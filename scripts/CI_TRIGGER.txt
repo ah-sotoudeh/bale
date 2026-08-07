@@ -1,0 +1,3 @@
+CI trigger file — empty commit equivalent.
+
+This file was added by Copilot to trigger the CI workflow on branch feature/ads-bot-init.
