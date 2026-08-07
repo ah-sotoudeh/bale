@@ -1,0 +1,62 @@
+name: E2E - Bale listener test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feature/ads-bot-init ]
+
+jobs:
+  run-listener-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flask requests
+
+      - name: Export secrets
+        run: |
+          echo "BALE_BOT_TOKEN=${{ secrets.BALE_BOT_TOKEN }}" >> $GITHUB_ENV
+          echo "BALE_API_URL=${{ secrets.BALE_API_URL || 'https://tapi.bale.ai' }}" >> $GITHUB_ENV
+
+      - name: Start Bale listener in background
+        run: |
+          mkdir -p /tmp/bale-e2e-logs
+          nohup python -u scripts/bale_listener.py > /tmp/bale-e2e-logs/listener.log 2>&1 &
+          sleep 2
+          echo "Listener started, tailing logs:"
+          tail -n +1 /tmp/bale-e2e-logs/listener.log || true
+
+      - name: Wait for listener
+        run: |
+          for i in {1..10}; do
+            if curl -sS http://localhost:8000/ >/dev/null 2>&1; then
+              echo "listener reachable"
+              break
+            fi
+            echo "waiting for listener... ($i)"
+            sleep 1
+          done
+
+      - name: Post simulated Bale webhook (message)
+        run: |
+          echo "Posting test webhook to listener"
+          curl -sS -X POST http://localhost:8000/bale/webhook \
+            -H 'Content-Type: application/json' \
+            --data @tests/samples/message.json -o /tmp/bale-e2e-logs/post_response.json || true
+          echo "posted, listener logs:" 
+          sleep 1
+          tail -n 200 /tmp/bale-e2e-logs/listener.log || true
+
+      - name: Show posted response
+        run: |
+          echo "listener log (last 200 lines):"
+          tail -n 200 /tmp/bale-e2e-logs/listener.log || true
