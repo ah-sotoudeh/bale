@@ -30,6 +30,7 @@ class OrderItem(models.Model):
     tariff = models.ForeignKey(Tariff, on_delete=models.CASCADE)
     requested_start = models.DateTimeField()
     requested_end = models.DateTimeField()
+    banner_message_id = models.CharField(max_length=255, null=True, blank=True)
     banner_forwarded = models.BooleanField(default=False)
     manager = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     manager_status = models.CharField(max_length=20, choices=MANAGER_STATUS, default='pending')
