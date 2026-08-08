@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling Bale bot: conversation flow + order commands + inline callbacks."""
+"""Long-polling Bale bot: conversation flow + order commands + free-days calendar."""
 from __future__ import annotations
 
 import logging
@@ -86,7 +86,7 @@ def prepare_polling() -> None:
         sys.exit(1)
     result = me.get('result') or me
     log.info('Bot OK → id=%s @%s', result.get('id'), result.get('username'))
-    log.info('Flows: /start → manager → DB save → publish %s', os.environ.get('REFERENCE_CHANNEL', '@linktest'))
+    log.info('Flows: /start /free + order callbacks')
 
     info = bc.get_webhook_info()
     current_url = (info.get('result') or {}).get('url') or ''
@@ -236,8 +236,10 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            'برای شروع /start را بزنید.\n'
-            'اگر مدیر هستید و لینک می‌فرستید، اول نقش مدیر را از /start انتخاب کنید.',
+            'دستورات:\n'
+            '/start — شروع و انتخاب نقش\n'
+            '/free — روزهای خالی کانال‌های شما\n'
+            '/approve_1 /reject_1 /paid_1 — سفارش',
         )
 
 
