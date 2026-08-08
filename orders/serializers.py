@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from rest_framework import serializers
 
 from channels_app.models import Channel, Tariff
@@ -27,23 +29,21 @@ class OrderItemSerializer(serializers.ModelSerializer):
         start = attrs['requested_start']
         end = attrs['requested_end']
 
-        if tariff.channel_id != channel.id:
+        if tariff.channel_id and tariff.channel_id != channel.id:
             raise serializers.ValidationError({'tariff': 'این تعرفه متعلق به این کانال نیست.'})
+        if tariff.group_id and not tariff.group.channels.filter(id=channel.id).exists():
+            raise serializers.ValidationError({'tariff': 'این کانال عضو مجموعه تعرفه نیست.'})
 
         if end <= start:
             raise serializers.ValidationError({'requested_end': 'پایان باید بعد از شروع باشد.'})
 
-        # Align end with duration when start_hour slot model is used
         if tariff.start_hour is not None:
-            from datetime import timedelta
+            end = start + timedelta(hours=tariff.duration_hours)
+            attrs['requested_end'] = end
 
-            expected_end = start + timedelta(hours=tariff.duration_hours)
-            attrs['requested_end'] = expected_end
-            end = expected_end
-
-        if has_slot_conflict(channel, tariff, start, end):
+        if has_slot_conflict(tariff, start, end, channel=channel):
             raise serializers.ValidationError(
-                {'requested_start': 'این نوبت قبلاً رزرو شده یا توسط مدیر مسدود شده است.'}
+                {'requested_start': 'این نوبت قبلاً رزرو شده یا مسدود است.'}
             )
         return attrs
 
