@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """Long-polling Bale bot with real order commands.
 
-Commands:
-  /start
-  /approve <order_item_id>
-  /reject <order_item_id>
-  /paid <order_id>
+Commands (both forms work):
+  /approve_1   or   /approve 1
+  /reject_1    or   /reject 1
+  /paid_1      or   /paid 1
 
-Setup:
-  .env with BALE_BOT_TOKEN
-  python scripts/demo_order_flow.py
-  python scripts/poll_bot.py
+Underscore form is preferred in outgoing messages so the whole command is tappable.
 """
 from __future__ import annotations
 
@@ -50,19 +46,22 @@ logging.basicConfig(
 )
 log = logging.getLogger('poll_bot')
 
-# Invisible / bidi marks Bale or mobile keyboards sometimes inject
 _INVISIBLE = re.compile(
     r'[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]'
 )
 
+# /approve_12  OR  /approve 12  OR  /approve@Bot 12
 CMD_APPROVE = re.compile(
-    r'^/approve(?:@[^\s]+)?(?:\s+|$)(\d+)?\s*$', re.IGNORECASE
+    r'^/approve(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$',
+    re.IGNORECASE,
 )
 CMD_REJECT = re.compile(
-    r'^/reject(?:@[^\s]+)?(?:\s+|$)(\d+)?\s*$', re.IGNORECASE
+    r'^/reject(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$',
+    re.IGNORECASE,
 )
 CMD_PAID = re.compile(
-    r'^/paid(?:@[^\s]+)?(?:\s+|$)(\d+)?\s*$', re.IGNORECASE
+    r'^/paid(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$',
+    re.IGNORECASE,
 )
 
 
@@ -72,9 +71,12 @@ def normalize_text(text: str) -> str:
     t = _INVISIBLE.sub('', text)
     t = t.replace('\u00a0', ' ')
     t = t.strip()
-    # collapse whitespace
     t = re.sub(r'\s+', ' ', t)
     return t
+
+
+def _cmd_id(match: re.Match) -> str | None:
+    return match.group(1) or match.group(2)
 
 
 def ensure_token() -> None:
@@ -92,7 +94,7 @@ def prepare_polling() -> None:
         sys.exit(1)
     result = me.get('result') or me
     log.info('Bot OK → id=%s @%s', result.get('id'), result.get('username'))
-    log.info('Command handlers active: /approve /reject /paid')
+    log.info('Handlers: /approve_1 /reject_1 /paid_1 (space form also ok)')
 
     info = bc.get_webhook_info()
     current_url = (info.get('result') or {}).get('url') or ''
@@ -104,17 +106,17 @@ def prepare_polling() -> None:
 
 
 def handle_text_command(chat_id: str, bale_user_id: str, text: str) -> bool:
-    """Return True if a command was handled (including help for incomplete cmds)."""
     raw = text
     text = normalize_text(text)
     log.info('CMD parse raw=%r normalized=%r user=%s', raw, text, bale_user_id)
 
     m = CMD_APPROVE.match(text)
     if m:
-        if not m.group(1):
-            bc.send_message(str(chat_id), 'فرمت: /approve <شماره_آیتم>\nمثال: /approve 1')
+        sid = _cmd_id(m)
+        if not sid:
+            bc.send_message(str(chat_id), 'فرمت: /approve_1  یا  /approve 1')
             return True
-        item_id = int(m.group(1))
+        item_id = int(sid)
         result = process_manager_response(item_id, str(bale_user_id), 'approve')
         log.info('approve item=%s → %s', item_id, result)
         if result.get('ok'):
@@ -129,10 +131,11 @@ def handle_text_command(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     m = CMD_REJECT.match(text)
     if m:
-        if not m.group(1):
-            bc.send_message(str(chat_id), 'فرمت: /reject <شماره_آیتم>\nمثال: /reject 1')
+        sid = _cmd_id(m)
+        if not sid:
+            bc.send_message(str(chat_id), 'فرمت: /reject_1  یا  /reject 1')
             return True
-        item_id = int(m.group(1))
+        item_id = int(sid)
         result = process_manager_response(item_id, str(bale_user_id), 'reject')
         log.info('reject item=%s → %s', item_id, result)
         if result.get('ok'):
@@ -147,10 +150,11 @@ def handle_text_command(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     m = CMD_PAID.match(text)
     if m:
-        if not m.group(1):
-            bc.send_message(str(chat_id), 'فرمت: /paid <شماره_سفارش>\nمثال: /paid 1')
+        sid = _cmd_id(m)
+        if not sid:
+            bc.send_message(str(chat_id), 'فرمت: /paid_1  یا  /paid 1')
             return True
-        order_id = int(m.group(1))
+        order_id = int(sid)
         result = process_payment_paid(order_id)
         log.info('paid order=%s → %s', order_id, result)
         if result.get('ok'):
@@ -184,10 +188,10 @@ def handle_update(update: dict) -> None:
                 str(chat_id),
                 'سلام 👋 ربات تبلیغات بله\n'
                 f"شناسه شما: {bale_uid}\n\n"
-                'دستورات:\n'
-                '/approve 1\n'
-                '/reject 1\n'
-                '/paid 1',
+                'دستورات (قابل لمس):\n'
+                '/approve_1\n'
+                '/reject_1\n'
+                '/paid_1',
             )
             return
 
