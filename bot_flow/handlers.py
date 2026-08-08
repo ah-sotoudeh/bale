@@ -1,8 +1,8 @@
 """Manager-side registration conversation for the Bale ads bot.
 
-Ownership proof: manager's public @id (e.g. @linkpakhsh) must appear in channel bio.
-Channels + tariffs are always persisted in DB (Channel / Tariff models).
-Catalog posts go to REFERENCE_CHANNEL (default @linktest).
+Ownership proof: public @username (e.g. @linkpakhsh) must appear in channel bio.
+Channel and Tariff rows are always written to the database.
+Published catalog posts go to REFERENCE_CHANNEL (default: @linktest).
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def save_session(sess: BotSession, state: Optional[str] = None, **data_updates) 
 
 
 def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
-    """Create/update User; store public Bale @id in bale_username when available."""
+    """Create/update User and keep bale_username in sync when Bale sends it."""
     uid = str(bale_user_id)
     handle = (username_hint or '').lstrip('@').strip() or None
 
@@ -79,31 +79,26 @@ def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
 
 
 def ownership_tokens(manager: User) -> List[str]:
-    """Strings that count as proof in channel bio (prefer public @id)."""
+    """Accept @username first; numeric id only as fallback."""
     tokens: List[str] = []
     if manager.bale_username:
         u = manager.bale_username.lstrip('@')
-        tokens.append(f'@{u}')
-        tokens.append(u)
+        tokens.extend([f'@{u}', u])
     if manager.bale_user_id:
         tokens.append(str(manager.bale_user_id))
-    # unique, non-empty
     seen = set()
-    out = []
+    out: List[str] = []
     for t in tokens:
-        if t and t.lower() not in seen:
-            seen.add(t.lower())
+        key = t.lower()
+        if t and key not in seen:
+            seen.add(key)
             out.append(t)
     return out
 
 
 def bio_matches_owner(bio: str, manager: User) -> bool:
-    text = bio or ''
-    text_lower = text.lower()
-    for tok in ownership_tokens(manager):
-        if tok.lower() in text_lower:
-            return True
-    return False
+    text_lower = (bio or '').lower()
+    return any(tok.lower() in text_lower for tok in ownership_tokens(manager))
 
 
 def role_keyboard() -> Dict[str, Any]:
@@ -159,13 +154,12 @@ def handle_role_callback(
     if role == 'manager':
         save_session(sess, STATE_AWAIT_LINKS, role='manager', verified_ids=[])
         proof = user.bale_handle or user.bale_user_id
+        tip = ''
         if not user.bale_username:
             tip = (
-                '\n⚠️ برای حساب شما آیدی عمومی (@...) دیده نشد؛ '
-                'فعلاً از شناسه عددی استفاده می‌شود. اگر آیدی دارید، یک‌بار دیگر /start بزنید.'
+                '\n⚠️ آیدی عمومی (@...) برای حساب شما ثبت نشده؛ '
+                'اگر در بله آیدی دارید یک‌بار دیگر /start بزنید تا ذخیره شود.'
             )
-        else:
-            tip = ''
         bc.send_message(
             str(chat_id),
             'نقش شما: مدیر کانال ✅\n\n'
@@ -174,7 +168,7 @@ def handle_role_callback(
             'مثال:\n'
             '@mychannel\n'
             'ble.ir/otherchannel\n\n'
-            f'⚠️ آیدی شما باید داخل بیو/توضیحات کانال باشد تا مالکیت تأیید شود.\n'
+            '⚠️ آیدی عمومی شما باید داخل بیو/توضیحات کانال باشد.\n'
             f'آیدی قابل قبول: {proof}'
             f'{tip}',
         )
@@ -222,7 +216,9 @@ def _verify_and_register_channels(
             ch.manager = manager
             ch.save()
             ok.append(ch)
-            notes.append(f'{"ثبت در دیتابیس" if created else "به‌روزرسانی دیتابیس"}: {title} ({norm}) #id={ch.id}')
+            notes.append(
+                f'{"ثبت در دیتابیس" if created else "به‌روزرسانی دیتابیس"}: {title} ({norm}) #id={ch.id}'
+            )
 
     return ok, fail, notes
 
@@ -298,7 +294,6 @@ def parse_tariff_lines(text: str) -> List[Tuple[str, int, int]]:
 
 
 def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
-    """Build post from DB tariffs and send to catalog channel."""
     tariffs = list(Tariff.objects.filter(channel=channel).order_by('id'))
     if not tariffs:
         return {'error': 'no_tariffs'}
@@ -324,16 +319,15 @@ def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
         {'text': '📝 ثبت سفارش تبلیغ', 'callback_data': f'order_channel:{channel.id}'}
     ])
 
-    target = reference_channel()
     return bc.send_message(
-        target,
+        reference_channel(),
         '\n'.join(lines),
         reply_markup=bc.inline_keyboard(rows),
     )
 
 
 def catalog_from_db() -> List[Channel]:
-    """All channels that have at least one tariff — for future customer picker."""
+    """Channels with tariffs, for later customer-facing selection UI."""
     return list(
         Channel.objects.filter(tariffs__isnull=False)
         .distinct()
