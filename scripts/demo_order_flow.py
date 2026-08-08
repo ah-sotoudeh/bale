@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Seed demo data and create a real order that notifies on Bale.
+"""Seed demo data and create an order with distinct customer vs manager.
 
-Usage (PowerShell)::
+Examples (PowerShell)::
 
-    cd G:\\GitHub\\bale
-    python scripts/demo_order_flow.py
+    # Manager = you (default 80619262), customer = other account
+    python scripts/demo_order_flow.py --customer-bale-id 12345678
 
-If DB is broken, delete db.sqlite3 once, then re-run.
+    # Explicit both
+    python scripts/demo_order_flow.py --manager-bale-id 80619262 --customer-bale-id 12345678
 """
 from __future__ import annotations
 
@@ -56,7 +57,7 @@ def _sqlite_path() -> Path | None:
 def _reset_sqlite() -> None:
     path = _sqlite_path()
     if not path:
-        print('Not using SQLite; cannot auto-reset. Fix migrations manually.')
+        print('Not using SQLite; cannot auto-reset.')
         return
     for candidate in (path, Path(str(path) + '-journal'), Path(str(path) + '-wal'), Path(str(path) + '-shm')):
         if candidate.exists():
@@ -65,25 +66,26 @@ def _reset_sqlite() -> None:
 
 
 def ensure_db() -> None:
-    """Create migrations and tables; reset SQLite if history is inconsistent."""
     call_command('makemigrations', 'users', 'channels_app', 'orders', interactive=False, verbosity=1)
     try:
         call_command('migrate', interactive=False, verbosity=1)
     except InconsistentMigrationHistory as e:
-        print('Inconsistent migration history detected.')
-        print(e)
-        print('Resetting local SQLite database and migrating again...')
+        print('Inconsistent migration history:', e)
+        print('Resetting local SQLite...')
         _reset_sqlite()
         call_command('migrate', interactive=False, verbosity=1)
 
 
-def get_or_create_demo_user(bale_id: str) -> User:
+def get_or_create_user(role: str, bale_id: str) -> User:
+    """One Django user per unique bale_user_id."""
+    bale_id = str(bale_id).strip()
     existing = User.objects.filter(bale_user_id=bale_id).first()
     if existing:
         return existing
 
+    username = f'{role}_{bale_id}'
     user, created = User.objects.get_or_create(
-        username=f'demo_{bale_id}',
+        username=username,
         defaults={'bale_user_id': bale_id},
     )
     if not user.bale_user_id:
@@ -98,34 +100,59 @@ def get_or_create_demo_user(bale_id: str) -> User:
 def main() -> None:
     parser = argparse.ArgumentParser(description='Create a demo Bale ads order')
     parser.add_argument(
+        '--manager-bale-id',
+        default=os.environ.get('DEMO_MANAGER_BALE_ID', '80619262'),
+        help='Channel manager Bale user id (default: 80619262)',
+    )
+    parser.add_argument(
+        '--customer-bale-id',
+        default=os.environ.get('DEMO_CUSTOMER_BALE_ID') or os.environ.get('DEMO_BALE_USER_ID'),
+        help='Customer Bale user id (required if different from manager)',
+    )
+    parser.add_argument(
         '--bale-id',
-        default=os.environ.get('DEMO_BALE_USER_ID', '80619262'),
-        help='Your Bale user id',
+        default=None,
+        help='Deprecated: same id for both roles (solo test)',
     )
     parser.add_argument('--price', type=int, default=10000, help='Price in Rials')
     args = parser.parse_args()
-    bale_id = str(args.bale_id)
+
+    if args.bale_id and not args.customer_bale_id:
+        # legacy solo mode
+        manager_id = customer_id = str(args.bale_id)
+    else:
+        manager_id = str(args.manager_bale_id)
+        customer_id = str(args.customer_bale_id) if args.customer_bale_id else None
+
+    if not customer_id:
+        print('ERROR: customer Bale id is required.')
+        print('  1) From the other account send /start to the bot')
+        print('  2) Copy the numeric id from the reply')
+        print('  3) Run:')
+        print('     python scripts/demo_order_flow.py --customer-bale-id <ID>')
+        sys.exit(1)
 
     print('Ensuring database tables exist...')
     ensure_db()
 
-    print(f'Using bale_user_id={bale_id}')
+    print(f'Manager bale_user_id = {manager_id}')
+    print(f'Customer bale_user_id = {customer_id}')
+    if manager_id == customer_id:
+        print('(same person for both roles — solo mode)')
+
     try:
-        user = get_or_create_demo_user(bale_id)
+        manager = get_or_create_user('manager', manager_id)
+        customer = get_or_create_user('customer', customer_id)
     except (OperationalError, ProgrammingError) as e:
-        print('Database error after migrate:', e)
-        print('Try:')
-        print('  del db.sqlite3')
-        print('  python manage.py makemigrations')
-        print('  python manage.py migrate')
+        print('Database error:', e)
         sys.exit(1)
 
     channel, _ = Channel.objects.get_or_create(
         link='@demo_channel',
-        defaults={'name': 'کانال دمو', 'description': 'برای تست فلو', 'manager': user},
+        defaults={'name': 'کانال دمو', 'description': 'برای تست فلو', 'manager': manager},
     )
-    if channel.manager_id != user.id:
-        channel.manager = user
+    if channel.manager_id != manager.id:
+        channel.manager = manager
         channel.save(update_fields=['manager'])
 
     tariff, _ = Tariff.objects.get_or_create(
@@ -141,7 +168,7 @@ def main() -> None:
     end = start + timedelta(hours=tariff.duration_hours)
 
     order = Order.objects.create(
-        customer=user,
+        customer=customer,
         status='waiting_managers',
         total_amount=tariff.price,
     )
@@ -152,20 +179,21 @@ def main() -> None:
         requested_start=start,
         requested_end=end,
         price=tariff.price,
-        manager=user,
+        manager=manager,
         manager_status='pending',
         banner_message_id=None,
     )
 
     print(f'Created order #{order.id} item #{item.id} status={order.status}')
-    print('Notifying on Bale...')
+    print(f'  customer user_id={customer.id} bale={customer.bale_user_id}')
+    print(f'  manager  user_id={manager.id} bale={manager.bale_user_id}')
+    print('Notifying manager on Bale...')
     notify_managers_for_order(order)
     print('Done.')
     print()
-    print('Next:')
-    print('  1) python scripts/poll_bot.py')
-    print(f'  2) In Bale:  /approve {item.id}')
-    print(f'  3) In Bale:  /paid {order.id}')
+    print('Expected flow:')
+    print(f'  • Manager account ({manager_id}): taps ✅ تأیید on the order message')
+    print(f'  • Customer account ({customer_id}): receives payment prompt, taps 💳')
     print()
 
 
