@@ -4,23 +4,9 @@
 Usage (PowerShell)::
 
     cd G:\\GitHub\\bale
-    git pull origin feature/ads-bot-init
-    python manage.py makemigrations
-    python manage.py migrate
     python scripts/demo_order_flow.py
 
-Optional::
-
-    python scripts/demo_order_flow.py --bale-id 80619262
-
-Then in another terminal::
-
-    python scripts/poll_bot.py
-
-In Bale::
-
-    /approve <item_id>
-    /paid <order_id>
+If DB is broken, delete db.sqlite3 once, then re-run.
 """
 from __future__ import annotations
 
@@ -47,8 +33,9 @@ import django
 
 django.setup()
 
+from django.conf import settings  # noqa: E402
 from django.core.management import call_command  # noqa: E402
-from django.db import connection  # noqa: E402
+from django.db.migrations.exceptions import InconsistentMigrationHistory  # noqa: E402
 from django.db.utils import OperationalError, ProgrammingError  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
@@ -58,21 +45,39 @@ from orders.services import notify_managers_for_order  # noqa: E402
 from users.models import User  # noqa: E402
 
 
+def _sqlite_path() -> Path | None:
+    db = settings.DATABASES.get('default', {})
+    if 'sqlite' not in db.get('ENGINE', ''):
+        return None
+    name = db.get('NAME')
+    return Path(name) if name else None
+
+
+def _reset_sqlite() -> None:
+    path = _sqlite_path()
+    if not path:
+        print('Not using SQLite; cannot auto-reset. Fix migrations manually.')
+        return
+    for candidate in (path, Path(str(path) + '-journal'), Path(str(path) + '-wal'), Path(str(path) + '-shm')):
+        if candidate.exists():
+            candidate.unlink()
+            print(f'Removed {candidate}')
+
+
 def ensure_db() -> None:
-    """Create migrations and tables if this is a fresh SQLite DB."""
-    try:
-        call_command('makemigrations', 'users', 'channels_app', 'orders', interactive=False, verbosity=1)
-    except Exception as e:
-        print(f'makemigrations note: {e}')
+    """Create migrations and tables; reset SQLite if history is inconsistent."""
+    call_command('makemigrations', 'users', 'channels_app', 'orders', interactive=False, verbosity=1)
     try:
         call_command('migrate', interactive=False, verbosity=1)
-    except Exception as e:
-        print(f'migrate note: {e}')
-        raise
+    except InconsistentMigrationHistory as e:
+        print('Inconsistent migration history detected.')
+        print(e)
+        print('Resetting local SQLite database and migrating again...')
+        _reset_sqlite()
+        call_command('migrate', interactive=False, verbosity=1)
 
 
 def get_or_create_demo_user(bale_id: str) -> User:
-    """One account acts as both customer and manager for solo testing."""
     existing = User.objects.filter(bale_user_id=bale_id).first()
     if existing:
         return existing
@@ -109,7 +114,8 @@ def main() -> None:
         user = get_or_create_demo_user(bale_id)
     except (OperationalError, ProgrammingError) as e:
         print('Database error after migrate:', e)
-        print('Try manually:')
+        print('Try:')
+        print('  del db.sqlite3')
         print('  python manage.py makemigrations')
         print('  python manage.py migrate')
         sys.exit(1)
