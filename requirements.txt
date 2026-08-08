@@ -1,5 +1,11 @@
+# Core (works on Windows without compilers)
 Django==4.2
 djangorestframework==3.14.0
-mysqlclient==2.1.1
 python-dotenv==1.0.0
 requests==2.31.0
+
+# Optional: MySQL driver for production/CI only
+# Install separately when you have MySQL + build tools:
+#   pip install mysqlclient==2.1.1
+# Or use the pure-Python alternative:
+#   pip install PyMySQL
