@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from django.utils.dateparse import parse_datetime
 
 from integrations import bale_client
+from orders.availability import effective_window, has_slot_conflict
 from orders.models import ManagerResponse, Order, OrderItem
 from users.models import User
 
@@ -27,9 +29,9 @@ def process_manager_response(
         return {'ok': False, 'error': 'invalid_action', 'detail': 'action must be approve|reject|edit'}
 
     try:
-        item = OrderItem.objects.select_related('order', 'channel', 'manager', 'order__customer').get(
-            id=order_item_id
-        )
+        item = OrderItem.objects.select_related(
+            'order', 'channel', 'tariff', 'manager', 'order__customer'
+        ).get(id=order_item_id)
     except OrderItem.DoesNotExist:
         return {'ok': False, 'error': 'item_not_found'}
 
@@ -41,13 +43,32 @@ def process_manager_response(
     if item.manager_id and item.manager_id != manager.id:
         return {'ok': False, 'error': 'not_item_manager'}
 
+    if action == 'edit' and new_start:
+        parsed = parse_datetime(new_start)
+        if not parsed:
+            return {'ok': False, 'error': 'invalid_new_start'}
+        new_end = parsed + timedelta(hours=item.tariff.duration_hours)
+        if has_slot_conflict(
+            item.channel, item.tariff, parsed, new_end, exclude_item_id=item.id
+        ):
+            return {'ok': False, 'error': 'slot_conflict'}
+        item.manager_edited_start = parsed
+
+    if action in ('approve', 'edit'):
+        start, end = effective_window(item)
+        if action == 'edit' and new_start:
+            parsed = parse_datetime(new_start)
+            if parsed:
+                start = parsed
+                end = parsed + timedelta(hours=item.tariff.duration_hours)
+        if has_slot_conflict(
+            item.channel, item.tariff, start, end, exclude_item_id=item.id
+        ):
+            return {'ok': False, 'error': 'slot_conflict'}
+
     item.manager_status = (
         'approved' if action == 'approve' else ('rejected' if action == 'reject' else 'edited')
     )
-    if action == 'edit' and new_start:
-        parsed = parse_datetime(new_start)
-        if parsed:
-            item.manager_edited_start = parsed
     item.save()
 
     payload = {'order_item_id': order_item_id, 'manager_bale_id': manager_bale_id, 'action': action}
@@ -124,7 +145,7 @@ def process_manager_response(
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند.\n'
-            f'مبلغ سفارش #{order.id}: {order.total_amount} ریال\n'
+            f'مبلغ سفارش #{order.id}: {order.total_amount} تومان\n'
             f'برای شبیه‌سازی پرداخت دکمه را بزن یا: {paid_cmd}',
             reply_markup=pay_kb,
         )
@@ -133,7 +154,6 @@ def process_manager_response(
 
 
 def process_payment_paid(order_id: int) -> Dict[str, Any]:
-    """Mark order paid/completed and attempt schedule/forward side-effects."""
     try:
         order = Order.objects.prefetch_related('items__channel', 'items__manager').get(id=order_id)
     except Order.DoesNotExist:
@@ -184,7 +204,6 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
 
 
 def notify_managers_for_order(order: Order) -> None:
-    """Send Bale notifications with inline approve/reject buttons."""
     for item in order.items.select_related('channel', 'manager', 'order__customer').all():
         if not item.manager or not item.manager.bale_user_id:
             continue
@@ -209,7 +228,7 @@ def notify_managers_for_order(order: Order) -> None:
             f'📢 درخواست تبلیغ جدید\n'
             f'کانال: {item.channel.name}\n'
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
-            f'مبلغ آیتم: {item.price}\n'
+            f'مبلغ آیتم: {item.price} تومان\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}\n\n'
             f'از دکمه‌ها استفاده کنید یا:\n{approve_cmd}\n{reject_cmd}',
             reply_markup=kb,
