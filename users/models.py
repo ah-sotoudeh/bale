@@ -3,11 +3,21 @@ from django.contrib.auth.models import AbstractUser
 
 
 class User(AbstractUser):
-    # bale_user_id: شناسه کاربر در پیام‌رسان بله
+    # bale_user_id: numeric id in Bale
     bale_user_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    # bale_username: public @id without @ (e.g. linkpakhsh)
+    bale_username = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
     def __str__(self):
+        if self.bale_username:
+            return f'@{self.bale_username}'
         return self.username if self.username else (self.bale_user_id or 'user')
+
+    @property
+    def bale_handle(self) -> str:
+        if self.bale_username:
+            return f'@{self.bale_username.lstrip("@")}'
+        return self.bale_user_id or ''
 
 
 class BotSession(models.Model):
