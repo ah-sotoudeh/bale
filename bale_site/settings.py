@@ -3,7 +3,6 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env if present (optional)
 try:
     from dotenv import load_dotenv
     load_dotenv(BASE_DIR / '.env')
@@ -59,11 +58,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'bale_site.wsgi.application'
 
-# ---------------------------------------------------------------------------
-# Database
-# - Local / Windows: set USE_SQLITE=1 (default when DB_ENGINE not set to mysql)
-# - Production / CI MySQL: USE_SQLITE=0 and set DB_* env vars
-# ---------------------------------------------------------------------------
 USE_SQLITE = os.environ.get('USE_SQLITE', '1') == '1'
 DB_ENGINE = os.environ.get('DB_ENGINE', '').lower()
 
@@ -100,10 +94,11 @@ STATIC_URL = '/static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# Bale integration
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
 BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
+# Public catalog channel where approved tariffs are posted (bot must be admin)
+REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linkban')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
