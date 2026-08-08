@@ -3,9 +3,9 @@ from django.contrib.auth.models import AbstractUser
 
 
 class User(AbstractUser):
-    # bale_user_id: numeric id in Bale
+    # شناسه عددی کاربر در بله
     bale_user_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
-    # bale_username: public @id without @ (e.g. linkpakhsh)
+    # آیدی عمومی بدون @ مثلا linkpakhsh
     bale_username = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
     def __str__(self):
@@ -16,12 +16,12 @@ class User(AbstractUser):
     @property
     def bale_handle(self) -> str:
         if self.bale_username:
-            return f'@{self.bale_username.lstrip("@")}'
-        return self.bale_user_id or ''
+            return f'@{str(self.bale_username).lstrip("@")}'
+        return str(self.bale_user_id or '')
 
 
 class BotSession(models.Model):
-    """Per-user conversation state for the Bale bot."""
+    """وضعیت گفتگوی چندمرحله‌ای کاربر با ربات"""
 
     bale_user_id = models.CharField(max_length=64, unique=True, db_index=True)
     state = models.CharField(max_length=64, default='idle')
