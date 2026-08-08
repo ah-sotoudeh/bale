@@ -1,17 +1,4 @@
-"""Slot conflict and external-busy checks for ad bookings.
-
-Rules:
-- An OrderItem occupies [effective_start, effective_end).
-- effective_start = manager_edited_start or requested_start
-- effective_end = effective_start + tariff.duration_hours
-  (if start was edited) else requested_end
-- Active bookings: order status in waiting_managers/waiting_payment/completed/pending
-  and item manager_status in pending/approved/edited (not rejected)
-- Conflict if same channel + same tariff and time ranges overlap
-- When tariff.start_hour is set, also treat same calendar day as the same slot
-- AvailabilitySlot with is_available=False blocks overlapping windows
-  (optionally scoped to a tariff)
-"""
+"""Slot conflict checks for single-channel and package (ChannelGroup) tariffs."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -37,7 +24,7 @@ def effective_window(item: OrderItem) -> Tuple[datetime, datetime]:
     return start, end
 
 
-def ranges_overlap(start_a: datetime, end_a: datetime, start_b: datetime, end_b: datetime) -> bool:
+def ranges_overlap(start_a, end_a, start_b, end_b) -> bool:
     return start_a < end_b and start_b < end_a
 
 
@@ -50,21 +37,21 @@ def same_local_day(a: datetime, b: datetime) -> bool:
 
 
 def has_slot_conflict(
-    channel: Channel,
     tariff: Tariff,
     start: datetime,
     end: datetime,
     exclude_item_id: Optional[int] = None,
+    channel: Optional[Channel] = None,
 ) -> bool:
-    """True if another active booking or external busy slot overlaps."""
-    qs = (
-        OrderItem.objects.select_related('tariff', 'order')
-        .filter(
-            channel=channel,
-            tariff=tariff,
-            manager_status__in=ACTIVE_ITEM_STATUSES,
-            order__status__in=ACTIVE_ORDER_STATUSES,
-        )
+    """True if another active booking or external busy overlaps this tariff slot.
+
+    Package tariffs: conflict is per tariff (whole group is one unit).
+    Single-channel: same tariff on that channel.
+    """
+    qs = OrderItem.objects.select_related('tariff', 'order').filter(
+        tariff=tariff,
+        manager_status__in=ACTIVE_ITEM_STATUSES,
+        order__status__in=ACTIVE_ORDER_STATUSES,
     )
     if exclude_item_id is not None:
         qs = qs.exclude(id=exclude_item_id)
@@ -72,31 +59,36 @@ def has_slot_conflict(
     for item in qs:
         other_start, other_end = effective_window(item)
         if tariff.start_hour is not None:
-            # One turn per tariff per calendar day
             if same_local_day(start, other_start):
                 return True
         elif ranges_overlap(start, end, other_start, other_end):
             return True
 
-    blocked = AvailabilitySlot.objects.filter(
-        channel=channel,
-        is_available=False,
-        start__lt=end,
-        end__gt=start,
-    ).filter(Q(tariff__isnull=True) | Q(tariff=tariff))
+    busy_q = Q(is_available=False, start__lt=end, end__gt=start)
+    if tariff.group_id:
+        blocked = AvailabilitySlot.objects.filter(busy_q).filter(
+            Q(group=tariff.group) | Q(tariff=tariff)
+        )
+    else:
+        ch = channel or tariff.channel
+        blocked = AvailabilitySlot.objects.filter(busy_q).filter(
+            Q(channel=ch) | Q(tariff=tariff)
+        )
     return blocked.exists()
 
 
 def mark_external_busy(
-    channel: Channel,
     start: datetime,
     end: datetime,
+    *,
+    channel: Optional[Channel] = None,
+    group=None,
     tariff: Optional[Tariff] = None,
     note: str = 'رزرو خارج از سیستم',
 ) -> AvailabilitySlot:
-    """Manager marks a window full (taken outside the bot)."""
     return AvailabilitySlot.objects.create(
         channel=channel,
+        group=group,
         tariff=tariff,
         start=start,
         end=end,
@@ -105,14 +97,8 @@ def mark_external_busy(
     )
 
 
-def free_days_for_tariff(
-    channel: Channel,
-    tariff: Tariff,
-    from_date,
-    to_date,
-):
-    """Yield dates in [from_date, to_date] that are not occupied for this tariff."""
-    from datetime import date, datetime, time as dtime
+def free_days_for_tariff(tariff: Tariff, from_date, to_date, channel: Optional[Channel] = None):
+    from datetime import datetime, time as dtime
 
     if isinstance(from_date, datetime):
         from_date = timezone.localtime(from_date).date() if timezone.is_aware(from_date) else from_date.date()
@@ -125,6 +111,6 @@ def free_days_for_tariff(
     while day <= to_date:
         start = timezone.make_aware(datetime.combine(day, dtime(hour=hour)))
         end = start + timedelta(hours=duration)
-        if not has_slot_conflict(channel, tariff, start, end):
+        if not has_slot_conflict(tariff, start, end, channel=channel or tariff.channel):
             yield day
         day = day + timedelta(days=1)
