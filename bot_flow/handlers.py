@@ -1,8 +1,8 @@
-"""Manager-side registration conversation for the Bale ads bot.
+"""Manager registration flow for the Bale ads bot.
 
-Ownership proof: public @username (e.g. @linkpakhsh) must appear in channel bio.
-Channel and Tariff rows are always written to the database.
-Published catalog posts go to REFERENCE_CHANNEL (default: @linktest).
+Ownership: public @username (e.g. @linkpakhsh) must appear in channel bio.
+Channel and Tariff are always saved in the database.
+Catalog posts go to REFERENCE_CHANNEL (default @linktest).
 """
 from __future__ import annotations
 
@@ -55,7 +55,6 @@ def save_session(sess: BotSession, state: Optional[str] = None, **data_updates) 
 
 
 def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
-    """Create/update User and keep bale_username in sync when Bale sends it."""
     uid = str(bale_user_id)
     handle = (username_hint or '').lstrip('@').strip() or None
 
@@ -79,7 +78,6 @@ def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
 
 
 def ownership_tokens(manager: User) -> List[str]:
-    """Accept @username first; numeric id only as fallback."""
     tokens: List[str] = []
     if manager.bale_username:
         u = manager.bale_username.lstrip('@')
