@@ -104,26 +104,29 @@ def process_manager_response(
     )
     result['payment'] = {'ok': payment.get('ok'), 'error': payment.get('error')}
 
-    # Use /paid_123 (no space) so the whole command is tappable in Bale/Telegram clients
     paid_cmd = f'/paid_{order.id}'
+    pay_kb = bale_client.payment_done_keyboard(order.id)
 
     if payment.get('payment_url'):
         bale_client.send_message(
             order.customer.bale_user_id,
             f"همه مدیران تایید کردند. لطفاً پرداخت را تکمیل کنید: {payment.get('payment_url')}",
+            reply_markup=pay_kb,
         )
     elif payment.get('ok'):
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند. فاکتور پرداخت برای سفارش #{order.id} ارسال شد.\n'
-            f'پس از پرداخت بزن: {paid_cmd}',
+            f'پس از پرداخت دکمه زیر را بزن یا: {paid_cmd}',
+            reply_markup=pay_kb,
         )
     else:
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند.\n'
             f'مبلغ سفارش #{order.id}: {order.total_amount} ریال\n'
-            f'برای شبیه‌سازی پرداخت در تست بزن:\n{paid_cmd}',
+            f'برای شبیه‌سازی پرداخت دکمه را بزن یا: {paid_cmd}',
+            reply_markup=pay_kb,
         )
 
     return result
@@ -181,7 +184,7 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
 
 
 def notify_managers_for_order(order: Order) -> None:
-    """Send Bale notifications to each item manager after order creation."""
+    """Send Bale notifications with inline approve/reject buttons."""
     for item in order.items.select_related('channel', 'manager', 'order__customer').all():
         if not item.manager or not item.manager.bale_user_id:
             continue
@@ -197,17 +200,19 @@ def notify_managers_for_order(order: Order) -> None:
             except (TypeError, ValueError):
                 logger.warning('banner_message_id not int, skip forward: %s', item.banner_message_id)
 
-        # Underscore form is one tappable bot-command entity in Bale/Telegram UIs
         approve_cmd = f'/approve_{item.id}'
         reject_cmd = f'/reject_{item.id}'
+        kb = bale_client.manager_decision_keyboard(item.id)
 
-        bale_client.send_message(
+        resp = bale_client.send_message(
             manager_id,
             f'📢 درخواست تبلیغ جدید\n'
             f'کانال: {item.channel.name}\n'
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
             f'مبلغ آیتم: {item.price}\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}\n\n'
-            f'برای قبول بزن:\n{approve_cmd}\n'
-            f'برای رد بزن:\n{reject_cmd}',
+            f'از دکمه‌ها استفاده کنید یا:\n{approve_cmd}\n{reject_cmd}',
+            reply_markup=kb,
         )
+        if resp.get('error'):
+            logger.warning('notify manager failed: %s', resp)
