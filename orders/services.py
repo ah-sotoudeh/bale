@@ -21,10 +21,7 @@ def process_manager_response(
     new_start: Optional[str] = None,
     extra_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Apply manager approve/reject/edit and advance order state.
-
-    Returns a small status dict for the caller (API or bot).
-    """
+    """Apply manager approve/reject/edit and advance order state."""
     action = (action or '').lower().strip()
     if action not in ('approve', 'reject', 'edit'):
         return {'ok': False, 'error': 'invalid_action', 'detail': 'action must be approve|reject|edit'}
@@ -41,7 +38,6 @@ def process_manager_response(
     except User.DoesNotExist:
         return {'ok': False, 'error': 'manager_not_found'}
 
-    # Optional: ensure this manager owns the item
     if item.manager_id and item.manager_id != manager.id:
         return {'ok': False, 'error': 'not_item_manager'}
 
@@ -108,6 +104,9 @@ def process_manager_response(
     )
     result['payment'] = {'ok': payment.get('ok'), 'error': payment.get('error')}
 
+    # Use /paid_123 (no space) so the whole command is tappable in Bale/Telegram clients
+    paid_cmd = f'/paid_{order.id}'
+
     if payment.get('payment_url'):
         bale_client.send_message(
             order.customer.bale_user_id,
@@ -117,14 +116,14 @@ def process_manager_response(
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند. فاکتور پرداخت برای سفارش #{order.id} ارسال شد.\n'
-            f'پس از پرداخت، در ربات بزن: /paid {order.id}',
+            f'پس از پرداخت بزن: {paid_cmd}',
         )
     else:
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند.\n'
             f'مبلغ سفارش #{order.id}: {order.total_amount} ریال\n'
-            f'برای شبیه‌سازی پرداخت در تست بزن: /paid {order.id}',
+            f'برای شبیه‌سازی پرداخت در تست بزن:\n{paid_cmd}',
         )
 
     return result
@@ -198,6 +197,10 @@ def notify_managers_for_order(order: Order) -> None:
             except (TypeError, ValueError):
                 logger.warning('banner_message_id not int, skip forward: %s', item.banner_message_id)
 
+        # Underscore form is one tappable bot-command entity in Bale/Telegram UIs
+        approve_cmd = f'/approve_{item.id}'
+        reject_cmd = f'/reject_{item.id}'
+
         bale_client.send_message(
             manager_id,
             f'📢 درخواست تبلیغ جدید\n'
@@ -205,6 +208,6 @@ def notify_managers_for_order(order: Order) -> None:
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
             f'مبلغ آیتم: {item.price}\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}\n\n'
-            f'برای قبول بزن:\n/approve {item.id}\n'
-            f'برای رد بزن:\n/reject {item.id}',
+            f'برای قبول بزن:\n{approve_cmd}\n'
+            f'برای رد بزن:\n{reject_cmd}',
         )
