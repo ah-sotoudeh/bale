@@ -1,9 +1,22 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
+
 class User(AbstractUser):
     # bale_user_id: شناسه کاربر در پیام‌رسان بله
     bale_user_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
 
     def __str__(self):
         return self.username if self.username else (self.bale_user_id or 'user')
+
+
+class BotSession(models.Model):
+    """Per-user conversation state for the Bale bot."""
+
+    bale_user_id = models.CharField(max_length=64, unique=True, db_index=True)
+    state = models.CharField(max_length=64, default='idle')
+    data = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.bale_user_id}:{self.state}'
