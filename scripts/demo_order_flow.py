@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Seed demo data and create a real order that notifies on Bale.
 
-Usage (PowerShell):
-    cd G:\GitHub\bale
+Usage (PowerShell)::
+
+    cd G:\\GitHub\\bale
     git pull origin feature/ads-bot-init
+    python manage.py makemigrations
+    python manage.py migrate
     python scripts/demo_order_flow.py
 
-Optional:
+Optional::
+
     python scripts/demo_order_flow.py --bale-id 80619262
 
-Then in another terminal:
+Then in another terminal::
+
     python scripts/poll_bot.py
 
-In Bale:
+In Bale::
+
     /approve <item_id>
     /paid <order_id>
 """
@@ -41,6 +47,9 @@ import django
 
 django.setup()
 
+from django.core.management import call_command  # noqa: E402
+from django.db import connection  # noqa: E402
+from django.db.utils import OperationalError, ProgrammingError  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
 from channels_app.models import Channel, Tariff  # noqa: E402
@@ -49,11 +58,21 @@ from orders.services import notify_managers_for_order  # noqa: E402
 from users.models import User  # noqa: E402
 
 
-def get_or_create_demo_user(bale_id: str) -> User:
-    """One account acts as both customer and manager for solo testing.
+def ensure_db() -> None:
+    """Create migrations and tables if this is a fresh SQLite DB."""
+    try:
+        call_command('makemigrations', 'users', 'channels_app', 'orders', interactive=False, verbosity=1)
+    except Exception as e:
+        print(f'makemigrations note: {e}')
+    try:
+        call_command('migrate', interactive=False, verbosity=1)
+    except Exception as e:
+        print(f'migrate note: {e}')
+        raise
 
-    bale_user_id is unique, so we must not create two users with the same id.
-    """
+
+def get_or_create_demo_user(bale_id: str) -> User:
+    """One account acts as both customer and manager for solo testing."""
     existing = User.objects.filter(bale_user_id=bale_id).first()
     if existing:
         return existing
@@ -82,8 +101,18 @@ def main() -> None:
     args = parser.parse_args()
     bale_id = str(args.bale_id)
 
+    print('Ensuring database tables exist...')
+    ensure_db()
+
     print(f'Using bale_user_id={bale_id}')
-    user = get_or_create_demo_user(bale_id)
+    try:
+        user = get_or_create_demo_user(bale_id)
+    except (OperationalError, ProgrammingError) as e:
+        print('Database error after migrate:', e)
+        print('Try manually:')
+        print('  python manage.py makemigrations')
+        print('  python manage.py migrate')
+        sys.exit(1)
 
     channel, _ = Channel.objects.get_or_create(
         link='@demo_channel',
