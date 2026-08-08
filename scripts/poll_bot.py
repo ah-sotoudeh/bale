@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling Bale bot with commands + inline keyboard callbacks.
-
-Text commands:
-  /approve_1  /reject_1  /paid_1
-  (space form also works)
-
-Inline buttons send callback_data:
-  approve:1  reject:1  paid:1
-"""
+"""Long-polling Bale bot: conversation flow + order commands + inline callbacks."""
 from __future__ import annotations
 
 import logging
@@ -35,6 +27,7 @@ import django
 
 django.setup()
 
+from bot_flow import handlers as flow  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from orders.services import process_manager_response, process_payment_paid  # noqa: E402
@@ -62,8 +55,7 @@ CMD_PAID = re.compile(
     r'^/paid(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$',
     re.IGNORECASE,
 )
-
-CB_ACTION = re.compile(r'^(approve|reject|paid):(\d+)$', re.IGNORECASE)
+CB_ORDER_MGR = re.compile(r'^(approve|reject|paid):(\d+)$', re.IGNORECASE)
 
 
 def normalize_text(text: str) -> str:
@@ -72,8 +64,7 @@ def normalize_text(text: str) -> str:
     t = _INVISIBLE.sub('', text)
     t = t.replace('\u00a0', ' ')
     t = t.strip()
-    t = re.sub(r'\s+', ' ', t)
-    return t
+    return re.sub(r'\s+', ' ', t)
 
 
 def _cmd_id(match: re.Match) -> str | None:
@@ -83,7 +74,7 @@ def _cmd_id(match: re.Match) -> str | None:
 def ensure_token() -> None:
     token = _token()
     if not token:
-        log.error('BALE_BOT_TOKEN missing. Put it in .env')
+        log.error('BALE_BOT_TOKEN missing')
         sys.exit(1)
     log.info('Token loaded (length=%d)', len(token))
 
@@ -95,18 +86,18 @@ def prepare_polling() -> None:
         sys.exit(1)
     result = me.get('result') or me
     log.info('Bot OK → id=%s @%s', result.get('id'), result.get('username'))
-    log.info('Handlers: commands + inline callbacks (approve:/reject:/paid:)')
+    log.info('Flows: /start role → manager channels → tariffs → @linkban')
 
     info = bc.get_webhook_info()
     current_url = (info.get('result') or {}).get('url') or ''
     if current_url:
-        log.info('Deleting webhook %s', current_url)
         bc.delete_webhook()
+        log.info('Webhook deleted')
     else:
-        log.info('No webhook set. Ready for polling.')
+        log.info('No webhook set')
 
 
-def run_approve(chat_id: str, bale_user_id: str, item_id: int) -> str:
+def run_approve(bale_user_id: str, item_id: int) -> str:
     result = process_manager_response(item_id, str(bale_user_id), 'approve')
     log.info('approve item=%s → %s', item_id, result)
     if result.get('ok'):
@@ -117,7 +108,7 @@ def run_approve(chat_id: str, bale_user_id: str, item_id: int) -> str:
     return f"❌ خطا: {result.get('error') or result}"
 
 
-def run_reject(chat_id: str, bale_user_id: str, item_id: int) -> str:
+def run_reject(bale_user_id: str, item_id: int) -> str:
     result = process_manager_response(item_id, str(bale_user_id), 'reject')
     log.info('reject item=%s → %s', item_id, result)
     if result.get('ok'):
@@ -132,42 +123,35 @@ def run_paid(order_id: int) -> str:
     result = process_payment_paid(order_id)
     log.info('paid order=%s → %s', order_id, result)
     if result.get('ok'):
-        return f"💳 سفارش #{order_id} پرداخت‌شده ثبت شد. وضعیت: {result.get('order_status')}"
+        return f"💳 سفارش #{order_id} پرداخت‌شده. وضعیت: {result.get('order_status')}"
     return f"❌ خطا: {result.get('error') or result}"
 
 
-def handle_text_command(chat_id: str, bale_user_id: str, text: str) -> bool:
-    raw = text
-    text = normalize_text(text)
-    log.info('CMD parse raw=%r normalized=%r user=%s', raw, text, bale_user_id)
-
+def handle_legacy_commands(chat_id: str, bale_user_id: str, text: str) -> bool:
     m = CMD_APPROVE.match(text)
     if m:
         sid = _cmd_id(m)
         if not sid:
-            bc.send_message(str(chat_id), 'فرمت: /approve_1  یا  /approve 1')
+            bc.send_message(str(chat_id), 'فرمت: /approve_1')
             return True
-        bc.send_message(str(chat_id), run_approve(str(chat_id), str(bale_user_id), int(sid)))
+        bc.send_message(str(chat_id), run_approve(str(bale_user_id), int(sid)))
         return True
-
     m = CMD_REJECT.match(text)
     if m:
         sid = _cmd_id(m)
         if not sid:
-            bc.send_message(str(chat_id), 'فرمت: /reject_1  یا  /reject 1')
+            bc.send_message(str(chat_id), 'فرمت: /reject_1')
             return True
-        bc.send_message(str(chat_id), run_reject(str(chat_id), str(bale_user_id), int(sid)))
+        bc.send_message(str(chat_id), run_reject(str(bale_user_id), int(sid)))
         return True
-
     m = CMD_PAID.match(text)
     if m:
         sid = _cmd_id(m)
         if not sid:
-            bc.send_message(str(chat_id), 'فرمت: /paid_1  یا  /paid 1')
+            bc.send_message(str(chat_id), 'فرمت: /paid_1')
             return True
         bc.send_message(str(chat_id), run_paid(int(sid)))
         return True
-
     return False
 
 
@@ -175,36 +159,35 @@ def handle_callback_query(cq: dict) -> None:
     cq_id = cq.get('id')
     data = (cq.get('data') or '').strip()
     from_user = cq.get('from') or {}
-    bale_uid = from_user.get('id')
+    bale_uid = str(from_user.get('id') or '')
     msg = cq.get('message') or {}
-    chat = msg.get('chat') or {}
-    chat_id = chat.get('id')
+    chat_id = str((msg.get('chat') or {}).get('id') or '')
 
-    log.info('callback_query id=%s data=%r user=%s', cq_id, data, bale_uid)
+    log.info('callback data=%r user=%s', data, bale_uid)
 
-    m = CB_ACTION.match(data)
-    if not m:
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='دستور ناشناخته', show_alert=False)
+    if flow.try_handle_callback(chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None):
         return
 
-    action, sid = m.group(1).lower(), int(m.group(2))
-
-    if action == 'approve':
-        text = run_approve(str(chat_id), str(bale_uid), sid)
-        toast = 'تایید شد' if text.startswith('✅') else 'خطا'
-    elif action == 'reject':
-        text = run_reject(str(chat_id), str(bale_uid), sid)
-        toast = 'رد شد' if text.startswith('🚫') else 'خطا'
-    else:  # paid
-        text = run_paid(sid)
-        toast = 'پرداخت ثبت شد' if text.startswith('💳') else 'خطا'
+    m = CB_ORDER_MGR.match(data)
+    if m:
+        action, sid = m.group(1).lower(), int(m.group(2))
+        if action == 'approve':
+            text = run_approve(bale_uid, sid)
+            toast = 'تایید شد' if text.startswith('✅') else 'خطا'
+        elif action == 'reject':
+            text = run_reject(bale_uid, sid)
+            toast = 'رد شد' if text.startswith('🚫') else 'خطا'
+        else:
+            text = run_paid(sid)
+            toast = 'پرداخت ثبت شد' if text.startswith('💳') else 'خطا'
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text=toast)
+        if chat_id:
+            bc.send_message(chat_id, text)
+        return
 
     if cq_id:
-        bc.answer_callback_query(str(cq_id), text=toast, show_alert=False)
-
-    if chat_id:
-        bc.send_message(str(chat_id), text)
+        bc.answer_callback_query(str(cq_id), text='دستور ناشناخته')
 
 
 def handle_update(update: dict) -> None:
@@ -214,52 +197,47 @@ def handle_update(update: dict) -> None:
         try:
             handle_callback_query(update['callback_query'])
         except Exception:
-            log.exception('callback_query handler failed')
+            log.exception('callback failed')
         return
 
     msg = update.get('message') or update.get('edited_message')
-    if msg:
-        chat = msg.get('chat') or {}
-        chat_id = chat.get('id')
-        from_user = msg.get('from') or {}
-        text = (msg.get('text') or '')
-        bale_uid = from_user.get('id')
-        log.info('From %s text=%r', bale_uid, text)
-
-        if not chat_id:
-            return
-
-        norm = normalize_text(text)
-        if norm.startswith('/start'):
-            bc.send_message(
-                str(chat_id),
-                'سلام 👋 ربات تبلیغات بله\n'
-                f"شناسه شما: {bale_uid}\n\n"
-                'دستورات:\n'
-                '/approve_1\n'
-                '/reject_1\n'
-                '/paid_1\n\n'
-                'یا از دکمه‌های زیر پیام سفارش استفاده کنید.',
-            )
-            return
-
-        if norm and handle_text_command(str(chat_id), str(bale_uid), text):
-            return
-
-        if norm:
-            bc.send_message(str(chat_id), f'دریافت شد: {norm}')
+    if not msg:
+        log.info('Unhandled keys: %s', list(update.keys()))
         return
 
-    if update.get('pre_checkout_query'):
-        log.info('pre_checkout_query: %s', update['pre_checkout_query'])
+    chat_id = str((msg.get('chat') or {}).get('id') or '')
+    from_user = msg.get('from') or {}
+    bale_uid = str(from_user.get('id') or '')
+    username = from_user.get('username') or ''
+    text = msg.get('text') or ''
+    norm = normalize_text(text)
+    log.info('From %s text=%r', bale_uid, text)
+
+    if not chat_id or not bale_uid:
         return
 
-    log.info('Unhandled keys: %s', list(update.keys()))
+    if norm.startswith('/start'):
+        flow.handle_start(chat_id, bale_uid, username)
+        return
+
+    if handle_legacy_commands(chat_id, bale_uid, norm):
+        return
+
+    if flow.try_handle_text(chat_id, bale_uid, text):
+        return
+
+    if norm:
+        # gentle nudge if idle
+        bc.send_message(
+            chat_id,
+            'برای شروع /start را بزنید.\n'
+            'اگر مدیر هستید و لینک می‌فرستید، اول نقش مدیر را از /start انتخاب کنید.',
+        )
 
 
 def run_polling(timeout: int = 25) -> None:
     offset = None
-    log.info('Polling… (Ctrl+C to stop)')
+    log.info('Polling…')
     while True:
         try:
             data = bc.get_updates(offset=offset, limit=50, timeout=timeout)
@@ -283,7 +261,7 @@ def run_polling(timeout: int = 25) -> None:
             log.info('Stopped.')
             break
         except Exception as e:
-            log.exception('loop error: %s', e)
+            log.exception('loop: %s', e)
             time.sleep(5)
 
 
