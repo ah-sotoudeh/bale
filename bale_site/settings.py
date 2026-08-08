@@ -3,7 +3,15 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'replace-me')
+# Load .env if present (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / '.env')
+    load_dotenv(BASE_DIR / 'config' / '.env')
+except ImportError:
+    pass
+
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'replace-me-dev-only')
 DEBUG = os.environ.get('DEBUG', '1') == '1'
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',') if os.environ.get('ALLOWED_HOSTS') else ['*']
@@ -51,20 +59,35 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'bale_site.wsgi.application'
 
-# Database (MySQL) - configure via env vars
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DB_NAME', 'bale_db'),
-        'USER': os.environ.get('DB_USER', 'bale_user'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
-        'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('DB_PORT', '3306'),
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+# ---------------------------------------------------------------------------
+# Database
+# - Local / Windows: set USE_SQLITE=1 (default when DB_ENGINE not set to mysql)
+# - Production / CI MySQL: USE_SQLITE=0 and set DB_* env vars
+# ---------------------------------------------------------------------------
+USE_SQLITE = os.environ.get('USE_SQLITE', '1') == '1'
+DB_ENGINE = os.environ.get('DB_ENGINE', '').lower()
+
+if USE_SQLITE or DB_ENGINE in ('sqlite', 'sqlite3'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.environ.get('SQLITE_PATH', str(BASE_DIR / 'db.sqlite3')),
         }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('DB_NAME', 'bale_db'),
+            'USER': os.environ.get('DB_USER', 'bale_user'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+            'HOST': os.environ.get('DB_HOST', 'localhost'),
+            'PORT': os.environ.get('DB_PORT', '3306'),
+            'OPTIONS': {
+                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            },
+        }
+    }
 
 AUTH_USER_MODEL = 'users.User'
 
@@ -80,6 +103,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Bale integration
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
+BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -89,3 +113,5 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.AllowAny',
     ),
 }
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
