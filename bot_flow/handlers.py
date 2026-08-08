@@ -1,8 +1,4 @@
-"""Manager registration flow for the Bale ads bot.
-
-Ownership: public @username must appear in channel bio.
-Channels + tariffs saved in DB; free days via /free and inline buttons.
-"""
+"""Manager registration: single channels or multi-channel packages."""
 from __future__ import annotations
 
 import logging
@@ -11,10 +7,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import transaction
-from django.db.models import Prefetch
 
 from bot_flow.links import extract_channel_refs, normalize_channel_ref
-from channels_app.models import Channel, Tariff
+from channels_app.models import Channel, ChannelGroup, Tariff
 from integrations import bale_client as bc
 from users.models import BotSession, User
 
@@ -23,6 +18,7 @@ logger = logging.getLogger(__name__)
 STATE_IDLE = 'idle'
 STATE_AWAIT_ROLE = 'await_role'
 STATE_AWAIT_LINKS = 'await_links'
+STATE_AWAIT_GROUP_NAME = 'await_group_name'
 STATE_AWAIT_TARIFFS = 'await_tariffs'
 
 TARIFF_LINE = re.compile(
@@ -112,8 +108,9 @@ def start_message(user: User) -> Tuple[str, Dict[str, Any]]:
     text = (
         'سلام 👋 به ربات تبلیغات بله خوش آمدید.\n\n'
         f'آیدی شما: {handle}\n\n'
-        'لطفاً نقش خود را انتخاب کنید:\n'
-        'مدیران بعداً با /free روزهای خالی را می‌بینند.'
+        'نقش خود را انتخاب کنید.\n'
+        'مدیر: تک‌کانال یا چند کانال باهم (مجموعه).\n'
+        'روزهای خالی: /free'
     )
     return text, role_keyboard()
 
@@ -142,33 +139,28 @@ def handle_role_callback(
         save_session(sess, STATE_IDLE, role='customer')
         bc.send_message(
             str(chat_id),
-            'شما به‌عنوان مشتری ثبت شدید.\n'
-            f'کانال نمایش تعرفه: {reference_channel()}\n\n'
-            'برای شروع دوباره: /start',
+            f'شما مشتری شدید.\nکانال تعرفه: {reference_channel()}\n/start',
         )
         return
 
     if role == 'manager':
         save_session(sess, STATE_AWAIT_LINKS, role='manager', verified_ids=[])
         proof = user.bale_handle or user.bale_user_id
-        tip = ''
-        if not user.bale_username:
-            tip = (
-                '\n⚠️ آیدی عمومی (@...) ثبت نشده؛ '
-                'اگر دارید یک‌بار دیگر /start بزنید.'
-            )
         bc.send_message(
             str(chat_id),
-            'نقش شما: مدیر کانال ✅\n\n'
-            'لینک یا آیدی کانال‌ها را بفرستید (هر خط یکی).\n\n'
-            'مثال:\n@mychannel\nble.ir/otherchannel\n\n'
-            f'⚠️ آیدی شما باید در بیو کانال باشد: {proof}'
-            f'{tip}\n\n'
-            'بعد از ثبت تعرفه با /free روزهای خالی را ببینید.',
+            'نقش: مدیر کانال ✅\n\n'
+            'لینک کانال‌ها را بفرستید (هر خط یکی).\n'
+            '• یک لینک = تک‌کانال\n'
+            '• چند لینک در یک پیام = یک مجموعه با تعرفه مشترک\n\n'
+            f'آیدی شما باید در بیوی هر کانال باشد: {proof}\n\n'
+            'مثال مجموعه:\n'
+            '@cooking1\n'
+            '@inja_iran\n'
+            '@cake_decoration',
         )
         return
 
-    bc.send_message(str(chat_id), 'نقش نامعتبر. /start را بزنید.')
+    bc.send_message(str(chat_id), 'نقش نامعتبر. /start')
 
 
 def _verify_and_register_channels(
@@ -184,15 +176,14 @@ def _verify_and_register_channels(
         norm = normalize_channel_ref(ref)
         info = bc.get_channel_info(norm)
         if info.get('error'):
-            fail.append(f'{norm}: نتوانستیم اطلاعات بگیریم ({info.get("error")})')
+            fail.append(f'{norm}: خطا ({info.get("error")})')
             continue
 
         bio = str(info.get('bio') or info.get('description') or '')
         title = info.get('title') or norm
         if not bio_matches_owner(bio, manager):
             fail.append(
-                f'{title} ({norm}): آیدی شما در بیو نیست.\n'
-                f'لطفاً «{proof}» را در بیو بگذارید و دوباره بفرستید.'
+                f'{title} ({norm}): آیدی در بیو نیست. «{proof}» را بگذارید.'
             )
             continue
 
@@ -206,9 +197,7 @@ def _verify_and_register_channels(
             ch.manager = manager
             ch.save()
             ok.append(ch)
-            notes.append(
-                f'{"ثبت" if created else "به‌روزرسانی"}: {title} ({norm}) #id={ch.id}'
-            )
+            notes.append(f'{"ثبت" if created else "به‌روز"}: {title} ({norm})')
 
     return ok, fail, notes
 
@@ -220,10 +209,7 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     refs = extract_channel_refs(text)
     if not refs:
-        bc.send_message(
-            str(chat_id),
-            'لینک معتبری پیدا نشد.\nمثال: @mychannel یا ble.ir/mychannel',
-        )
+        bc.send_message(str(chat_id), 'لینک معتبر پیدا نشد. مثال: @mychannel')
         return True
 
     manager = ensure_user(bale_user_id)
@@ -231,34 +217,96 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     parts: List[str] = []
     if notes:
-        parts.append('✅ کانال‌های تأییدشده:\n' + '\n'.join(f'• {n}' for n in notes))
+        parts.append('✅ تأییدشده:\n' + '\n'.join(f'• {n}' for n in notes))
     if fail:
-        parts.append('⚠️ نیاز به اصلاح:\n' + '\n\n'.join(fail))
+        parts.append('⚠️ اصلاح:\n' + '\n'.join(fail))
 
     if not ok:
-        parts.append('\nپس از اصلاح بیو، دوباره لینک را بفرستید.')
+        parts.append('بعد از اصلاح بیو دوباره بفرستید.')
         bc.send_message(str(chat_id), '\n\n'.join(parts))
         return True
 
-    verified_ids = list(sess.data.get('verified_ids') or [])
-    for ch in ok:
-        if ch.id not in verified_ids:
-            verified_ids.append(ch.id)
+    channel_ids = [c.id for c in ok]
+
+    # چند کانال → مجموعه
+    if len(ok) > 1:
+        save_session(
+            sess,
+            STATE_AWAIT_GROUP_NAME,
+            role='manager',
+            pending_channel_ids=channel_ids,
+            package_mode=True,
+            tariff_group_id=None,
+            tariff_channel_id=None,
+        )
+        names = '\n'.join(f'{i+1}. {c.name} — {c.link}' for i, c in enumerate(ok))
+        parts.append(
+            f'\n📦 {len(ok)} کانال به‌صورت یک مجموعه ثبت می‌شوند (تعرفه و نوبت مشترک).\n'
+            f'{names}\n\n'
+            'نام مجموعه را بفرستید.\n'
+            'مثال: کانال های آشپزی'
+        )
+        bc.send_message(str(chat_id), '\n\n'.join(parts))
+        return True
+
+    # تک‌کانال
     save_session(
         sess,
         STATE_AWAIT_TARIFFS,
-        verified_ids=verified_ids,
+        role='manager',
+        package_mode=False,
         tariff_channel_id=ok[0].id,
-        tariff_queue=[c.id for c in ok],
+        tariff_group_id=None,
+        pending_channel_ids=channel_ids,
     )
-
-    first = ok[0]
     parts.append(
-        f'\nتعرفه برای «{first.name}»:\n'
-        'نام | ساعت_مدت | قیمت_تومان\n'
-        'مثال:\nروزانه | 24 | 50000\nشبانه | 12 | 30000'
+        f'\nتعرفه برای «{ok[0].name}»:\n'
+        'نام | مدت_ساعت | قیمت_تومان\n'
+        'مثال:\nروزانه | 24 | 300\nشبانه | 12 | 250'
     )
     bc.send_message(str(chat_id), '\n\n'.join(parts))
+    return True
+
+
+def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
+    sess = get_session(bale_user_id)
+    if sess.state != STATE_AWAIT_GROUP_NAME:
+        return False
+
+    name = (text or '').strip()
+    if not name or name.startswith('/'):
+        bc.send_message(str(chat_id), 'نام مجموعه را متنی بفرستید. مثال: کانال های آشپزی')
+        return True
+
+    manager = ensure_user(bale_user_id)
+    ids = list(sess.data.get('pending_channel_ids') or [])
+    channels = list(Channel.objects.filter(id__in=ids, manager=manager))
+    if len(channels) < 2:
+        bc.send_message(str(chat_id), 'کانال‌های مجموعه ناقص است. /start')
+        save_session(sess, STATE_AWAIT_LINKS)
+        return True
+
+    with transaction.atomic():
+        group = ChannelGroup.objects.create(name=name[:200], manager=manager)
+        group.channels.set(channels)
+
+    save_session(
+        sess,
+        STATE_AWAIT_TARIFFS,
+        package_mode=True,
+        tariff_group_id=group.id,
+        tariff_channel_id=None,
+        pending_channel_ids=ids,
+    )
+    bc.send_message(
+        str(chat_id),
+        f'مجموعه «{group.name}» با {len(channels)} کانال ذخیره شد.\n\n'
+        'تعرفه‌های مشترک مجموعه را بفرستید (قیمت برای همه با هم):\n'
+        'نام | مدت_ساعت | قیمت_تومان\n\n'
+        'مثال:\n'
+        '۲۴ ساعته روزانه | 24 | 300\n'
+        '۱۲ ساعته شبانه | 12 | 250',
+    )
     return True
 
 
@@ -279,6 +327,47 @@ def parse_tariff_lines(text: str) -> List[Tuple[str, int, int]]:
     return rows
 
 
+def _channel_handle(ch: Channel) -> str:
+    link = (ch.link or '').strip()
+    if link.startswith('@'):
+        return link
+    if 'ble.ir/' in link:
+        return '@' + link.rstrip('/').split('/')[-1]
+    return link or ch.name
+
+
+def publish_package_to_reference(group: ChannelGroup) -> Dict[str, Any]:
+    tariffs = list(group.tariffs.order_by('id'))
+    channels = list(group.channels.order_by('id'))
+    if not tariffs:
+        return {'error': 'no_tariffs'}
+
+    lines = [f'📺 «{group.name}»']
+    for i, ch in enumerate(channels, 1):
+        lines.append(f'{i}. {ch.name} . {_channel_handle(ch)}')
+    lines.append(f'💳 تعرفه ({len(channels)} کانال با هم)')
+    for t in tariffs:
+        lines.append(f'• {t.name} . {t.duration_hours}س . {t.price:,} ت')
+
+    rows = []
+    for t in tariffs:
+        rows.append([
+            {
+                'text': f'{t.name} — {t.price:,} ت',
+                'callback_data': f'order_tariff:{t.id}',
+            }
+        ])
+    rows.append([
+        {'text': '📝 ثبت سفارش تبلیغ', 'callback_data': f'order_group:{group.id}'}
+    ])
+
+    return bc.send_message(
+        reference_channel(),
+        '\n'.join(lines),
+        reply_markup=bc.inline_keyboard(rows),
+    )
+
+
 def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
     tariffs = list(Tariff.objects.filter(channel=channel).order_by('id'))
     if not tariffs:
@@ -286,7 +375,7 @@ def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
 
     lines = [
         f'📢 {channel.name}',
-        channel.link or '',
+        _channel_handle(channel),
         '',
         'تعرفه‌ها:',
     ]
@@ -296,10 +385,7 @@ def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
     rows = []
     for t in tariffs:
         rows.append([
-            {
-                'text': f'{t.name} — {t.price:,} ت',
-                'callback_data': f'order_tariff:{t.id}',
-            }
+            {'text': f'{t.name} — {t.price:,} ت', 'callback_data': f'order_tariff:{t.id}'}
         ])
     rows.append([
         {'text': '📝 ثبت سفارش تبلیغ', 'callback_data': f'order_channel:{channel.id}'}
@@ -312,15 +398,6 @@ def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
     )
 
 
-def catalog_from_db() -> List[Channel]:
-    return list(
-        Channel.objects.filter(tariffs__isnull=False)
-        .distinct()
-        .prefetch_related(Prefetch('tariffs', queryset=Tariff.objects.order_by('id')))
-        .order_by('name')
-    )
-
-
 def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     sess = get_session(bale_user_id)
     if sess.state != STATE_AWAIT_TARIFFS:
@@ -330,69 +407,99 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     if not rows:
         bc.send_message(
             str(chat_id),
-            'فرمت تعرفه درست نبود.\nمثال:\nروزانه | 24 | 50000',
+            'فرمت تعرفه نادرست.\nمثال:\n۲۴ ساعته روزانه | 24 | 300',
         )
         return True
 
+    package_mode = bool(sess.data.get('package_mode'))
+    group_id = sess.data.get('tariff_group_id')
     ch_id = sess.data.get('tariff_channel_id')
-    queue = list(sess.data.get('tariff_queue') or [])
-    try:
-        channel = Channel.objects.get(id=ch_id)
-    except Channel.DoesNotExist:
-        bc.send_message(str(chat_id), 'کانال پیدا نشد. /start')
-        save_session(sess, STATE_IDLE)
-        return True
 
     created = []
-    with transaction.atomic():
-        for name, hours, price in rows:
-            t, _ = Tariff.objects.update_or_create(
-                channel=channel,
-                name=name,
-                defaults={'duration_hours': hours, 'price': price},
-            )
-            created.append(t)
+    if package_mode and group_id:
+        try:
+            group = ChannelGroup.objects.get(id=group_id)
+        except ChannelGroup.DoesNotExist:
+            bc.send_message(str(chat_id), 'مجموعه پیدا نشد. /start')
+            save_session(sess, STATE_IDLE)
+            return True
 
-    summary = '\n'.join(
-        f'• {t.name}: {t.price} تومان / {t.duration_hours}س (id={t.id})' for t in created
-    )
-    bc.send_message(
-        str(chat_id),
-        f'تعرفه‌های «{channel.name}» ذخیره شد:\n{summary}',
-    )
+        with transaction.atomic():
+            for name, hours, price in rows:
+                t, _ = Tariff.objects.update_or_create(
+                    group=group,
+                    name=name,
+                    defaults={
+                        'channel': None,
+                        'duration_hours': hours,
+                        'price': price,
+                    },
+                )
+                created.append(t)
 
-    pub = publish_channel_to_reference(channel)
+        summary = '\n'.join(
+            f'• {t.name}: {t.price} ت / {t.duration_hours}س' for t in created
+        )
+        bc.send_message(
+            str(chat_id),
+            f'تعرفه مشترک «{group.name}» ذخیره شد:\n{summary}',
+        )
+        pub = publish_package_to_reference(group)
+        label = group.name
+    else:
+        try:
+            channel = Channel.objects.get(id=ch_id)
+        except Channel.DoesNotExist:
+            bc.send_message(str(chat_id), 'کانال پیدا نشد. /start')
+            save_session(sess, STATE_IDLE)
+            return True
+
+        with transaction.atomic():
+            for name, hours, price in rows:
+                t, _ = Tariff.objects.update_or_create(
+                    channel=channel,
+                    name=name,
+                    defaults={
+                        'group': None,
+                        'duration_hours': hours,
+                        'price': price,
+                    },
+                )
+                created.append(t)
+
+        summary = '\n'.join(
+            f'• {t.name}: {t.price} ت / {t.duration_hours}س' for t in created
+        )
+        bc.send_message(
+            str(chat_id),
+            f'تعرفه «{channel.name}» ذخیره شد:\n{summary}',
+        )
+        pub = publish_channel_to_reference(channel)
+        label = channel.name
+
     if pub.get('error') and pub.get('error') != 'no_tariffs':
         bc.send_message(
             str(chat_id),
             f'⚠️ انتشار در {reference_channel()} ناموفق: {pub.get("error")}',
         )
     elif not pub.get('error'):
-        bc.send_message(str(chat_id), f'✅ در {reference_channel()} منتشر شد.')
+        bc.send_message(str(chat_id), f'✅ «{label}» در {reference_channel()} منتشر شد.')
 
-    if ch_id in queue:
-        queue = [x for x in queue if x != ch_id]
-    if queue:
-        next_id = queue[0]
-        save_session(sess, STATE_AWAIT_TARIFFS, tariff_channel_id=next_id, tariff_queue=queue)
-        next_ch = Channel.objects.filter(id=next_id).first()
-        name = next_ch.name if next_ch else str(next_id)
-        bc.send_message(str(chat_id), f'کانال بعدی: «{name}» — تعرفه‌ها را بفرستید.')
-    else:
-        save_session(sess, STATE_AWAIT_LINKS, role='manager', tariff_queue=[], tariff_channel_id=None)
-        n_ch = Channel.objects.filter(manager__bale_user_id=str(bale_user_id)).count()
-        n_t = Tariff.objects.filter(channel__manager__bale_user_id=str(bale_user_id)).count()
-        kb = bc.inline_keyboard([
-            [{'text': '📅 روزهای خالی', 'callback_data': 'free:list'}]
-        ])
-        bc.send_message(
-            str(chat_id),
-            'ثبت تمام شد ✅\n'
-            f'دیتابیس: {n_ch} کانال، {n_t} تعرفه.\n'
-            'لینک کانال جدید بفرستید، /free یا دکمه زیر:',
-            reply_markup=kb,
-        )
-
+    save_session(
+        sess,
+        STATE_AWAIT_LINKS,
+        role='manager',
+        package_mode=False,
+        tariff_group_id=None,
+        tariff_channel_id=None,
+        pending_channel_ids=[],
+    )
+    kb = bc.inline_keyboard([[{'text': '📅 روزهای خالی', 'callback_data': 'free:list'}]])
+    bc.send_message(
+        str(chat_id),
+        'می‌توانید کانال/مجموعه جدید بفرستید، /free یا دکمه زیر:',
+        reply_markup=kb,
+    )
     return True
 
 
@@ -405,27 +512,41 @@ def handle_order_callback(
 ) -> None:
     if cq_id:
         bc.answer_callback_query(str(cq_id), text='دریافت شد')
+
     if kind == 'tariff':
-        t = Tariff.objects.select_related('channel').filter(id=obj_id).first()
+        t = Tariff.objects.select_related('channel', 'group').filter(id=obj_id).first()
         if not t:
             bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
             return
-        from bot_flow.calendar_ui import free_days_text
+        from bot_flow.calendar_ui import free_days_text_for_tariff
 
+        owner = t.group.name if t.group_id else (t.channel.name if t.channel else '?')
+        n = t.group.channel_count if t.group_id else 1
         text = (
-            f'سفارش «{t.name}» — {t.channel.name}\n'
+            f'سفارش «{t.name}»\n'
+            f'هدف: {owner}' + (f' ({n} کانال با هم)' if n > 1 else '') + '\n'
             f'{t.price:,} تومان / {t.duration_hours} ساعت\n\n'
-            + free_days_text(t.channel, t, days=7)
-            + '\n\n(ثبت کامل سفارش مشتری مرحله بعد است.)'
+            + free_days_text_for_tariff(t, days=7)
+            + '\n\n(فلو کامل سفارش مشتری مرحله بعد.)'
         )
         bc.send_message(str(chat_id), text)
-    else:
-        ch = Channel.objects.filter(id=obj_id).first()
-        name = ch.name if ch else obj_id
+        return
+
+    if kind == 'group':
+        g = ChannelGroup.objects.filter(id=obj_id).first()
+        name = g.name if g else obj_id
         bc.send_message(
             str(chat_id),
-            f'ثبت سفارش برای «{name}».\nبه‌زودی فلو مشتری کامل می‌شود.',
+            f'ثبت سفارش برای مجموعه «{name}».\nبه‌زودی فلو مشتری کامل می‌شود.',
         )
+        return
+
+    ch = Channel.objects.filter(id=obj_id).first()
+    name = ch.name if ch else obj_id
+    bc.send_message(
+        str(chat_id),
+        f'ثبت سفارش برای «{name}».\nبه‌زودی فلو مشتری کامل می‌شود.',
+    )
 
 
 def try_handle_callback(
@@ -441,16 +562,17 @@ def try_handle_callback(
         return True
     if data.startswith('role:'):
         handle_role_callback(
-            chat_id,
-            bale_user_id,
-            data.split(':', 1)[1],
-            cq_id=cq_id,
-            username=username,
+            chat_id, bale_user_id, data.split(':', 1)[1], cq_id=cq_id, username=username
         )
         return True
     if data.startswith('order_tariff:'):
         handle_order_callback(
             chat_id, bale_user_id, 'tariff', int(data.split(':')[1]), cq_id=cq_id
+        )
+        return True
+    if data.startswith('order_group:'):
+        handle_order_callback(
+            chat_id, bale_user_id, 'group', int(data.split(':')[1]), cq_id=cq_id
         )
         return True
     if data.startswith('order_channel:'):
@@ -466,13 +588,14 @@ def try_handle_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     if norm.startswith('/free'):
         from bot_flow.calendar_ui import send_manager_channel_picker
 
-        user = ensure_user(bale_user_id)
-        send_manager_channel_picker(chat_id, user)
+        send_manager_channel_picker(chat_id, ensure_user(bale_user_id))
         return True
 
     sess = get_session(bale_user_id)
     if sess.state == STATE_AWAIT_LINKS:
         return handle_links_text(chat_id, bale_user_id, text)
+    if sess.state == STATE_AWAIT_GROUP_NAME:
+        return handle_group_name_text(chat_id, bale_user_id, text)
     if sess.state == STATE_AWAIT_TARIFFS:
         return handle_tariffs_text(chat_id, bale_user_id, text)
     return False
