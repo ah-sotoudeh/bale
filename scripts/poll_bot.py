@@ -86,7 +86,7 @@ def prepare_polling() -> None:
         sys.exit(1)
     result = me.get('result') or me
     log.info('Bot OK → id=%s @%s', result.get('id'), result.get('username'))
-    log.info('Flows: /start role → manager channels → tariffs → @linkban')
+    log.info('Flows: /start → manager → DB save → publish %s', os.environ.get('REFERENCE_CHANNEL', '@linktest'))
 
     info = bc.get_webhook_info()
     current_url = (info.get('result') or {}).get('url') or ''
@@ -160,12 +160,19 @@ def handle_callback_query(cq: dict) -> None:
     data = (cq.get('data') or '').strip()
     from_user = cq.get('from') or {}
     bale_uid = str(from_user.get('id') or '')
+    username = from_user.get('username') or ''
     msg = cq.get('message') or {}
     chat_id = str((msg.get('chat') or {}).get('id') or '')
 
-    log.info('callback data=%r user=%s', data, bale_uid)
+    log.info('callback data=%r user=%s @%s', data, bale_uid, username)
 
-    if flow.try_handle_callback(chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None):
+    if flow.try_handle_callback(
+        chat_id,
+        bale_uid,
+        data,
+        cq_id=str(cq_id) if cq_id else None,
+        username=username,
+    ):
         return
 
     m = CB_ORDER_MGR.match(data)
@@ -211,7 +218,7 @@ def handle_update(update: dict) -> None:
     username = from_user.get('username') or ''
     text = msg.get('text') or ''
     norm = normalize_text(text)
-    log.info('From %s text=%r', bale_uid, text)
+    log.info('From %s @%s text=%r', bale_uid, username, text)
 
     if not chat_id or not bale_uid:
         return
@@ -227,7 +234,6 @@ def handle_update(update: dict) -> None:
         return
 
     if norm:
-        # gentle nudge if idle
         bc.send_message(
             chat_id,
             'برای شروع /start را بزنید.\n'
