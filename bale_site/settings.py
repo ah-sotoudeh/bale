@@ -97,8 +97,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
 BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
-# Public catalog channel where approved tariffs are posted (bot must be admin)
-REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linkban')
+REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linktest')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
