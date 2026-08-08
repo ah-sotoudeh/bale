@@ -1,19 +1,13 @@
 """Bale API client implemented against the official Bale Bot API (tapi.bale.ai).
 
-Authentication (priority order):
-1. Django settings (BALE_BOT_TOKEN / BALE_CARD_NUMBER) when Django is configured
-2. Environment variables
-3. Project .env / config/.env files (loaded via python-dotenv)
-
-Note: GitHub Secrets are injected as env vars only inside GitHub Actions —
-they are not readable from a developer machine. For local runs use a .env file.
+Supports InlineKeyboardMarkup via reply_markup on sendMessage, and answerCallbackQuery.
 """
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import requests
 
@@ -28,7 +22,6 @@ def _load_dotenv() -> None:
         from dotenv import load_dotenv
     except ImportError:
         return
-    # Root .env first, then config/.env (later does not override existing)
     load_dotenv(_ROOT / '.env', override=False)
     load_dotenv(_ROOT / 'config' / '.env', override=False)
 
@@ -64,8 +57,6 @@ def _api_base() -> str:
     )
 
 
-# Backwards-compatible module attributes (evaluated at import; may be empty).
-# Prefer _token() / helpers above for runtime accuracy after dotenv.
 TOKEN = _token()
 CARD_NUMBER = _card_number()
 BALE_API_BASE = _api_base()
@@ -82,6 +73,30 @@ def _bot_url(path: str) -> str:
         _warned_empty_token = True
     token_segment = f'/bot{token}' if token else '/bot'
     return f"{_api_base().rstrip('/')}{token_segment}/{path.lstrip('/')}"
+
+
+def inline_keyboard(rows: Sequence[Sequence[Dict[str, str]]]) -> Dict[str, Any]:
+    """Build Telegram/Bale-style InlineKeyboardMarkup.
+
+    Each button dict needs 'text' and either 'callback_data' or 'url'.
+    callback_data should stay under 64 bytes.
+    """
+    return {'inline_keyboard': [list(row) for row in rows]}
+
+
+def manager_decision_keyboard(item_id: int) -> Dict[str, Any]:
+    return inline_keyboard([
+        [
+            {'text': '✅ تأیید', 'callback_data': f'approve:{item_id}'},
+            {'text': '❌ رد', 'callback_data': f'reject:{item_id}'},
+        ]
+    ])
+
+
+def payment_done_keyboard(order_id: int) -> Dict[str, Any]:
+    return inline_keyboard([
+        [{'text': '💳 پرداخت انجام شد (تست)', 'callback_data': f'paid:{order_id}'}]
+    ])
 
 
 def get_me() -> Dict[str, Any]:
@@ -139,6 +154,27 @@ def delete_webhook() -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('delete_webhook failed')
+        return {'error': str(e)}
+
+
+def answer_callback_query(
+    callback_query_id: str,
+    text: Optional[str] = None,
+    show_alert: bool = False,
+) -> Dict[str, Any]:
+    """Stop the loading spinner on an inline button; optional toast/alert."""
+    url = _bot_url('answerCallbackQuery')
+    body: Dict[str, Any] = {'callback_query_id': callback_query_id}
+    if text is not None:
+        body['text'] = text[:200]
+    if show_alert:
+        body['show_alert'] = True
+    try:
+        r = requests.post(url, json=body, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        logger.exception('answer_callback_query failed')
         return {'error': str(e)}
 
 
