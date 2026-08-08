@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Seed demo data and create a real order that notifies the manager on Bale.
+"""Seed demo data and create a real order that notifies on Bale.
 
 Usage (PowerShell):
     cd G:\GitHub\bale
-    $env:USE_SQLITE="1"
-    # BALE_BOT_TOKEN from .env is enough
+    git pull origin feature/ads-bot-init
     python scripts/demo_order_flow.py
 
-Optional args:
+Optional:
     python scripts/demo_order_flow.py --bale-id 80619262
 
-Then keep poll_bot.py running and in Bale send:
+Then in another terminal:
+    python scripts/poll_bot.py
+
+In Bale:
     /approve <item_id>
     /paid <order_id>
 """
@@ -47,9 +49,17 @@ from orders.services import notify_managers_for_order  # noqa: E402
 from users.models import User  # noqa: E402
 
 
-def get_or_create_user(username: str, bale_id: str) -> User:
+def get_or_create_demo_user(bale_id: str) -> User:
+    """One account acts as both customer and manager for solo testing.
+
+    bale_user_id is unique, so we must not create two users with the same id.
+    """
+    existing = User.objects.filter(bale_user_id=bale_id).first()
+    if existing:
+        return existing
+
     user, created = User.objects.get_or_create(
-        username=username,
+        username=f'demo_{bale_id}',
         defaults={'bale_user_id': bale_id},
     )
     if not user.bale_user_id:
@@ -66,24 +76,21 @@ def main() -> None:
     parser.add_argument(
         '--bale-id',
         default=os.environ.get('DEMO_BALE_USER_ID', '80619262'),
-        help='Your Bale user id (default: 80619262 or DEMO_BALE_USER_ID)',
+        help='Your Bale user id',
     )
-    parser.add_argument('--price', type=int, default=10000, help='Tariff price in Rials')
+    parser.add_argument('--price', type=int, default=10000, help='Price in Rials')
     args = parser.parse_args()
     bale_id = str(args.bale_id)
 
     print(f'Using bale_user_id={bale_id}')
-
-    # Same person as customer + manager for easy solo testing
-    customer = get_or_create_user('demo_customer', bale_id)
-    manager = get_or_create_user('demo_manager', bale_id)
+    user = get_or_create_demo_user(bale_id)
 
     channel, _ = Channel.objects.get_or_create(
         link='@demo_channel',
-        defaults={'name': 'کانال دمو', 'description': 'برای تست فلو', 'manager': manager},
+        defaults={'name': 'کانال دمو', 'description': 'برای تست فلو', 'manager': user},
     )
-    if channel.manager_id != manager.id:
-        channel.manager = manager
+    if channel.manager_id != user.id:
+        channel.manager = user
         channel.save(update_fields=['manager'])
 
     tariff, _ = Tariff.objects.get_or_create(
@@ -99,7 +106,7 @@ def main() -> None:
     end = start + timedelta(hours=tariff.duration_hours)
 
     order = Order.objects.create(
-        customer=customer,
+        customer=user,
         status='waiting_managers',
         total_amount=tariff.price,
     )
@@ -110,20 +117,20 @@ def main() -> None:
         requested_start=start,
         requested_end=end,
         price=tariff.price,
-        manager=manager,
+        manager=user,
         manager_status='pending',
         banner_message_id=None,
     )
 
     print(f'Created order #{order.id} item #{item.id} status={order.status}')
-    print('Notifying manager on Bale...')
+    print('Notifying on Bale...')
     notify_managers_for_order(order)
     print('Done.')
     print()
-    print('Next steps:')
-    print('  1) Run:  python scripts/poll_bot.py')
-    print(f'  2) In Bale send:  /approve {item.id}')
-    print(f'  3) Then send:     /paid {order.id}')
+    print('Next:')
+    print('  1) python scripts/poll_bot.py')
+    print(f'  2) In Bale:  /approve {item.id}')
+    print(f'  3) In Bale:  /paid {order.id}')
     print()
 
 
