@@ -23,7 +23,6 @@ def process_manager_response(
     new_start: Optional[str] = None,
     extra_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Apply manager approve/reject/edit and advance order state."""
     action = (action or '').lower().strip()
     if action not in ('approve', 'reject', 'edit'):
         return {'ok': False, 'error': 'invalid_action', 'detail': 'action must be approve|reject|edit'}
@@ -49,7 +48,7 @@ def process_manager_response(
             return {'ok': False, 'error': 'invalid_new_start'}
         new_end = parsed + timedelta(hours=item.tariff.duration_hours)
         if has_slot_conflict(
-            item.channel, item.tariff, parsed, new_end, exclude_item_id=item.id
+            item.tariff, parsed, new_end, exclude_item_id=item.id, channel=item.channel
         ):
             return {'ok': False, 'error': 'slot_conflict'}
         item.manager_edited_start = parsed
@@ -62,7 +61,7 @@ def process_manager_response(
                 start = parsed
                 end = parsed + timedelta(hours=item.tariff.duration_hours)
         if has_slot_conflict(
-            item.channel, item.tariff, start, end, exclude_item_id=item.id
+            item.tariff, start, end, exclude_item_id=item.id, channel=item.channel
         ):
             return {'ok': False, 'error': 'slot_conflict'}
 
@@ -128,6 +127,7 @@ def process_manager_response(
     paid_cmd = f'/paid_{order.id}'
     pay_kb = bale_client.payment_done_keyboard(order.id)
 
+    amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount} تومان'
     if payment.get('payment_url'):
         bale_client.send_message(
             order.customer.bale_user_id,
@@ -144,8 +144,7 @@ def process_manager_response(
     else:
         bale_client.send_message(
             order.customer.bale_user_id,
-            f'همه مدیران تایید کردند.\n'
-            f'مبلغ سفارش #{order.id}: {order.total_amount} تومان\n'
+            f'همه مدیران تایید کردند.\n{amount_line}\n'
             f'برای شبیه‌سازی پرداخت دکمه را بزن یا: {paid_cmd}',
             reply_markup=pay_kb,
         )
@@ -204,7 +203,7 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
 
 
 def notify_managers_for_order(order: Order) -> None:
-    for item in order.items.select_related('channel', 'manager', 'order__customer').all():
+    for item in order.items.select_related('channel', 'manager', 'order__customer', 'tariff').all():
         if not item.manager or not item.manager.bale_user_id:
             continue
         manager_id = item.manager.bale_user_id
@@ -219,6 +218,10 @@ def notify_managers_for_order(order: Order) -> None:
             except (TypeError, ValueError):
                 logger.warning('banner_message_id not int, skip forward: %s', item.banner_message_id)
 
+        target = item.channel.name
+        if item.tariff and item.tariff.group_id:
+            target = f'مجموعه «{item.tariff.group.name}»'
+
         approve_cmd = f'/approve_{item.id}'
         reject_cmd = f'/reject_{item.id}'
         kb = bale_client.manager_decision_keyboard(item.id)
@@ -226,9 +229,9 @@ def notify_managers_for_order(order: Order) -> None:
         resp = bale_client.send_message(
             manager_id,
             f'📢 درخواست تبلیغ جدید\n'
-            f'کانال: {item.channel.name}\n'
+            f'هدف: {target}\n'
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
-            f'مبلغ آیتم: {item.price} تومان\n'
+            f'مبلغ: {item.price} تومان\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}\n\n'
             f'از دکمه‌ها استفاده کنید یا:\n{approve_cmd}\n{reject_cmd}',
             reply_markup=kb,
