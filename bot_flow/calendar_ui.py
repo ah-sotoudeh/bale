@@ -1,26 +1,20 @@
-"""Show free booking days for a tariff in the Bale bot."""
+"""Show free booking days for a tariff in the Bale bot (Jalali dates)."""
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from django.utils import timezone
 
+from bot_flow.jalali import format_jalali
 from channels_app.models import Channel, Tariff
 from integrations import bale_client as bc
 from orders.availability import free_days_for_tariff
 from users.models import User
 
-WEEKDAY_FA = ['دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه', 'یکشنبه']
-# Python weekday(): Mon=0 ... Sun=6 → map to FA list above
-
-
-def _fa_weekday(d: date) -> str:
-    return WEEKDAY_FA[d.weekday()]
-
 
 def format_day(d: date) -> str:
-    return f'{_fa_weekday(d)} {d.year}/{d.month:02d}/{d.day:02d}'
+    return format_jalali(d)
 
 
 def free_days_text(
@@ -38,11 +32,12 @@ def free_days_text(
         else 'بدون ساعت ثابت'
     )
     header = (
-        f'📅 روزهای خالی\n'
+        f'📅 روزهای خالی (شمسی)\n'
         f'کانال: {channel.name}\n'
         f'تعرفه: {tariff.name}\n'
         f'نوبت: {hour_label} | {tariff.duration_hours} ساعت | {tariff.price:,} تومان\n'
         f'بازه: {days} روز آینده\n'
+        f'از {format_jalali(today)} تا {format_jalali(until)}\n'
     )
     if not free:
         return header + '\nهیچ روز خالی‌ای در این بازه نیست.'
@@ -58,7 +53,9 @@ def free_days_text(
 
 def channels_keyboard_for_manager(manager: User) -> Optional[Dict[str, Any]]:
     channels = list(
-        Channel.objects.filter(manager=manager, tariffs__isnull=False).distinct().order_by('name')[:20]
+        Channel.objects.filter(manager=manager, tariffs__isnull=False)
+        .distinct()
+        .order_by('name')[:20]
     )
     if not channels:
         return None
@@ -108,7 +105,6 @@ def handle_free_callback(
     data: str,
     cq_id: Optional[str] = None,
 ) -> bool:
-    """Handle free:list | free:ch:ID | free:t:ID. Return True if matched."""
     if not data.startswith('free:'):
         return False
 
