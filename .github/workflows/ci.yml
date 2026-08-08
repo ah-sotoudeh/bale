@@ -41,11 +41,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-mysql.txt
 
       - name: Configure env
         run: |
           echo "DJANGO_SECRET_KEY=ci-secret" >> $GITHUB_ENV
+          echo "USE_SQLITE=0" >> $GITHUB_ENV
           echo "DB_NAME=bale_db" >> $GITHUB_ENV
           echo "DB_USER=bale_user" >> $GITHUB_ENV
           echo "DB_PASSWORD=bale_pass" >> $GITHUB_ENV
@@ -80,7 +81,6 @@ PY
           DJANGO_SETTINGS_MODULE: bale_site.settings
         run: |
           set -e
-          # generate migrations for all apps (noinput so CI is non-interactive)
           python manage.py makemigrations --noinput
           echo "---- current migrations (after makemigrations) ----"
           python manage.py showmigrations
