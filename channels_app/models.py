@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 
 
@@ -20,50 +21,90 @@ class Channel(models.Model):
         return self.name
 
 
+class ChannelGroup(models.Model):
+    """Package of channels sold/booked together (same manager, shared tariffs)."""
+
+    name = models.CharField(max_length=200)
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='channel_groups',
+    )
+    channels = models.ManyToManyField(Channel, related_name='groups', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def channel_count(self) -> int:
+        return self.channels.count()
+
+
 class Tariff(models.Model):
-    """One bookable slot definition on a channel.
+    """Bookable slot on a single channel OR on a ChannelGroup package."""
 
-    start_hour makes each tariff a single daily turn (e.g. 10:00, 14:00, 22:00),
-    so capacity/calendar logic stays simple: one active order per (channel, tariff, day).
-    """
-
-    channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name='tariffs')
-    name = models.CharField(max_length=100)  # e.g. "ساعت ۱۰ — ۲۴ ساعته"
+    channel = models.ForeignKey(
+        Channel,
+        on_delete=models.CASCADE,
+        related_name='tariffs',
+        null=True,
+        blank=True,
+    )
+    group = models.ForeignKey(
+        ChannelGroup,
+        on_delete=models.CASCADE,
+        related_name='tariffs',
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=100)
     start_hour = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(23)],
-        help_text='ساعت شروع نوبت در روز (0-23)؛ هر تعرفه = یک نوبت',
+        help_text='ساعت شروع نوبت (0-23)'
     )
     duration_hours = models.IntegerField()
-    price = models.IntegerField(help_text='قیمت به تومان')
+    price = models.IntegerField(help_text='قیمت به تومان (برای کل مجموعه اگر group باشد)')
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=['channel', 'start_hour', 'duration_hours'],
-                name='uniq_channel_slot_hour_duration',
-                condition=models.Q(start_hour__isnull=False),
+            models.CheckConstraint(
+                check=(
+                    models.Q(channel__isnull=False, group__isnull=True)
+                    | models.Q(channel__isnull=True, group__isnull=False)
+                ),
+                name='tariff_channel_xor_group',
             ),
         ]
 
+    def clean(self):
+        if bool(self.channel_id) == bool(self.group_id):
+            raise ValidationError('تعرفه باید دقیقاً به یک کانال یا یک مجموعه وصل باشد.')
+
     def __str__(self):
-        if self.start_hour is not None:
-            return f'{self.channel.name} @ {self.start_hour:02d}:00 ({self.duration_hours}h)'
-        return f'{self.channel.name} - {self.name}'
+        owner = self.group.name if self.group_id else (self.channel.name if self.channel_id else '?')
+        return f'{owner} - {self.name}'
+
+    @property
+    def is_package(self) -> bool:
+        return self.group_id is not None
 
 
 class AvailabilitySlot(models.Model):
-    """Explicit busy/free windows; is_available=False blocks external bookings."""
-
-    channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name='availability')
+    channel = models.ForeignKey(
+        Channel, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
+    )
+    group = models.ForeignKey(
+        ChannelGroup, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
+    )
     tariff = models.ForeignKey(
         Tariff,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name='availability',
-        help_text='اگر خالی باشد برای کل کانال است',
     )
     start = models.DateTimeField()
     end = models.DateTimeField()
@@ -75,4 +116,5 @@ class AvailabilitySlot(models.Model):
 
     def __str__(self):
         flag = 'free' if self.is_available else 'busy'
-        return f'{self.channel.name}: {self.start} - {self.end} ({flag})'
+        label = self.group or self.channel
+        return f'{label}: {self.start} - {self.end} ({flag})'
