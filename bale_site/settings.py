@@ -5,6 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv(BASE_DIR / '.env')
     load_dotenv(BASE_DIR / 'config' / '.env')
 except ImportError:
@@ -13,7 +14,11 @@ except ImportError:
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'replace-me-dev-only')
 DEBUG = os.environ.get('DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',') if os.environ.get('ALLOWED_HOSTS') else ['*']
+ALLOWED_HOSTS = (
+    os.environ.get('ALLOWED_HOSTS', '*').split(',')
+    if os.environ.get('ALLOWED_HOSTS')
+    else ['*']
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -26,6 +31,7 @@ INSTALLED_APPS = [
     'users',
     'channels_app',
     'orders',
+    'wallet',
 ]
 
 MIDDLEWARE = [
@@ -98,6 +104,9 @@ BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
 BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
 REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linktest')
+OPERATOR_BALE_ID = os.environ.get('OPERATOR_BALE_ID', '')
+PLATFORM_FEE_PERCENT = int(os.environ.get('PLATFORM_FEE_PERCENT', '14'))
+MIN_PAYOUT_TOMAN = int(os.environ.get('MIN_PAYOUT_TOMAN', '100000'))
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
