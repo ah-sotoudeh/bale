@@ -126,8 +126,8 @@ def process_manager_response(
 
     paid_cmd = f'/paid_{order.id}'
     pay_kb = bale_client.payment_done_keyboard(order.id)
-
     amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount} تومان'
+
     if payment.get('payment_url'):
         bale_client.send_message(
             order.customer.bale_user_id,
@@ -158,45 +158,29 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
     except Order.DoesNotExist:
         return {'ok': False, 'error': 'order_not_found'}
 
-    order.status = 'completed'
-    order.save()
+    order.status = 'paid'
+    order.save(update_fields=['status'])
 
-    for item in order.items.all():
-        send_time = item.manager_edited_start if item.manager_edited_start else item.requested_start
-        send_iso = send_time.isoformat() if send_time else ''
-        channel_target = item.channel.link or str(item.channel.id)
-
-        if bale_client.bot_is_channel_admin(channel_target):
-            if item.banner_message_id:
-                resp = bale_client.schedule_message(
-                    channel_target,
-                    {'forward_message_id': item.banner_message_id},
-                    send_iso,
-                )
-                if resp.get('error') and item.manager and item.manager.bale_user_id:
-                    bale_client.schedule_message(
-                        item.manager.bale_user_id,
-                        {'forward_message_id': item.banner_message_id},
-                        send_iso,
-                    )
-                else:
-                    item.banner_forwarded = True
-                    item.save()
-        else:
-            if item.manager and item.manager.bale_user_id and item.banner_message_id:
-                bale_client.schedule_message(
-                    item.manager.bale_user_id,
-                    {'forward_message_id': item.banner_message_id},
-                    send_iso,
-                )
-                item.banner_forwarded = True
-                item.save()
+    for item in order.items.filter(manager_status='approved'):
+        item.execution_status = 'paid'
+        item.save(update_fields=['execution_status'])
+        # Notify manager: wait for publish reminder near slot time
+        if item.manager and item.manager.bale_user_id:
+            target = item.channel.name if item.channel else '?'
+            if item.tariff_id and item.tariff.group_id:
+                target = item.tariff.group.name
+            bale_client.send_message(
+                item.manager.bale_user_id,
+                f'💳 سفارش پرداخت شد.\n'
+                f'آیتم #{item.id} — {target}\n'
+                f'زمان انتشار: {item.effective_start}\n'
+                f'۲ ساعت قبل یادآوری + دکمه «منتشر شد» می‌آید.',
+            )
 
     if order.customer.bale_user_id:
         bale_client.send_message(
             order.customer.bale_user_id,
-            f'سفارش شما #{order.id} با موفقیت ثبت و پرداخت شد. '
-            f'تبلیغات در زمان‌های مشخص منتشر خواهد شد.',
+            f'سفارش #{order.id} پرداخت شد. در زمان مقرر منتشر می‌شود.',
         )
 
     return {'ok': True, 'order_id': order.id, 'order_status': order.status}
@@ -222,19 +206,13 @@ def notify_managers_for_order(order: Order) -> None:
         if item.tariff and item.tariff.group_id:
             target = f'مجموعه «{item.tariff.group.name}»'
 
-        approve_cmd = f'/approve_{item.id}'
-        reject_cmd = f'/reject_{item.id}'
         kb = bale_client.manager_decision_keyboard(item.id)
-
-        resp = bale_client.send_message(
+        bale_client.send_message(
             manager_id,
             f'📢 درخواست تبلیغ جدید\n'
             f'هدف: {target}\n'
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
             f'مبلغ: {item.price} تومان\n'
-            f'آیتم: #{item.id} | سفارش: #{order.id}\n\n'
-            f'از دکمه‌ها استفاده کنید یا:\n{approve_cmd}\n{reject_cmd}',
+            f'آیتم: #{item.id} | سفارش: #{order.id}',
             reply_markup=kb,
         )
-        if resp.get('error'):
-            logger.warning('notify manager failed: %s', resp)
