@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling Bale bot: manager + customer cart flow."""
+"""Long-polling Bale bot: manager + customer + wallet + execution."""
 from __future__ import annotations
 
 import logging
@@ -7,7 +7,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,13 +31,26 @@ django.setup()
 
 from django.utils import timezone  # noqa: E402
 
-from bot_flow import handlers as flow  # noqa: E402
 from bot_flow import customer as cust  # noqa: E402
+from bot_flow import handlers as flow  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from orders.cart import expire_timed_out_items, process_manager_item  # noqa: E402
+from orders.execution import (  # noqa: E402
+    customer_confirm_execution,
+    escalate_unconfirmed,
+    mark_published,
+    operator_resolve,
+    send_publish_reminders,
+)
 from orders.services import process_payment_paid  # noqa: E402
-from users.models import BotSession  # noqa: E402
+from users.models import BotSession, User  # noqa: E402
+from wallet.services import (  # noqa: E402
+    available_balance,
+    build_payout_batch,
+    is_operator,
+    mark_batch_paid,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,15 +60,9 @@ logging.basicConfig(
 log = logging.getLogger('poll_bot')
 
 _INVISIBLE = re.compile(r'[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]')
-CMD_APPROVE = re.compile(
-    r'^/approve(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I
-)
-CMD_REJECT = re.compile(
-    r'^/reject(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I
-)
-CMD_PAID = re.compile(
-    r'^/paid(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I
-)
+CMD_APPROVE = re.compile(r'^/approve(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
+CMD_REJECT = re.compile(r'^/reject(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
+CMD_PAID = re.compile(r'^/paid(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
 
 
 def normalize_text(text: str) -> str:
@@ -121,9 +128,47 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             r = process_payment_paid(int(sid))
             bc.send_message(
                 chat_id,
-                f'💳 {r}' if r.get('ok') else f'❌ {r.get("error")}',
+                '💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
             )
         return True
+
+    # operator commands
+    if text.startswith('/payout_file') and is_operator(bale_uid):
+        user = User.objects.filter(bale_user_id=bale_uid).first()
+        if not user:
+            bc.send_message(chat_id, 'کاربر یافت نشد')
+            return True
+        r = build_payout_batch(user)
+        if not r.get('ok'):
+            bc.send_message(chat_id, f'خطا: {r.get("error")}')
+            return True
+        batch = r['batch']
+        body = r['file_text'] or '(خالی)'
+        # Bale message limit — chunk if needed
+        header = f'📁 Batch #{batch.id} — {r["count"]} درخواست\nمبالغ ریال:\n'
+        bc.send_message(chat_id, header + body[:3500])
+        bc.send_message(
+            chat_id,
+            f'پس از واریز بانک: /payout_paid_{batch.id}',
+        )
+        return True
+
+    m = re.match(r'^/payout_paid_(\d+)$', text, re.I)
+    if m and is_operator(bale_uid):
+        r = mark_batch_paid(int(m.group(1)))
+        bc.send_message(
+            chat_id,
+            '✅ پرداخت batch ثبت و به مدیران اعلام شد' if r.get('ok') else f'❌ {r.get("error")}',
+        )
+        return True
+
+    if text in ('/wallet', '/کیف') or text.startswith('/wallet'):
+        user = User.objects.filter(bale_user_id=bale_uid).first()
+        if user:
+            bal = available_balance(user)
+            bc.send_message(chat_id, f'💰 موجودی قابل برداشت: {bal:,} تومان')
+        return True
+
     return False
 
 
@@ -148,6 +193,38 @@ def handle_callback_query(cq: dict) -> None:
     ):
         return
 
+    # execution flow
+    if data.startswith('published:'):
+        item_id = int(data.split(':')[1])
+        r = mark_published(item_id, bale_uid)
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text='ثبت شد' if r.get('ok') else 'خطا')
+        bc.send_message(
+            chat_id,
+            'منتشر شد ثبت گردید؛ منتظر تأیید مشتری.'
+            if r.get('ok')
+            else f'خطا: {r.get("error")}',
+        )
+        return
+    if data.startswith('execok:') or data.startswith('execno:'):
+        item_id = int(data.split(':')[1])
+        ok = data.startswith('execok:')
+        r = customer_confirm_execution(item_id, bale_uid, ok)
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text='OK')
+        bc.send_message(chat_id, 'ثبت شد.' if r.get('ok') else f'خطا: {r.get("error")}')
+        return
+    if data.startswith('opok:') or data.startswith('opno:'):
+        item_id = int(data.split(':')[1])
+        r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text='OK')
+        bc.send_message(
+            chat_id,
+            f'نتیجه: {r.get("status")}' if r.get('ok') else f'خطا: {r.get("error")}',
+        )
+        return
+
     if data.startswith('approve:'):
         text = run_mgr('approve', bale_uid, int(data.split(':')[1]))
         if cq_id:
@@ -163,7 +240,7 @@ def handle_callback_query(cq: dict) -> None:
     if data.startswith('editask:'):
         item_id = int(data.split(':')[1])
         if cq_id:
-            bc.answer_callback_query(str(cq_id), text='تاریخ را بفرستید')
+            bc.answer_callback_query(str(cq_id), text='تاریخ')
         sess, _ = BotSession.objects.get_or_create(
             bale_user_id=bale_uid, defaults={'state': 'idle', 'data': {}}
         )
@@ -172,11 +249,7 @@ def handle_callback_query(cq: dict) -> None:
         sess.state = 'mgr_edit_date'
         sess.data = d
         sess.save()
-        bc.send_message(
-            chat_id,
-            f'برای آیتم #{item_id} تاریخ جدید را بفرستید:\n'
-            'فرمت: 1405-05-20 یا 2026-08-10',
-        )
+        bc.send_message(chat_id, f'تاریخ جدید آیتم #{item_id}: 2026-08-15')
         return
     if data.startswith('paid:'):
         r = process_payment_paid(int(data.split(':')[1]))
@@ -184,7 +257,7 @@ def handle_callback_query(cq: dict) -> None:
             bc.answer_callback_query(str(cq_id), text='OK')
         bc.send_message(
             chat_id,
-            f'💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
+            '💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
         )
         return
 
@@ -193,7 +266,6 @@ def handle_callback_query(cq: dict) -> None:
 
 
 def _parse_manager_date(text: str):
-    """Accept YYYY-MM-DD or Jalali-ish YYYY-MM-DD numbers."""
     text = text.strip().replace('/', '-')
     parts = text.split('-')
     if len(parts) != 3:
@@ -202,15 +274,12 @@ def _parse_manager_date(text: str):
         y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
     except ValueError:
         return None
-    # if year looks Jalali (>1500 and <1600-ish modern: 1400+)
     if 1300 <= y <= 1500:
         try:
-            import jdatetime  # optional
+            import jdatetime
 
-            g = jdatetime.date(y, m, d).togregorian()
-            day = g
+            day = jdatetime.date(y, m, d).togregorian()
         except Exception:
-            # crude fallback: treat as gregorian if conversion fails
             try:
                 day = datetime(y, m, d).date()
             except ValueError:
@@ -251,14 +320,13 @@ def handle_update(update: dict) -> None:
         flow.handle_start(chat_id, bale_uid, username)
         return
 
-    # manager edit date
     try:
         sess = BotSession.objects.filter(bale_user_id=bale_uid).first()
         if sess and sess.state == 'mgr_edit_date' and norm:
             item_id = (sess.data or {}).get('edit_item_id')
             start = _parse_manager_date(norm)
             if not start or not item_id:
-                bc.send_message(chat_id, 'تاریخ نامعتبر. مثال: 2026-08-15')
+                bc.send_message(chat_id, 'تاریخ نامعتبر.')
                 return
             text_out = run_mgr('edit', bale_uid, int(item_id), new_start=start)
             sess.state = 'idle'
@@ -269,7 +337,6 @@ def handle_update(update: dict) -> None:
     except Exception:
         log.exception('mgr edit date')
 
-    # media banner for customer
     if msg.get('photo') or msg.get('video') or msg.get('document'):
         try:
             if cust.handle_banner_message(chat_id, bale_uid, msg):
@@ -289,22 +356,32 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start نقش\n/free روز خالی مدیر\nسبد مشتری بعد از بنر',
+            '/start نقش\n/free روز خالی\n/wallet موجودی\n'
+            'اپراتور: /payout_file /payout_paid_ID',
         )
 
 
 def run_polling(timeout: int = 25) -> None:
     offset = None
-    last_expire = 0.0
+    last_jobs = 0.0
     log.info('Polling…')
     while True:
         try:
             now = time.time()
-            if now - last_expire > 60:
-                n = expire_timed_out_items()
-                if n:
-                    log.info('expired %s items', n)
-                last_expire = now
+            if now - last_jobs > 60:
+                try:
+                    n = expire_timed_out_items()
+                    if n:
+                        log.info('expired %s items', n)
+                    n2 = send_publish_reminders()
+                    if n2:
+                        log.info('reminders %s', n2)
+                    n3 = escalate_unconfirmed()
+                    if n3:
+                        log.info('escalated %s', n3)
+                except Exception:
+                    log.exception('background jobs')
+                last_jobs = now
 
             data = bc.get_updates(offset=offset, limit=50, timeout=timeout)
             if data.get('error'):
