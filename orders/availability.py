@@ -10,8 +10,15 @@ from django.utils import timezone
 from channels_app.models import AvailabilitySlot, Channel, Tariff
 from orders.models import OrderItem
 
-ACTIVE_ORDER_STATUSES = ('pending', 'waiting_managers', 'waiting_payment', 'completed')
-ACTIVE_ITEM_STATUSES = ('pending', 'approved', 'edited')
+ACTIVE_ORDER_STATUSES = (
+    'draft',
+    'pending',
+    'waiting_managers',
+    'waiting_customer_confirm',
+    'waiting_payment',
+    'completed',
+)
+ACTIVE_ITEM_STATUSES = ('cart', 'pending', 'approved', 'edited')
 
 
 def effective_window(item: OrderItem) -> Tuple[datetime, datetime]:
@@ -43,11 +50,6 @@ def has_slot_conflict(
     exclude_item_id: Optional[int] = None,
     channel: Optional[Channel] = None,
 ) -> bool:
-    """True if another active booking or external busy overlaps this tariff slot.
-
-    Package tariffs: conflict is per tariff (whole group is one unit).
-    Single-channel: same tariff on that channel.
-    """
     qs = OrderItem.objects.select_related('tariff', 'order').filter(
         tariff=tariff,
         manager_status__in=ACTIVE_ITEM_STATUSES,
