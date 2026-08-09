@@ -4,12 +4,12 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, time as dtime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.utils import timezone
 
-from channels_app.models import Channel, Tariff
+from channels_app.models import Tariff
 from integrations import bale_client as bc
 from orders.availability import has_slot_conflict
 from orders.models import ManagerResponse, Order, OrderItem
@@ -58,9 +58,6 @@ def add_to_cart(
         return {'ok': False, 'error': 'slot_conflict'}
 
     order = get_or_create_draft(customer)
-    if order.banner_message_id:
-        # keep banner
-        pass
 
     item = OrderItem.objects.create(
         order=order,
@@ -77,7 +74,11 @@ def add_to_cart(
 
 
 def cart_summary(order: Order) -> str:
-    items = list(order.items.filter(manager_status='cart').select_related('tariff', 'channel', 'tariff__group'))
+    items = list(
+        order.items.filter(manager_status='cart').select_related(
+            'tariff', 'channel', 'tariff__group'
+        )
+    )
     if not items:
         return 'سبد خرید خالی است.'
     lines = ['🛒 سبد خرید:']
@@ -100,7 +101,9 @@ def set_banner(order: Order, from_chat_id: str, message_id: str, caption: str = 
 
 @transaction.atomic
 def checkout(order: Order) -> Dict[str, Any]:
-    items = list(order.items.filter(manager_status='cart').select_related('tariff', 'channel', 'manager'))
+    items = list(
+        order.items.filter(manager_status='cart').select_related('tariff', 'channel', 'manager')
+    )
     if not items:
         return {'ok': False, 'error': 'empty_cart'}
     if not order.banner_message_id:
@@ -108,7 +111,11 @@ def checkout(order: Order) -> Dict[str, Any]:
 
     for it in items:
         if has_slot_conflict(
-            it.tariff, it.requested_start, it.requested_end, channel=it.channel, exclude_item_id=it.id
+            it.tariff,
+            it.requested_start,
+            it.requested_end,
+            channel=it.channel,
+            exclude_item_id=it.id,
         ):
             return {'ok': False, 'error': 'slot_conflict', 'item_id': it.id}
 
@@ -122,7 +129,6 @@ def checkout(order: Order) -> Dict[str, Any]:
         it.manager_status = 'pending'
         it.save(update_fields=['manager_status'])
 
-    # notify managers
     for it in items:
         _notify_manager(order, it)
 
@@ -189,8 +195,11 @@ def process_manager_item(
     order = item.order
     if action == 'approve':
         if has_slot_conflict(
-            item.tariff, item.requested_start, item.requested_end,
-            channel=item.channel, exclude_item_id=item.id,
+            item.tariff,
+            item.requested_start,
+            item.requested_end,
+            channel=item.channel,
+            exclude_item_id=item.id,
         ):
             return {'ok': False, 'error': 'slot_conflict'}
         item.manager_status = 'approved'
@@ -212,7 +221,9 @@ def process_manager_item(
         item.manager_status = 'edited'
         item.save()
         ManagerResponse.objects.create(
-            order_item=item, manager=manager, action='edit',
+            order_item=item,
+            manager=manager,
+            action='edit',
             payload={'new_start': new_start.isoformat()},
         )
         _ask_customer_confirm(order, item)
@@ -249,7 +260,9 @@ def _ask_customer_confirm(order: Order, item: OrderItem) -> None:
 
 def customer_confirm_edit(item_id: int, customer_bale_id: str, accept: bool) -> Dict[str, Any]:
     try:
-        item = OrderItem.objects.select_related('order', 'order__customer', 'tariff').get(id=item_id)
+        item = OrderItem.objects.select_related('order', 'order__customer', 'tariff').get(
+            id=item_id
+        )
     except OrderItem.DoesNotExist:
         return {'ok': False, 'error': 'item_not_found'}
     if str(item.order.customer.bale_user_id) != str(customer_bale_id):
@@ -274,28 +287,35 @@ def customer_confirm_edit(item_id: int, customer_bale_id: str, accept: bool) -> 
 
 def expire_timed_out_items() -> int:
     """Mark pending items past deadline as expired. Returns count."""
-    now = timezone.now()
-    qs = OrderItem.objects.filter(
-        manager_status='pending',
-        order__status__in=('waiting_managers', 'waiting_customer_confirm'),
-        order__managers_deadline__lt=now,
-    )
-    n = 0
-    order_ids = set()
-    for it in qs.select_related('order'):
-        it.manager_status = 'expired'
-        it.save(update_fields=['manager_status'])
-        order_ids.add(it.order_id)
-        n += 1
-    for oid in order_ids:
-        maybe_finalize_order(oid)
-    return n
+    try:
+        now = timezone.now()
+        qs = OrderItem.objects.filter(
+            manager_status='pending',
+            order__status__in=('waiting_managers', 'waiting_customer_confirm'),
+            order__managers_deadline__lt=now,
+        )
+        n = 0
+        order_ids = set()
+        for it in qs.select_related('order'):
+            it.manager_status = 'expired'
+            it.save(update_fields=['manager_status'])
+            order_ids.add(it.order_id)
+            n += 1
+        for oid in order_ids:
+            maybe_finalize_order(oid)
+        return n
+    except OperationalError as e:
+        logger.warning(
+            'expire_timed_out_items skipped (DB schema outdated?). Run migrate. %s', e
+        )
+        return 0
 
 
 def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
-    """When no pending/edited left, notify customer once and request payment if needed."""
     try:
-        order = Order.objects.prefetch_related('items__tariff', 'items__channel').get(id=order_id)
+        order = Order.objects.prefetch_related('items__tariff', 'items__channel').get(
+            id=order_id
+        )
     except Order.DoesNotExist:
         return {'ok': False, 'error': 'order_not_found'}
 
@@ -308,7 +328,11 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
         return {'ok': True, 'pending_left': len(still), 'order_status': order.status}
 
     approved = [i for i in items if i.manager_status == 'approved']
-    rejected = [i for i in items if i.manager_status in ('rejected', 'expired', 'customer_declined')]
+    rejected = [
+        i
+        for i in items
+        if i.manager_status in ('rejected', 'expired', 'customer_declined')
+    ]
 
     lines = [f'📋 نتیجه سفارش #{order.id}:']
     for i in approved:
@@ -318,9 +342,11 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     for i in rejected:
         t = i.tariff
         owner = t.group.name if t.group_id else (i.channel.name if i.channel else '?')
-        st = {'rejected': 'رد مدیر', 'expired': 'مهلت تمام', 'customer_declined': 'رد زمان'}.get(
-            i.manager_status, i.manager_status
-        )
+        st = {
+            'rejected': 'رد مدیر',
+            'expired': 'مهلت تمام',
+            'customer_declined': 'رد زمان',
+        }.get(i.manager_status, i.manager_status)
         lines.append(f'❌ {owner} — {t.name} ({st})')
 
     cust = order.customer.bale_user_id
@@ -343,8 +369,6 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     kb = bc.payment_done_keyboard(order.id)
     if cust:
         bc.send_message(cust, '\n'.join(lines), reply_markup=kb)
-        from orders.services import process_payment_paid  # noqa: F401 — payment via callback
-
         payment = bc.create_payment_request(
             chat_id=cust,
             amount=total,
