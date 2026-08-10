@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling Bale bot: manager + customer + Link Yar publish jobs."""
+"""Long-polling: لینک‌سازه (Bot API) + لینک‌یار (aiobale user)."""
 from __future__ import annotations
 
 import logging
@@ -76,26 +76,32 @@ def _cmd_id(m: re.Match) -> str | None:
 def ensure_token() -> None:
     token = _token()
     if not token:
-        log.error('BALE_BOT_TOKEN missing')
+        log.error('BALE_BOT_TOKEN missing (لینک‌سازه)')
         sys.exit(1)
-    log.info('Conversation bot token length=%d', len(token))
-    ly_tok = ly.linkyar_token()
-    log.info('Link Yar token length=%d (same as bot if LINKYAR_BOT_TOKEN empty)', len(ly_tok or ''))
-    me = ly.get_me()
-    if me.get('ok') or me.get('result'):
-        r = me.get('result') or me
-        log.info('Link Yar getMe → id=%s @%s', r.get('id'), r.get('username'))
+    log.info('لینک‌سازه bot token length=%d', len(token))
+
+    ut = ly.user_token()
+    if not ut:
+        log.warning(
+            'BALE_TOKEN missing — لینک‌یار (کاربر) وصل نیست. '
+            'ارسال خودکار کانال کار نمی‌کند تا JWT سشن را در .env بگذارید.'
+        )
     else:
-        log.warning('Link Yar getMe failed: %s', me)
+        log.info('لینک‌یار user token length=%d', len(ut))
+        me = ly.get_me()
+        if me.get('ok'):
+            log.info('لینک‌یار get_me OK user_id=%s', me.get('user_id'))
+        else:
+            log.warning('لینک‌یار get_me failed: %s', me)
 
 
 def prepare_polling() -> None:
     me = bc.get_me()
     if me.get('error') or not me.get('ok', True):
-        log.error('getMe failed: %s', me)
+        log.error('لینک‌سازه getMe failed: %s', me)
         sys.exit(1)
     result = me.get('result') or me
-    log.info('Bot OK → id=%s @%s', result.get('id'), result.get('username'))
+    log.info('لینک‌سازه OK → id=%s @%s', result.get('id'), result.get('username'))
     info = bc.get_webhook_info()
     url = (info.get('result') or {}).get('url') or ''
     if url:
@@ -340,19 +346,20 @@ def run_background_jobs() -> None:
         if n:
             log.info('expired manager timeouts: %s', n)
 
-        pub = publish_due_items()
-        if pub.get('published') or pub.get('failed_channels'):
-            log.info('publish job: %s', pub)
+        if ly.user_token():
+            pub = publish_due_items()
+            if pub.get('published') or pub.get('failed_channels'):
+                log.info('publish job: %s', pub)
 
-        deleted = delete_expired_posts()
-        if deleted:
-            log.info('deleted channel posts: %s', deleted)
+            deleted = delete_expired_posts()
+            if deleted:
+                log.info('deleted channel posts: %s', deleted)
 
-        today = timezone.localdate()
-        if _last_daily_audit_date != today:
-            audit = daily_admin_audit()
-            log.info('daily admin audit: %s', audit)
-            _last_daily_audit_date = today
+            today = timezone.localdate()
+            if _last_daily_audit_date != today:
+                audit = daily_admin_audit()
+                log.info('daily admin audit: %s', audit)
+                _last_daily_audit_date = today
     except Exception:
         log.exception('background jobs')
 
