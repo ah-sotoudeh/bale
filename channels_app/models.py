@@ -15,6 +15,9 @@ class Channel(models.Model):
         blank=True,
         related_name='channels',
     )
+    # Link Yar (bot) is admin — required for auto publish
+    linkyar_is_admin = models.BooleanField(default=False)
+    linkyar_checked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -63,10 +66,14 @@ class Tariff(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(23)],
-        help_text='ساعت شروع نوبت (0-23)'
+        help_text='ساعت شروع نوبت (0-23)',
     )
     duration_hours = models.IntegerField()
     price = models.IntegerField(help_text='قیمت به تومان (برای کل مجموعه اگر group باشد)')
+    is_active = models.BooleanField(
+        default=True,
+        help_text='اگر لینک‌یار ادمین نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
+    )
 
     class Meta:
         constraints = [
