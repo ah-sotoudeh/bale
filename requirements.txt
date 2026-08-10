@@ -3,6 +3,10 @@ Django==4.2
 djangorestframework==3.14.0
 python-dotenv==1.0.0
 requests==2.31.0
+aiohttp>=3.9.0
+
+# لینک‌یار (حساب کاربری) — اتصال به API داخلی بله
+aiobale>=0.1.5
 
 # Optional: MySQL driver for production/CI only
 # Install separately when you have MySQL + build tools:
