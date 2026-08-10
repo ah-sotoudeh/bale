@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling Bale bot: manager + customer + wallet + execution."""
+"""Long-polling Bale bot: manager + customer + Link Yar publish jobs."""
 from __future__ import annotations
 
 import logging
@@ -35,14 +35,9 @@ from bot_flow import customer as cust  # noqa: E402
 from bot_flow import handlers as flow  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
+from integrations import linkyar_client as ly  # noqa: E402
 from orders.cart import expire_timed_out_items, process_manager_item  # noqa: E402
-from orders.execution import (  # noqa: E402
-    customer_confirm_execution,
-    escalate_unconfirmed,
-    mark_published,
-    operator_resolve,
-    send_publish_reminders,
-)
+from orders.publish import daily_admin_audit, delete_expired_posts, publish_due_items  # noqa: E402
 from orders.services import process_payment_paid  # noqa: E402
 from users.models import BotSession, User  # noqa: E402
 from wallet.services import (  # noqa: E402
@@ -64,6 +59,8 @@ CMD_APPROVE = re.compile(r'^/approve(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', 
 CMD_REJECT = re.compile(r'^/reject(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
 CMD_PAID = re.compile(r'^/paid(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
 
+_last_daily_audit_date = None
+
 
 def normalize_text(text: str) -> str:
     if not text:
@@ -81,7 +78,15 @@ def ensure_token() -> None:
     if not token:
         log.error('BALE_BOT_TOKEN missing')
         sys.exit(1)
-    log.info('Token loaded (length=%d)', len(token))
+    log.info('Conversation bot token length=%d', len(token))
+    ly_tok = ly.linkyar_token()
+    log.info('Link Yar token length=%d (same as bot if LINKYAR_BOT_TOKEN empty)', len(ly_tok or ''))
+    me = ly.get_me()
+    if me.get('ok') or me.get('result'):
+        r = me.get('result') or me
+        log.info('Link Yar getMe → id=%s @%s', r.get('id'), r.get('username'))
+    else:
+        log.warning('Link Yar getMe failed: %s', me)
 
 
 def prepare_polling() -> None:
@@ -132,7 +137,6 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             )
         return True
 
-    # operator commands
     if text.startswith('/payout_file') and is_operator(bale_uid):
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if not user:
@@ -144,13 +148,9 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             return True
         batch = r['batch']
         body = r['file_text'] or '(خالی)'
-        # Bale message limit — chunk if needed
         header = f'📁 Batch #{batch.id} — {r["count"]} درخواست\nمبالغ ریال:\n'
         bc.send_message(chat_id, header + body[:3500])
-        bc.send_message(
-            chat_id,
-            f'پس از واریز بانک: /payout_paid_{batch.id}',
-        )
+        bc.send_message(chat_id, f'پس از واریز بانک: /payout_paid_{batch.id}')
         return True
 
     m = re.match(r'^/payout_paid_(\d+)$', text, re.I)
@@ -158,7 +158,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         r = mark_batch_paid(int(m.group(1)))
         bc.send_message(
             chat_id,
-            '✅ پرداخت batch ثبت و به مدیران اعلام شد' if r.get('ok') else f'❌ {r.get("error")}',
+            '✅ پرداخت batch ثبت شد' if r.get('ok') else f'❌ {r.get("error")}',
         )
         return True
 
@@ -167,6 +167,11 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         if user:
             bal = available_balance(user)
             bc.send_message(chat_id, f'💰 موجودی قابل برداشت: {bal:,} تومان')
+        return True
+
+    if text.startswith('/audit_admin') and is_operator(bale_uid):
+        r = daily_admin_audit()
+        bc.send_message(chat_id, f'چک ادمین: {r}')
         return True
 
     return False
@@ -191,38 +196,6 @@ def handle_callback_query(cq: dict) -> None:
     if flow.try_handle_callback(
         chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
     ):
-        return
-
-    # execution flow
-    if data.startswith('published:'):
-        item_id = int(data.split(':')[1])
-        r = mark_published(item_id, bale_uid)
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='ثبت شد' if r.get('ok') else 'خطا')
-        bc.send_message(
-            chat_id,
-            'منتشر شد ثبت گردید؛ منتظر تأیید مشتری.'
-            if r.get('ok')
-            else f'خطا: {r.get("error")}',
-        )
-        return
-    if data.startswith('execok:') or data.startswith('execno:'):
-        item_id = int(data.split(':')[1])
-        ok = data.startswith('execok:')
-        r = customer_confirm_execution(item_id, bale_uid, ok)
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK')
-        bc.send_message(chat_id, 'ثبت شد.' if r.get('ok') else f'خطا: {r.get("error")}')
-        return
-    if data.startswith('opok:') or data.startswith('opno:'):
-        item_id = int(data.split(':')[1])
-        r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK')
-        bc.send_message(
-            chat_id,
-            f'نتیجه: {r.get("status")}' if r.get('ok') else f'خطا: {r.get("error")}',
-        )
         return
 
     if data.startswith('approve:'):
@@ -356,9 +329,32 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start نقش\n/free روز خالی\n/wallet موجودی\n'
-            'اپراتور: /payout_file /payout_paid_ID',
+            '/start نقش\n/free روز خالی\n/wallet موجودی',
         )
+
+
+def run_background_jobs() -> None:
+    global _last_daily_audit_date
+    try:
+        n = expire_timed_out_items()
+        if n:
+            log.info('expired manager timeouts: %s', n)
+
+        pub = publish_due_items()
+        if pub.get('published') or pub.get('failed_channels'):
+            log.info('publish job: %s', pub)
+
+        deleted = delete_expired_posts()
+        if deleted:
+            log.info('deleted channel posts: %s', deleted)
+
+        today = timezone.localdate()
+        if _last_daily_audit_date != today:
+            audit = daily_admin_audit()
+            log.info('daily admin audit: %s', audit)
+            _last_daily_audit_date = today
+    except Exception:
+        log.exception('background jobs')
 
 
 def run_polling(timeout: int = 25) -> None:
@@ -369,18 +365,7 @@ def run_polling(timeout: int = 25) -> None:
         try:
             now = time.time()
             if now - last_jobs > 60:
-                try:
-                    n = expire_timed_out_items()
-                    if n:
-                        log.info('expired %s items', n)
-                    n2 = send_publish_reminders()
-                    if n2:
-                        log.info('reminders %s', n2)
-                    n3 = escalate_unconfirmed()
-                    if n3:
-                        log.info('escalated %s', n3)
-                except Exception:
-                    log.exception('background jobs')
+                run_background_jobs()
                 last_jobs = now
 
             data = bc.get_updates(offset=offset, limit=50, timeout=timeout)
