@@ -100,10 +100,12 @@ STATIC_URL = '/static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# لینک‌سازه = بازوی گفتگو
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
-# لینک‌یار: اگر خالی باشد همان BALE_BOT_TOKEN
-LINKYAR_BOT_TOKEN = os.environ.get('LINKYAR_BOT_TOKEN', '') or BALE_BOT_TOKEN
+# لینک‌یار = کاربر شخصی (JWT سشن web.bale.ai) — همان BALE_TOKEN در bale-ai
+BALE_TOKEN = os.environ.get('BALE_TOKEN', '') or os.environ.get('LINKYAR_TOKEN', '')
 LINKYAR_USERNAME = os.environ.get('LINKYAR_USERNAME', '@linkyar')
+
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
 BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
 REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linktest')
