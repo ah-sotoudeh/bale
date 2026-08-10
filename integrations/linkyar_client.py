@@ -1,9 +1,7 @@
-"""لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN (نه Bot API).
+"""لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN.
 
-بدون نقل‌قول:
-- Bot API: copyMessage (فقط بازو مثل لینک‌ساز)
-- aiobale کاربر: forward همیشه ارجاع دارد؛ بدون نقل‌قول = send_* با
-  DocumentMessage و use_own_content=True (ارسال مجدد محتوا، نه ForwardMessages)
+ارسال بدون نقل‌قول: SendMessage / send_document(use_own_content=True)
+نه ForwardMessages.
 """
 from __future__ import annotations
 
@@ -84,14 +82,11 @@ def _inject_token(client, token: str) -> None:
 
 
 def _run(coro):
-    """Always use a fresh event loop (Python 3.12+ MainThread has none by default)."""
-
     def _runner():
         return asyncio.run(coro)
 
     try:
         asyncio.get_running_loop()
-        # already inside async → run in thread
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -105,10 +100,9 @@ async def _with_client(async_fn):
 
     token = user_token()
     if not token or token == 'your_access_token_here':
-        return {'ok': False, 'error': 'BALE_TOKEN missing (user session JWT for Link Yar)'}
+        return {'ok': False, 'error': 'BALE_TOKEN missing'}
 
-    session_path = str(_ROOT / 'linkyar_session')
-    client = Client(session_file=session_path)
+    client = Client(session_file=str(_ROOT / 'linkyar_session'))
     try:
         _inject_token(client, token)
     except Exception as e:
@@ -127,6 +121,74 @@ async def _with_client(async_fn):
             pass
 
 
+async def _search_contact_raw(client, uname: str) -> Dict[str, Any]:
+    from aiobale.methods.user.search_contact import SearchContact
+    from aiobale.utils import clean_grpc
+    from aiobale.utils.grpc_post import add_header
+    import aiohttp
+
+    session = client.session
+    if not session.session or session.session.closed:
+        session.session = aiohttp.ClientSession()
+    method = SearchContact(request=uname.lstrip('@'))
+    headers = {
+        'User-Agent': session.user_agent,
+        'Origin': 'https://web.bale.ai',
+        'content-type': 'application/grpc-web+proto',
+        **{k[0].upper() + k[1:]: v for k, v in session._get_meta().items()},
+        **session._build_headers(client.token),
+    }
+    url = f'{session.post_url}/{method.__service__}/{method.__method__}'
+    data = method.model_dump(by_alias=True, exclude_none=True)
+    payload = add_header(session.encoder(data))
+    req = await session.session.post(url=url, headers=headers, data=payload)
+    content = await req.read()
+    if req.headers.get('grpc-message'):
+        return {'ok': False, 'error': req.headers.get('grpc-message')}
+    raw = session.decoder(clean_grpc(content))
+    group = (raw or {}).get('5') or {}
+    if group.get('1'):
+        return {
+            'ok': True,
+            'peer_id': int(group['1']),
+            'access_hash': int(group.get('2') or 0),
+            'source': 'SearchContact',
+            'raw_group': group,
+        }
+    return {'ok': False, 'error': 'channel_not_found', 'raw': raw}
+
+
+async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
+    """همیشه ترجیح با SearchContact تا access_hash داشته باشیم."""
+    ref = str(channel_ref).strip()
+    if ref.lstrip('-').isdigit():
+        # بدون hash — فقط id؛ ممکن است send fail شود
+        return {'ok': True, 'peer_id': int(ref), 'access_hash': None, 'source': 'numeric'}
+
+    uname = ref.lstrip('@')
+    # 1) SearchContact (مثل bale-ai) — hash مهم است
+    sc = await _search_contact_raw(client, uname)
+    if sc.get('ok'):
+        return sc
+
+    # 2) search_username
+    try:
+        resp = await client.search_username(uname)
+        g = getattr(resp, 'group', None)
+        if g is not None and getattr(g, 'id', None):
+            return {
+                'ok': True,
+                'peer_id': int(g.id),
+                'access_hash': int(getattr(g, 'access_hash', 0) or 0) or None,
+                'title': getattr(g, 'title', '') or '',
+                'source': 'search_username',
+            }
+    except Exception as e:
+        logger.info('search_username: %s', e)
+
+    return sc if sc else {'ok': False, 'error': 'resolve_failed'}
+
+
 def get_me() -> Dict[str, Any]:
     async def _fn(client):
         me = await client.get_me()
@@ -136,68 +198,6 @@ def get_me() -> Dict[str, Any]:
     return _run(_with_client(_fn))
 
 
-async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
-    ref = str(channel_ref).strip()
-    if ref.lstrip('-').isdigit():
-        return {'ok': True, 'peer_id': int(ref), 'access_hash': None}
-
-    uname = ref.lstrip('@')
-    try:
-        resp = await client.search_username(uname)
-        g = getattr(resp, 'group', None)
-        if g is not None and getattr(g, 'id', None):
-            return {
-                'ok': True,
-                'peer_id': int(g.id),
-                'access_hash': getattr(g, 'access_hash', None),
-                'title': getattr(g, 'title', '') or '',
-            }
-        # sometimes result structure differs
-        for attr in ('peer', 'user', 'contact'):
-            obj = getattr(resp, attr, None)
-            if obj is not None and getattr(obj, 'id', None):
-                return {'ok': True, 'peer_id': int(obj.id), 'access_hash': getattr(obj, 'access_hash', None)}
-    except Exception as e:
-        logger.info('search_username: %s', e)
-
-    try:
-        from aiobale.methods.user.search_contact import SearchContact
-        from aiobale.utils import clean_grpc
-        from aiobale.utils.grpc_post import add_header
-        import aiohttp
-
-        session = client.session
-        if not session.session or session.session.closed:
-            session.session = aiohttp.ClientSession()
-        method = SearchContact(request=uname)
-        headers = {
-            'User-Agent': session.user_agent,
-            'Origin': 'https://web.bale.ai',
-            'content-type': 'application/grpc-web+proto',
-            **{k[0].upper() + k[1:]: v for k, v in session._get_meta().items()},
-            **session._build_headers(client.token),
-        }
-        url = f'{session.post_url}/{method.__service__}/{method.__method__}'
-        data = method.model_dump(by_alias=True, exclude_none=True)
-        payload = add_header(session.encoder(data))
-        req = await session.session.post(url=url, headers=headers, data=payload)
-        content = await req.read()
-        if req.headers.get('grpc-message'):
-            return {'ok': False, 'error': req.headers.get('grpc-message')}
-        raw = session.decoder(clean_grpc(content))
-        group = (raw or {}).get('5') or {}
-        if group.get('1'):
-            return {
-                'ok': True,
-                'peer_id': int(group['1']),
-                'access_hash': int(group.get('2') or 0),
-                'raw_keys': list((raw or {}).keys()),
-            }
-        return {'ok': False, 'error': 'channel_not_found', 'raw': raw}
-    except Exception as e:
-        return {'ok': False, 'error': str(e)}
-
-
 def resolve_channel(username: str) -> Dict[str, Any]:
     async def _fn(client):
         return await _resolve_peer(client, username)
@@ -205,77 +205,154 @@ def resolve_channel(username: str) -> Dict[str, Any]:
     return _run(_with_client(_fn))
 
 
+def diagnose_channel(channel_ref: str) -> Dict[str, Any]:
+    """resolve + join + permissions — برای دیباگ InvalidArgument."""
+
+    async def _fn(client):
+        out: Dict[str, Any] = {'user_id': client.id}
+        resolved = await _resolve_peer(client, channel_ref)
+        out['resolve'] = resolved
+        if not resolved.get('ok'):
+            return out
+        pid = int(resolved['peer_id'])
+        try:
+            j = await client.join_public_chat(pid)
+            out['join'] = j.model_dump() if hasattr(j, 'model_dump') else str(j)
+        except Exception as e:
+            out['join_error'] = f'{type(e).__name__}: {e}'
+        try:
+            perms = await client.get_member_permissions(pid, client.id)
+            out['permissions'] = perms.model_dump() if hasattr(perms, 'model_dump') else str(perms)
+        except Exception as e:
+            out['permissions_error'] = f'{type(e).__name__}: {e}'
+        return out
+
+    return _run(_with_client(_fn))
+
+
 def is_admin_of_channel(channel_ref: str) -> bool:
-    async def _fn(client):
-        resolved = await _resolve_peer(client, channel_ref)
-        if not resolved.get('ok'):
-            return {'ok': False, 'is_admin': False, 'error': resolved.get('error')}
-        peer_id = resolved['peer_id']
+    d = diagnose_channel(channel_ref)
+    perms = d.get('permissions') or {}
+    if not isinstance(perms, dict):
+        return False
+
+    def _b(key):
+        v = perms.get(key)
+        if isinstance(v, dict):
+            return bool(v.get('value') or v.get('1'))
+        return bool(v)
+
+    return _b('send_message') or _b('send_media')
+
+
+async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text: str) -> Dict[str, Any]:
+    from aiobale.enums import ChatType, PeerType
+    from aiobale.types import Chat, Peer, MessageContent, TextMessage
+    from aiobale.methods.messaging.send_message import SendMessage
+    from aiobale.utils import generate_id
+
+    errors: List[str] = []
+    mid = generate_id()
+    content = MessageContent(text=TextMessage(value=text))
+
+    # ترکیب‌های محتمل peer / chat
+    combos = [
+        (PeerType.GROUP, ChatType.GROUP),
+        (PeerType.GROUP, ChatType.CHANNEL),
+        (PeerType.GROUP, ChatType.SUPER_GROUP),
+    ]
+
+    for ptype, ctype in combos:
+        peer_kwargs: Dict[str, Any] = {'type': ptype, 'id': peer_id}
+        if access_hash is not None:
+            peer_kwargs['access_hash'] = int(access_hash)
+        peer = Peer(**peer_kwargs)
+        chat = Chat(id=peer_id, type=ctype)
+        call = SendMessage(
+            peer=peer,
+            message_id=mid,
+            content=content,
+            chat=chat,
+        )
         try:
-            perms = await client.get_member_permissions(peer_id, client.id)
+            result = await client(call)
+            msg = getattr(result, 'message', result)
+            return {
+                'ok': True,
+                'message_id': getattr(msg, 'message_id', mid),
+                'date': getattr(msg, 'date', None),
+                'peer_id': peer_id,
+                'access_hash': access_hash,
+                'combo': f'{ptype}/{ctype}',
+                'without_quote': True,
+            }
         except Exception as e:
-            return {'ok': False, 'is_admin': False, 'error': str(e), 'peer_id': peer_id}
+            errors.append(f'{ptype}/{ctype}: {e}')
 
-        def _b(v):
-            if v is None:
-                return False
-            if hasattr(v, 'value'):
-                return bool(v.value)
-            return bool(v)
-
-        can_send = _b(getattr(perms, 'send_message', None)) or _b(getattr(perms, 'send_media', None))
-        can_del = _b(getattr(perms, 'delete_message', None))
-        can_pin = _b(getattr(perms, 'pin_message', None))
-        is_adm = can_send and (can_del or can_pin)
-        return {
-            'ok': True,
-            'is_admin': is_adm,
-            'peer_id': peer_id,
-            'permissions': {
-                'send_message': can_send,
-                'delete_message': can_del,
-                'pin_message': can_pin,
-            },
-        }
-
-    result = _run(_with_client(_fn))
-    return bool(isinstance(result, dict) and result.get('is_admin'))
-
-
-def send_text_to_channel(channel_ref: str, text: str) -> Dict[str, Any]:
-    """پست متنی جدید = بدون نقل‌قول."""
-
-    async def _fn(client):
-        from aiobale.enums import ChatType
-
-        resolved = await _resolve_peer(client, channel_ref)
-        if not resolved.get('ok'):
-            return {'ok': False, 'error': f"resolve: {resolved.get('error')}", 'resolved': resolved}
-        peer_id = int(resolved['peer_id'])
-
-        # عضویت/ادمین بودن کمک می‌کند InvalidArgument کمتر شود
-        try:
-            await client.join_public_chat(peer_id)
-        except Exception as e:
-            logger.info('join_public_chat (may already be member): %s', e)
-
-        errors: List[str] = []
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        # بدون access_hash هم یک‌بار
+        if access_hash is not None:
+            peer2 = Peer(type=ptype, id=peer_id)
+            call2 = SendMessage(
+                peer=peer2,
+                message_id=generate_id(),
+                content=content,
+                chat=chat,
+            )
             try:
-                msg = await client.send_message(text=text, chat_id=peer_id, chat_type=ctype)
+                result = await client(call2)
+                msg = getattr(result, 'message', result)
                 return {
                     'ok': True,
                     'message_id': getattr(msg, 'message_id', None),
                     'date': getattr(msg, 'date', None),
                     'peer_id': peer_id,
-                    'chat_type': str(ctype),
+                    'combo': f'{ptype}/{ctype}/nohash',
                     'without_quote': True,
                 }
             except Exception as e:
-                errors.append(f'{ctype}: {e}')
-                logger.info('send_message %s failed: %s', ctype, e)
+                errors.append(f'{ptype}/{ctype}/nohash: {e}')
 
-        return {'ok': False, 'error': 'InvalidArgument/send_failed', 'peer_id': peer_id, 'tries': errors}
+    return {'ok': False, 'error': 'send_failed', 'tries': errors, 'peer_id': peer_id, 'access_hash': access_hash}
+
+
+def send_text_to_channel(channel_ref: str, text: str) -> Dict[str, Any]:
+    async def _fn(client):
+        resolved = await _resolve_peer(client, channel_ref)
+        if not resolved.get('ok'):
+            return {'ok': False, 'error': f"resolve: {resolved.get('error')}", 'resolved': resolved}
+
+        peer_id = int(resolved['peer_id'])
+        access_hash = resolved.get('access_hash')
+
+        try:
+            await client.join_public_chat(peer_id)
+        except Exception as e:
+            logger.info('join: %s', e)
+
+        # اگر ادمین نیست، پیام واضح‌تر
+        try:
+            perms = await client.get_member_permissions(peer_id, client.id)
+            dump = perms.model_dump() if hasattr(perms, 'model_dump') else {}
+
+            def _b(key):
+                v = dump.get(key)
+                if isinstance(v, dict):
+                    return bool(v.get('value') or v.get('1'))
+                return bool(v)
+
+            if not (_b('send_message') or _b('send_media')):
+                return {
+                    'ok': False,
+                    'error': 'not_admin_or_no_send_permission',
+                    'peer_id': peer_id,
+                    'access_hash': access_hash,
+                    'permissions': dump,
+                    'hint': 'کاربر لینک‌یار را در کانال ادمین کنید (با حق ارسال پیام).',
+                }
+        except Exception as e:
+            logger.info('perms before send: %s', e)
+
+        return await _send_text_raw(client, peer_id, access_hash, text)
 
     return _run(_with_client(_fn))
 
@@ -285,11 +362,6 @@ def send_document_without_quote(
     document_message,
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """ارسال مجدد مدیا با use_own_content=True → بدون برچسب بازارسال.
-
-    document_message: aiobale DocumentMessage از پیام مبدأ که لینک‌یار به آن دسترسی دارد.
-    """
-
     async def _fn(client):
         from aiobale.enums import ChatType
 
@@ -301,7 +373,6 @@ def send_document_without_quote(
             await client.join_public_chat(peer_id)
         except Exception:
             pass
-
         errors = []
         for ctype in (ChatType.GROUP, ChatType.CHANNEL):
             try:
@@ -316,7 +387,6 @@ def send_document_without_quote(
                     'ok': True,
                     'message_id': getattr(msg, 'message_id', None),
                     'date': getattr(msg, 'date', None),
-                    'peer_id': peer_id,
                     'without_quote': True,
                 }
             except Exception as e:
@@ -333,8 +403,6 @@ def forward_to_channel(
     message_date: int,
     from_peer_type: int = 1,
 ) -> Dict[str, Any]:
-    """ForwardMessages — معمولاً با نقل‌قول/ارجاع مبدأ."""
-
     async def _fn(client):
         from aiobale.enums import ChatType, PeerType
         from aiobale.types import InfoMessage, Peer
@@ -343,7 +411,6 @@ def forward_to_channel(
         if not resolved.get('ok'):
             return {'ok': False, 'error': resolved.get('error')}
         peer_id = int(resolved['peer_id'])
-
         ptype = PeerType.PRIVATE if from_peer_type == 1 else PeerType.GROUP
         info = InfoMessage(
             peer=Peer(id=int(from_peer_id), type=ptype),
@@ -351,25 +418,15 @@ def forward_to_channel(
             date=int(message_date),
         )
         resp = await client.forward_message(
-            message=info,
-            chat_id=peer_id,
-            chat_type=ChatType.GROUP,
+            message=info, chat_id=peer_id, chat_type=ChatType.GROUP
         )
-        return {
-            'ok': True,
-            'result': str(resp),
-            'peer_id': peer_id,
-            'without_quote': False,
-            'note': 'forward معمولاً با برچسب بازارسال است',
-        }
+        return {'ok': True, 'result': str(resp), 'without_quote': False}
 
     return _run(_with_client(_fn))
 
 
 def delete_channel_message(
-    channel_ref: str,
-    message_id: int,
-    message_date: int,
+    channel_ref: str, message_id: int, message_date: int
 ) -> Dict[str, Any]:
     async def _fn(client):
         from aiobale.enums import ChatType
@@ -388,7 +445,7 @@ def delete_channel_message(
                     chat_type=ctype,
                     just_me=False,
                 )
-                return {'ok': True, 'result': str(resp), 'chat_type': str(ctype)}
+                return {'ok': True, 'result': str(resp)}
             except Exception as e:
                 last_err = e
         return {'ok': False, 'error': str(last_err)}
@@ -411,9 +468,6 @@ def copy_message(
     caption: Optional[str] = None,
     message_date: int = 0,
 ) -> Dict[str, Any]:
-    """نام سازگار — برای کاربر معادل forward است (با نقل‌قول).
-    بدون نقل‌قول از send_document_without_quote استفاده کن.
-    """
     try:
         from_peer = int(str(from_chat_id)) if str(from_chat_id).lstrip('-').isdigit() else 0
     except ValueError:
@@ -421,7 +475,7 @@ def copy_message(
     if not from_peer or not message_date:
         if caption:
             return send_text_to_channel(str(to_chat_id), caption)
-        return {'ok': False, 'error': 'need_from_peer_and_date; for no-quote use send_document_without_quote'}
+        return {'ok': False, 'error': 'need_from_peer_and_date'}
     return forward_to_channel(
         str(to_chat_id),
         from_peer_id=from_peer,
