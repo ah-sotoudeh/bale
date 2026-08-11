@@ -3,16 +3,15 @@
 
 جریان:
 1) یک بنر (عکس/فیلم/فایل) برای لینک‌ساز بازارسال یا ارسال کن
-2) اسکریپت زمان اجرا را روی حدود ۳ دقیقهٔ آینده می‌گذارد
+2) اسکریپت زمان اجرا را روی حدود N ثانیهٔ آینده می‌گذارد
 3) هم‌زمان:
-   الف) لینک‌ساز → forward با نقل‌قول به @linktest
-   ب) لینک‌ساز → copyMessage بدون نقل‌قول به @linktest
-   ج) بنر برای لینک‌یار فوروارد می‌شود؛ لینک‌یار با download+upload (send) به @linktest
-      سپس پیوند مطلب می‌سازد و برای چت لینک‌ساز می‌فرستد
+   الف) لینک‌ساز → forward با نقل‌قول به کانال
+   ب) لینک‌ساز → copyMessage بدون نقل‌قول به کانال
+   ج) لینک‌یار → download/upload (send) به کانال
+4) برای هر پست موفق، چند کاندید پیوند مطلب (ble.ir) ساخته و به چت لینک‌ساز فرستاده می‌شود
 
-اجرا:
-  python scripts/sim_publish_compare.py
-  python scripts/sim_publish_compare.py --delay 180 --channel @linktest
+اجرا (PowerShell — channel را quote کنید):
+  python scripts/sim_publish_compare.py --delay 60 --channel "@linktest"
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -64,13 +63,60 @@ def _linkyar_user_id() -> str:
     ).strip()
 
 
-def build_message_link(channel_username: str, message_id: int, date_ms: int) -> str:
+def normalize_date_ms(date_val: Optional[int]) -> Optional[int]:
+    """Bot API date is usually seconds; aiobale uses milliseconds."""
+    if date_val is None:
+        return None
+    d = int(date_val)
+    # timestamps before year ~2001 in ms would be < 1e12; seconds now are ~1.7e9
+    if d < 10_000_000_000:  # clearly seconds
+        return d * 1000
+    return d
+
+
+def build_message_link_candidates(
+    channel_username: str, message_id: int, date_val: Optional[int]
+) -> List[str]:
     uname = channel_username.lstrip('@')
-    return f'https://ble.ir/{uname}/{message_id}/{date_ms}'
+    mid = int(message_id)
+    out: List[str] = []
+    date_ms = normalize_date_ms(date_val)
+    if date_ms is not None:
+        out.append(f'https://ble.ir/{uname}/{mid}/{date_ms}')
+        # also seconds form (in case client expects sec)
+        out.append(f'https://ble.ir/{uname}/{mid}/{date_ms // 1000}')
+    out.append(f'https://ble.ir/{uname}/{mid}')
+    # unique preserve order
+    seen = set()
+    uniq = []
+    for u in out:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
+
+
+def extract_bot_message_meta(api_result: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+    """Extract message_id and date from Bot API forward/copy response."""
+    if not isinstance(api_result, dict):
+        return None, None
+    res = api_result.get('result')
+    mid = None
+    date = None
+    if isinstance(res, dict):
+        mid = res.get('message_id')
+        date = res.get('date') or res.get('forward_date')
+    elif isinstance(res, int):
+        mid = res
+    # some Bale variants: result.message_id at top
+    if mid is None:
+        mid = api_result.get('message_id')
+    if date is None:
+        date = api_result.get('date')
+    return (int(mid) if mid is not None else None, int(date) if date is not None else None)
 
 
 def extract_file_id(msg: dict) -> Tuple[Optional[str], str, Optional[str]]:
-    """Returns (file_id, kind, caption). kind: photo|video|document"""
     caption = msg.get('caption') or msg.get('text') or ''
     if msg.get('photo'):
         photos = msg['photo']
@@ -84,7 +130,6 @@ def extract_file_id(msg: dict) -> Tuple[Optional[str], str, Optional[str]]:
 
 
 def wait_for_banner(timeout_sec: int = 600) -> Dict[str, Any]:
-    """Long-poll until a media message arrives for the bot."""
     info = bc.get_webhook_info()
     url = (info.get('result') or {}).get('url') or ''
     if url:
@@ -161,6 +206,7 @@ def run_scheduled(
     msg_id = banner['message_id']
     run_at = datetime.now() + timedelta(seconds=delay_sec)
     linkyar_uid = _linkyar_user_id()
+    uname = channel.lstrip('@')
 
     bc.send_message(
         chat_id,
@@ -171,12 +217,11 @@ def run_scheduled(
             f'روش‌ها:\n'
             f'۱) لینک‌ساز forward با نقل‌قول → {channel}\n'
             f'۲) لینک‌ساز copyMessage بدون نقل‌قول → {channel}\n'
-            f'۳) فوروارد به لینک‌یار + send (دانلود/آپلود) → {channel}\n'
-            f'   سپس پیوند مطلب برای همین چت'
+            f'۳) لینک‌یار send (دانلود/آپلود) → {channel}\n'
+            f'۴) ساخت پیوند مطلب برای پست‌های موفق'
         ),
     )
 
-    # آماده‌سازی فایل برای لینک‌یار از همین الان
     local_file: Optional[Path] = None
     try:
         local_file = download_banner_file(banner['file_id'], banner['kind'])
@@ -184,7 +229,6 @@ def run_scheduled(
         log.exception('download for linkyar path failed early: %s', e)
         bc.send_message(chat_id, f'⚠️ دانلود فایل برای مسیر لینک‌یار الان fail شد: {e}')
 
-    # فوروارد فوری بنر به لینک‌یار (تا در اینباکسش باشد)
     fwd_ly = bc.forward_message(linkyar_uid, chat_id, msg_id)
     log.info('forward to linkyar user %s → %s', linkyar_uid, fwd_ly)
     bc.send_message(
@@ -195,7 +239,6 @@ def run_scheduled(
 
     wait = max(0, delay_sec)
     log.info('waiting %s seconds until publish…', wait)
-    # countdown every 30s
     left = wait
     while left > 0:
         step = min(30, left)
@@ -204,33 +247,31 @@ def run_scheduled(
         if left > 0:
             log.info('… %ss remaining', left)
 
-    results: Dict[str, Any] = {}
+    # fallback date if API omits it
+    fallback_date_sec = int(time.time())
 
     # ۱) bot forward با نقل‌قول
     log.info('=== 1) bot forwardMessage (با نقل‌قول) ===')
     r1 = bc.forward_message(channel, chat_id, msg_id)
-    results['bot_forward_quote'] = r1
-    mid1 = ((r1.get('result') or {}) if isinstance(r1, dict) else {}).get('message_id')
-    date1 = ((r1.get('result') or {}) if isinstance(r1, dict) else {}).get('date')
-    log.info('result: ok=%s message_id=%s', r1.get('ok'), mid1)
+    log.info('forward full result: %s', r1)
+    mid1, date1 = extract_bot_message_meta(r1)
+    if mid1 and not date1:
+        date1 = fallback_date_sec
+    log.info('forward meta mid=%s date=%s', mid1, date1)
 
     # ۲) bot copy بدون نقل‌قول
     log.info('=== 2) bot copyMessage (بدون نقل‌قول) ===')
     r2 = bc.copy_message(channel, chat_id, msg_id, caption=banner.get('caption') or None)
-    results['bot_copy_no_quote'] = r2
-    mid2 = None
-    if isinstance(r2, dict):
-        res2 = r2.get('result')
-        if isinstance(res2, dict):
-            mid2 = res2.get('message_id')
-        elif isinstance(res2, int):
-            mid2 = res2
-    log.info('result: ok=%s message_id=%s', r2.get('ok'), mid2)
+    log.info('copy full result: %s', r2)
+    mid2, date2 = extract_bot_message_meta(r2)
+    if mid2 and not date2:
+        # copy often returns only message_id — reuse forward date or now
+        date2 = date1 or fallback_date_sec
+    log.info('copy meta mid=%s date=%s', mid2, date2)
 
     # ۳) linkyar download+upload send
     log.info('=== 3) linkyar send (download/upload) ===')
     r3: Dict[str, Any] = {'ok': False}
-    permalink = None
     if local_file and local_file.exists():
         r3 = ly.send_local_file_to_channel(
             channel,
@@ -239,32 +280,48 @@ def run_scheduled(
             kind=banner['kind'],
         )
         log.info('linkyar send: %s', r3)
-        if r3.get('ok') and r3.get('message_id') and r3.get('date'):
-            uname = channel.lstrip('@')
-            permalink = build_message_link(uname, int(r3['message_id']), int(r3['date']))
-            log.info('permalink: %s', permalink)
     else:
         r3 = {'ok': False, 'error': 'no local file for upload'}
 
-    results['linkyar_upload'] = r3
-    results['permalink'] = permalink
+    mid3 = r3.get('message_id')
+    date3 = r3.get('date')
 
-    # گزارش به چت لینک‌ساز
+    # ۴) پیوندها
+    link_sections: List[str] = []
+    if mid1:
+        cands = build_message_link_candidates(uname, mid1, date1)
+        link_sections.append('🔗 پیوند forward (با نقل‌قول) mid=%s:' % mid1)
+        link_sections.extend(cands)
+        link_sections.append('')
+    if mid2:
+        cands = build_message_link_candidates(uname, mid2, date2)
+        link_sections.append('🔗 پیوند copy (بدون نقل‌قول) mid=%s:' % mid2)
+        link_sections.extend(cands)
+        link_sections.append('')
+    if r3.get('ok') and mid3:
+        cands = build_message_link_candidates(uname, int(mid3), date3)
+        link_sections.append('🔗 پیوند linkyar upload mid=%s:' % mid3)
+        link_sections.extend(cands)
+        link_sections.append('')
+
     lines = [
         '📊 نتیجه شبیه‌سازی انتشار',
         f'کانال: {channel}',
         '',
-        f'۱) forward با نقل‌قول: {"✅" if r1.get("ok") else "❌"} mid={mid1}',
-        f'۲) copy بدون نقل‌قول: {"✅" if r2.get("ok") else "❌"} mid={mid2}',
-        f'۳) linkyar upload: {"✅" if r3.get("ok") else "❌"} mid={r3.get("message_id")} date={r3.get("date")}',
+        f'۱) forward با نقل‌قول: {"✅" if r1.get("ok") else "❌"} mid={mid1} date={date1}',
+        f'۲) copy بدون نقل‌قول: {"✅" if r2.get("ok") else "❌"} mid={mid2} date={date2}',
+        f'۳) linkyar upload: {"✅" if r3.get("ok") else "❌"} mid={mid3} date={date3}',
+        '',
     ]
-    if permalink:
-        lines += ['', f'🔗 پیوند مطلب (مسیر لینک‌یار):', permalink]
+    if link_sections:
+        lines += ['کاندیدهای پیوند مطلب (یکی را در بله باز کن تا فرمت درست مشخص شود):', '']
+        lines += link_sections
     if not r3.get('ok'):
-        lines += ['', f'خطای لینک‌یار: {r3.get("error") or r3}']
+        lines += [f'خطای لینک‌یار: {r3.get("error") or r3}']
 
-    bc.send_message(chat_id, '\n'.join(lines))
-    log.info('done. full results keys=%s', list(results.keys()))
+    report = '\n'.join(lines)
+    log.info('REPORT\n%s', report)
+    bc.send_message(chat_id, report[:3500])
 
 
 def main() -> None:
@@ -273,6 +330,11 @@ def main() -> None:
     ap.add_argument('--channel', default=os.environ.get('REFERENCE_CHANNEL', '@linktest'))
     ap.add_argument('--timeout', type=int, default=600, help='wait for banner seconds')
     args = ap.parse_args()
+
+    # normalize channel: PowerShell may strip @
+    ch = args.channel.strip()
+    if ch and not ch.startswith('@') and not ch.lstrip('-').isdigit():
+        ch = '@' + ch
 
     if not bc._token():
         log.error('BALE_BOT_TOKEN missing')
@@ -287,7 +349,7 @@ def main() -> None:
         banner['message_id'],
         banner['kind'],
     )
-    run_scheduled(banner, args.channel, args.delay)
+    run_scheduled(banner, ch, args.delay)
 
 
 if __name__ == '__main__':
