@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>پنل مدیر | لینک‌ساز</title>
+  <script src="https://tapi.bale.ai/miniapp.js?3"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #2aabee;
+      --ok: #3dd68c;
+      --warn: #f5a524;
+      --danger: #f31260;
+      --border: #2a3548;
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f6f9;
+        --card: #fff;
+        --text: #1a2332;
+        --muted: #66788f;
+        --border: #e2e8f0;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 72px;
+    }
+    header {
+      padding: 16px 16px 8px;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 1.15rem; margin: 0 0 4px; }
+    header .sub { color: var(--muted); font-size: 0.85rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 12px 16px;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .stat b { display: block; font-size: 1.1rem; margin-top: 4px; }
+    .stat span { color: var(--muted); font-size: 0.8rem; }
+    nav.tabs {
+      display: flex;
+      gap: 6px;
+      padding: 0 12px 12px;
+      overflow-x: auto;
+    }
+    nav.tabs button {
+      flex: 0 0 auto;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    nav.tabs button.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    main { padding: 0 16px 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+    .card h3 { margin: 0 0 6px; font-size: 0.95rem; }
+    .card p { margin: 4px 0; color: var(--muted); font-size: 0.85rem; }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #243044;
+      color: var(--muted);
+    }
+    .badge.ok { background: rgba(61,214,140,.15); color: var(--ok); }
+    .badge.warn { background: rgba(245,165,36,.15); color: var(--warn); }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button.btn, select, input {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      padding: 10px 12px;
+    }
+    button.btn {
+      cursor: pointer;
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    button.btn.ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    button.btn:disabled { opacity: 0.5; }
+    .form-grid { display: grid; gap: 8px; }
+    .empty { text-align: center; color: var(--muted); padding: 32px 12px; }
+    .toast {
+      position: fixed; bottom: 16px; left: 16px; right: 16px;
+      background: #222; color: #fff; padding: 12px 16px; border-radius: 12px;
+      text-align: center; display: none; z-index: 50;
+    }
+    .toast.show { display: block; }
+    .err { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎛️ پنل مدیر</h1>
+    <div class="sub" id="userLine">در حال اتصال…</div>
+  </header>
+
+  <div class="stats" id="stats">
+    <div class="stat"><span>موجودی</span><b id="bal">—</b></div>
+    <div class="stat"><span>سفارش در انتظار</span><b id="pending">—</b></div>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="home" class="active">خانه</button>
+    <button data-tab="channels">کانال‌ها</button>
+    <button data-tab="tariffs">تعرفه‌ها</button>
+    <button data-tab="orders">سفارش‌ها</button>
+    <button data-tab="calendar">تقویم</button>
+    <button data-tab="wallet">مالی</button>
+  </nav>
+
+  <main id="view"></main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+  (function () {
+    const API = '/miniapp/api';
+    let initData = '';
+    let state = { me: null, channels: [], groups: [], tariffs: [], orders: [], wallet: null };
+    let tab = 'home';
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2800);
+    }
+
+    function wa() {
+      return (window.Bale && window.Bale.WebApp) || window.Telegram && window.Telegram.WebApp || null;
+    }
+
+    function bootstrapSdk() {
+      const w = wa();
+      if (w) {
+        try { w.ready && w.ready(); } catch (e) {}
+        try { w.expand && w.expand(); } catch (e) {}
+        initData = w.initData || '';
+        if (w.colorScheme === 'light') {
+          document.documentElement.style.setProperty('--bg', '#f4f6f9');
+          document.documentElement.style.setProperty('--card', '#fff');
+          document.documentElement.style.setProperty('--text', '#1a2332');
+          document.documentElement.style.setProperty('--muted', '#66788f');
+          document.documentElement.style.setProperty('--border', '#e2e8f0');
+        }
+      }
+      // browser debug
+      if (!initData) {
+        const q = new URLSearchParams(location.search);
+        if (q.get('debug_bale_id')) {
+          window.__debugBaleId = q.get('debug_bale_id');
+        }
+      }
+    }
+
+    async function api(path, opts) {
+      opts = opts || {};
+      const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+      if (initData) headers['X-Bale-Init-Data'] = initData;
+      let url = API + path;
+      const method = (opts.method || 'GET').toUpperCase();
+      let body = opts.body;
+      if (window.__debugBaleId) {
+        if (method === 'GET') {
+          url += (url.includes('?') ? '&' : '?') + 'debug_bale_id=' + encodeURIComponent(window.__debugBaleId);
+        } else {
+          const o = typeof body === 'string' ? JSON.parse(body || '{}') : (body || {});
+          o.debug_bale_id = window.__debugBaleId;
+          o.initData = initData || '';
+          body = JSON.stringify(o);
+        }
+      } else if (method === 'POST' && initData) {
+        const o = typeof body === 'string' ? JSON.parse(body || '{}') : (body || {});
+        o.initData = initData;
+        body = JSON.stringify(o);
+      }
+      const res = await fetch(url, { method, headers, body: method === 'GET' ? undefined : body });
+      const data = await res.json().catch(() => ({ ok: false, error: 'bad_json' }));
+      if (!res.ok || data.ok === false) throw new Error(data.error || ('http_' + res.status));
+      return data;
+    }
+
+    function money(n) {
+      return (n || 0).toLocaleString('fa-IR') + ' ت';
+    }
+
+    async function loadMe() {
+      const data = await api('/me');
+      state.me = data;
+      document.getElementById('userLine').textContent =
+        (data.user.handle || data.user.bale_user_id) + (data.is_operator ? ' · اپراتور' : '');
+      document.getElementById('bal').textContent = money(data.wallet.available);
+      document.getElementById('pending').textContent = String(data.pending_orders);
+    }
+
+    function renderHome() {
+      const m = state.me;
+      if (!m) return '<div class="empty">بارگذاری…</div>';
+      return `
+        <div class="card">
+          <h3>خلاصه</h3>
+          <p>کانال‌ها: ${m.channel_count}</p>
+          <p>موجودی قابل برداشت: <b>${money(m.wallet.available)}</b></p>
+          <p>در انتظار تسویه: ${money(m.wallet.locked_pending)}</p>
+        </div>
+        <div class="card">
+          <h3>راهنما</h3>
+          <p>از تب‌های بالا کانال، تعرفه، سفارش، تقویم و مالی را مدیریت کنید.</p>
+          <p>حالت انتشار هر کانال: لینک‌ساز / لینک‌یار / دستی.</p>
+        </div>`;
+    }
+
+    async function renderChannels() {
+      const data = await api('/channels');
+      state.channels = data.channels;
+      state.groups = data.groups;
+      if (!data.channels.length && !data.groups.length) {
+        return '<div class="empty">کانالی ثبت نشده. از ربات لینک کانال بفرستید.</div>';
+      }
+      let html = data.channels.map(ch => `
+        <div class="card">
+          <h3>${escapeHtml(ch.name)}</h3>
+          <p>${escapeHtml(ch.link || '')}</p>
+          <span class="badge">${escapeHtml(ch.publish_mode_label || ch.publish_mode)}</span>
+          <span class="badge">تعرفه: ${ch.tariff_count}</span>
+          <div class="row-actions">
+            <select data-ch="${ch.id}" class="mode-select">
+              <option value="bot" ${ch.publish_mode==='bot'?'selected':''}>لینک‌ساز</option>
+              <option value="linkyar" ${ch.publish_mode==='linkyar'?'selected':''}>لینک‌یار</option>
+              <option value="manual" ${ch.publish_mode==='manual'?'selected':''}>دستی</option>
+            </select>
+            <button class="btn ghost" data-save-mode="${ch.id}">ذخیره حالت</button>
+          </div>
+        </div>`).join('');
+      if (data.groups.length) {
+        html += data.groups.map(g => `
+          <div class="card">
+            <h3>📦 ${escapeHtml(g.name)}</h3>
+            <p>${g.channel_count} کانال · ${g.tariff_count} تعرفه</p>
+          </div>`).join('');
+      }
+      return html;
+    }
+
+    async function renderTariffs() {
+      const data = await api('/tariffs');
+      state.tariffs = data.tariffs;
+      const chOpts = (state.channels || []).map(c =>
+        `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+      let form = `
+        <div class="card">
+          <h3>➕ تعرفه جدید</h3>
+          <div class="form-grid">
+            <select id="tf-ch">${chOpts || '<option value="">کانال نیست</option>'}</select>
+            <input id="tf-name" placeholder="نام (مثلا روزانه)" />
+            <input id="tf-hour" type="number" min="0" max="23" placeholder="ساعت شروع (اختیاری)" />
+            <input id="tf-dur" type="number" min="1" placeholder="مدت ساعت" />
+            <input id="tf-price" type="number" min="0" placeholder="قیمت تومان" />
+            <button class="btn" id="tf-save">ثبت تعرفه</button>
+          </div>
+        </div>`;
+      if (!data.tariffs.length) return form + '<div class="empty">تعرفه‌ای نیست</div>';
+      return form + data.tariffs.map(t => `
+        <div class="card">
+          <h3>${escapeHtml(t.name)} · ${escapeHtml(t.owner)}</h3>
+          <p>${t.start_hour != null ? t.start_hour + ':00 · ' : ''}${t.duration_hours}س · ${money(t.price)}</p>
+          <span class="badge ${t.is_active ? 'ok' : 'warn'}">${t.is_active ? 'فعال' : 'غیرفعال'}</span>
+        </div>`).join('');
+    }
+
+    async function renderOrders() {
+      const data = await api('/orders');
+      if (!data.orders.length) return '<div class="empty">سفارشی نیست</div>';
+      return data.orders.map(o => `
+        <div class="card">
+          <h3>#${o.id} · سفارش ${o.order_id}</h3>
+          <p>${escapeHtml(o.owner)}</p>
+          <p>${escapeHtml(o.start_jalali)} · ${money(o.price)}</p>
+          <span class="badge">مدیر: ${o.manager_status}</span>
+          <span class="badge">اجرا: ${o.execution_status}</span>
+          ${o.published_link ? `<p><a href="${escapeHtml(o.published_link)}" target="_blank">پیوند مطلب</a></p>` : ''}
+        </div>`).join('');
+    }
+
+    async function renderCalendar() {
+      if (!state.tariffs.length) {
+        try { state.tariffs = (await api('/tariffs')).tariffs; } catch (e) {}
+      }
+      if (!state.channels.length) {
+        try {
+          const c = await api('/channels');
+          state.channels = c.channels;
+          state.groups = c.groups;
+        } catch (e) {}
+      }
+      const opts = (state.tariffs || []).map(t =>
+        `<option value="${t.id}">${escapeHtml(t.owner)} — ${escapeHtml(t.name)}</option>`).join('');
+      return `
+        <div class="card">
+          <h3>روزهای خالی</h3>
+          <div class="form-grid">
+            <select id="cal-t">${opts || '<option value="">تعرفه نیست</option>'}</select>
+            <button class="btn" id="cal-load">نمایش ۱۴ روز</button>
+          </div>
+          <div id="cal-out"></div>
+        </div>
+        <div class="card">
+          <h3>🔒 اعلام روز پر</h3>
+          <div class="form-grid">
+            <select id="busy-ch">
+              ${(state.channels||[]).map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+            <input id="busy-date" type="date" />
+            <button class="btn" id="busy-save">ثبت روز پر</button>
+          </div>
+        </div>`;
+    }
+
+    async function renderWallet() {
+      const data = await api('/wallet');
+      state.wallet = data;
+      const banks = (data.banks || []).map(b => `
+        <div class="card">
+          <h3>${escapeHtml(b.holder_name)} ${b.is_default ? '⭐' : ''}</h3>
+          <p>…${escapeHtml(b.iban_tail)}</p>
+          <button class="btn" data-payout="${b.id}" ${data.can_payout ? '' : 'disabled'}>درخواست تسویه به این شبا</button>
+        </div>`).join('') || '<div class="empty">شبا ثبت نشده</div>';
+      return `
+        <div class="card">
+          <h3>موجودی</h3>
+          <p>قابل برداشت: <b>${money(data.balance.available)}</b></p>
+          <p>قفل‌شده: ${money(data.balance.locked_pending)}</p>
+          <p>حداقل تسویه: ${money(data.min_payout)} · کارمزد ${data.fee_percent}%</p>
+          ${data.can_payout ? '' : `<p class="err">مسدود: ${escapeHtml(data.payout_block_reason)}</p>`}
+        </div>
+        <div class="card">
+          <h3>➕ شبا جدید</h3>
+          <div class="form-grid">
+            <input id="iban" placeholder="IR + ۲۴ رقم" />
+            <input id="holder" placeholder="نام صاحب حساب" />
+            <button class="btn" id="bank-save">ذخیره شبا</button>
+          </div>
+        </div>
+        ${banks}`;
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&':'&','<':'<','>':'>','"':'"',"'":'&#39;'
+      })[c]);
+    }
+
+    async function render() {
+      const view = document.getElementById('view');
+      view.innerHTML = '<div class="empty">…</div>';
+      try {
+        if (tab === 'home') view.innerHTML = renderHome();
+        else if (tab === 'channels') view.innerHTML = await renderChannels();
+        else if (tab === 'tariffs') {
+          if (!state.channels.length) {
+            const c = await api('/channels');
+            state.channels = c.channels;
+          }
+          view.innerHTML = await renderTariffs();
+        }
+        else if (tab === 'orders') view.innerHTML = await renderOrders();
+        else if (tab === 'calendar') view.innerHTML = await renderCalendar();
+        else if (tab === 'wallet') view.innerHTML = await renderWallet();
+        bindViewEvents();
+      } catch (e) {
+        view.innerHTML = `<div class="empty err">خطا: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function bindViewEvents() {
+      document.querySelectorAll('[data-save-mode]').forEach(btn => {
+        btn.onclick = async () => {
+          const id = btn.getAttribute('data-save-mode');
+          const sel = document.querySelector(`select[data-ch="${id}"]`);
+          try {
+            await api('/publish-mode', {
+              method: 'POST',
+              body: JSON.stringify({ channel_id: Number(id), publish_mode: sel.value }),
+            });
+            toast('حالت انتشار ذخیره شد');
+          } catch (e) { toast(e.message); }
+        };
+      });
+      const tfSave = document.getElementById('tf-save');
+      if (tfSave) tfSave.onclick = async () => {
+        try {
+          await api('/tariffs/add', {
+            method: 'POST',
+            body: JSON.stringify({
+              channel_id: Number(document.getElementById('tf-ch').value),
+              name: document.getElementById('tf-name').value,
+              start_hour: document.getElementById('tf-hour').value,
+              duration_hours: Number(document.getElementById('tf-dur').value),
+              price: Number(document.getElementById('tf-price').value),
+            }),
+          });
+          toast('تعرفه ثبت شد');
+          render();
+        } catch (e) { toast(e.message); }
+      };
+      const calLoad = document.getElementById('cal-load');
+      if (calLoad) calLoad.onclick = async () => {
+        const tid = document.getElementById('cal-t').value;
+        try {
+          const data = await api('/free-days?tariff_id=' + encodeURIComponent(tid));
+          document.getElementById('cal-out').innerHTML =
+            (data.free_days || []).map(d => `<p>• ${escapeHtml(d.jalali)}</p>`).join('')
+            || '<p>روزی آزاد نیست</p>';
+        } catch (e) { toast(e.message); }
+      };
+      const busySave = document.getElementById('busy-save');
+      if (busySave) busySave.onclick = async () => {
+        try {
+          const r = await api('/busy', {
+            method: 'POST',
+            body: JSON.stringify({
+              channel_id: Number(document.getElementById('busy-ch').value),
+              date: document.getElementById('busy-date').value,
+            }),
+          });
+          toast('روز پر: ' + (r.jalali || 'OK'));
+        } catch (e) { toast(e.message); }
+      };
+      const bankSave = document.getElementById('bank-save');
+      if (bankSave) bankSave.onclick = async () => {
+        try {
+          await api('/bank', {
+            method: 'POST',
+            body: JSON.stringify({
+              iban: document.getElementById('iban').value,
+              holder_name: document.getElementById('holder').value,
+            }),
+          });
+          toast('شبا ذخیره شد');
+          render();
+        } catch (e) { toast(e.message); }
+      };
+      document.querySelectorAll('[data-payout]').forEach(btn => {
+        btn.onclick = async () => {
+          try {
+            const r = await api('/payout', {
+              method: 'POST',
+              body: JSON.stringify({ bank_id: Number(btn.getAttribute('data-payout')) }),
+            });
+            toast('درخواست #' + r.payout_id + ' ثبت شد');
+            loadMe().then(render);
+          } catch (e) { toast(e.message); }
+        };
+      });
+    }
+
+    document.getElementById('tabs').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-tab]');
+      if (!btn) return;
+      tab = btn.getAttribute('data-tab');
+      document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b === btn));
+      render();
+    });
+
+    bootstrapSdk();
+    loadMe().then(render).catch(e => {
+      document.getElementById('userLine').textContent = 'خطای احراز هویت';
+      document.getElementById('view').innerHTML =
+        `<div class="empty err">${escapeHtml(e.message)}<br><br>برای تست مرورگر:<br>?debug_bale_id=80619262<br>و ALLOW_MINIAPP_DEBUG=1</div>`;
+    });
+  })();
+  </script>
+</body>
+</html>
