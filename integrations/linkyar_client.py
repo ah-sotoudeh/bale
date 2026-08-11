@@ -1,7 +1,6 @@
 """لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN.
 
 ارسال بدون نقل‌قول: SendMessage / send_photo / send_document
-نه ForwardMessages.
 """
 from __future__ import annotations
 
@@ -295,16 +294,89 @@ def send_text_to_channel(channel_ref: str, text: str) -> Dict[str, Any]:
     return _run(_with_client(_fn))
 
 
+async def _send_uploaded_document(
+    client,
+    peer_id: int,
+    access_hash: Optional[int],
+    file_info,
+    caption: str,
+    kind: str,
+) -> Dict[str, Any]:
+    """Send already-uploaded FileDetails via raw SendMessage with access_hash."""
+    from aiobale.enums import ChatType, PeerType, SendType
+    from aiobale.types import (
+        Chat,
+        Peer,
+        MessageContent,
+        DocumentMessage,
+        MessageCaption,
+        DocumentsExt,
+        PhotoExt,
+        VideoExt,
+    )
+    from aiobale.methods.messaging.send_message import SendMessage
+    from aiobale.utils import generate_id
+
+    cap = MessageCaption(content=caption) if caption else None
+    ext = None
+    if kind == 'photo':
+        ext = DocumentsExt(photo=PhotoExt(w=1000, h=1000))
+    elif kind == 'video':
+        try:
+            ext = DocumentsExt(video=VideoExt(w=1280, h=720))
+        except Exception:
+            ext = None
+
+    document = DocumentMessage(
+        file_id=file_info.file_id,
+        size=file_info.size,
+        name=file_info.name,
+        mime_type=file_info.mime_type,
+        access_hash=file_info.access_hash,
+        caption=cap,
+        ext=ext,
+    )
+    content = MessageContent(document=document)
+    errors: List[str] = []
+
+    for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
+        if access_hash is not None:
+            peer_kwargs['access_hash'] = int(access_hash)
+        peer = Peer(**peer_kwargs)
+        chat = Chat(id=peer_id, type=ctype)
+        mid = generate_id()
+        call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
+        try:
+            result = await client(call)
+            msg = getattr(result, 'message', result)
+            return {
+                'ok': True,
+                'message_id': getattr(msg, 'message_id', mid),
+                'date': getattr(msg, 'date', None),
+                'peer_id': peer_id,
+                'access_hash': access_hash,
+                'chat_type': str(ctype),
+                'without_quote': True,
+                'method': 'raw_send_document',
+            }
+        except Exception as e:
+            errors.append(f'raw/{ctype}: {e}')
+            logger.info('raw media send %s failed: %s', ctype, e)
+
+    return {'ok': False, 'error': 'raw_send_failed', 'tries': errors}
+
+
 def send_local_file_to_channel(
     channel_ref: str,
     file_path: str,
     caption: str = '',
     kind: str = 'photo',
 ) -> Dict[str, Any]:
-    """آپلود فایل محلی به کانال (بدون نقل‌قول) — مسیر download/upload."""
+    """آپلود فایل محلی به کانال (بدون نقل‌قول)."""
 
     async def _fn(client):
-        from aiobale.enums import ChatType
+        from aiobale.enums import ChatType, SendType
         from aiobale.types import FileInput
 
         path = Path(file_path)
@@ -313,43 +385,88 @@ def send_local_file_to_channel(
 
         resolved = await _resolve_peer(client, channel_ref)
         if not resolved.get('ok'):
-            return {'ok': False, 'error': resolved.get('error')}
+            return {'ok': False, 'error': resolved.get('error'), 'resolved': resolved}
         peer_id = int(resolved['peer_id'])
+        access_hash = resolved.get('access_hash')
+        logger.info(
+            'send_local resolve peer_id=%s access_hash=%s source=%s',
+            peer_id,
+            access_hash,
+            resolved.get('source'),
+        )
+
         try:
             await client.join_public_chat(peer_id)
         except Exception as e:
             logger.info('join: %s', e)
 
         fin = FileInput(str(path))
-        errors: List[str] = []
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL):
-            try:
-                if kind == 'photo':
-                    msg = await client.send_photo(
-                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
-                    )
-                elif kind == 'video':
-                    msg = await client.send_video(
-                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
-                    )
-                else:
-                    msg = await client.send_document(
-                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
-                    )
-                return {
-                    'ok': True,
-                    'message_id': getattr(msg, 'message_id', None),
-                    'date': getattr(msg, 'date', None),
-                    'peer_id': peer_id,
-                    'chat_type': str(ctype),
-                    'without_quote': True,
-                    'method': f'send_{kind}',
-                }
-            except Exception as e:
-                errors.append(f'{ctype}: {e}')
-                logger.info('send_%s %s failed: %s', kind, ctype, e)
+        send_type = {
+            'photo': SendType.PHOTO,
+            'video': SendType.VIDEO,
+            'document': SendType.DOCUMENT,
+        }.get(kind, SendType.DOCUMENT)
 
-        return {'ok': False, 'error': 'upload_send_failed', 'tries': errors}
+        errors: List[str] = []
+
+        # 1) upload explicitly with GROUP, then raw SendMessage (+ access_hash)
+        try:
+            file_info = await client.upload_file(
+                file=fin,
+                chat_id=peer_id,
+                chat_type=ChatType.GROUP,
+                send_type=send_type,
+            )
+            logger.info(
+                'upload ok file_id=%s size=%s mime=%s',
+                getattr(file_info, 'file_id', None),
+                getattr(file_info, 'size', None),
+                getattr(file_info, 'mime_type', None),
+            )
+            raw = await _send_uploaded_document(
+                client, peer_id, access_hash, file_info, caption or '', kind
+            )
+            if raw.get('ok'):
+                return raw
+            errors.extend(raw.get('tries') or [raw.get('error')])
+        except Exception as e:
+            errors.append(f'upload_or_raw: {e}')
+            logger.info('upload/raw path failed: %s', e)
+
+        # 2) high-level helpers (GROUP only — CHANNEL often crashes decoder)
+        try:
+            if kind == 'photo':
+                msg = await client.send_photo(
+                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                )
+            elif kind == 'video':
+                msg = await client.send_video(
+                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                )
+            else:
+                msg = await client.send_document(
+                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                )
+            return {
+                'ok': True,
+                'message_id': getattr(msg, 'message_id', None),
+                'date': getattr(msg, 'date', None),
+                'peer_id': peer_id,
+                'chat_type': 'GROUP',
+                'without_quote': True,
+                'method': f'send_{kind}_highlevel',
+            }
+        except Exception as e:
+            errors.append(f'highlevel_GROUP: {e}')
+            logger.info('highlevel GROUP failed: %s', e)
+
+        return {
+            'ok': False,
+            'error': 'upload_send_failed',
+            'tries': errors,
+            'peer_id': peer_id,
+            'access_hash': access_hash,
+        }
 
     return _run(_with_client(_fn))
 
