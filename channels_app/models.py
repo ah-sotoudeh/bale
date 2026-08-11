@@ -5,6 +5,15 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 
 
 class Channel(models.Model):
+    PUBLISH_MANUAL = 'manual'
+    PUBLISH_BOT = 'bot'
+    PUBLISH_LINKYAR = 'linkyar'
+    PUBLISH_MODE_CHOICES = [
+        (PUBLISH_BOT, 'لینک‌ساز ادمین (پایدار)'),
+        (PUBLISH_LINKYAR, 'لینک‌یار ادمین'),
+        (PUBLISH_MANUAL, 'ارسال دستی مدیر'),
+    ]
+
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     link = models.CharField(max_length=500, blank=True)
@@ -15,13 +24,27 @@ class Channel(models.Model):
         blank=True,
         related_name='channels',
     )
-    # Link Yar (bot) is admin — required for auto publish
+    # نحوه انتشار تبلیغ در این کانال
+    publish_mode = models.CharField(
+        max_length=16,
+        choices=PUBLISH_MODE_CHOICES,
+        default=PUBLISH_BOT,
+        help_text='bot=لینک‌ساز | linkyar=لینک‌یار | manual=دستی',
+    )
+    # Link Yar (user account) is admin — for auto publish via linkyar
     linkyar_is_admin = models.BooleanField(default=False)
     linkyar_checked_at = models.DateTimeField(null=True, blank=True)
+    # لینک‌ساز (bot) is admin — for auto publish via Bot API
+    bot_is_admin = models.BooleanField(default=False)
+    bot_checked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
+
+    @property
+    def publish_mode_label(self) -> str:
+        return dict(self.PUBLISH_MODE_CHOICES).get(self.publish_mode, self.publish_mode)
 
 
 class ChannelGroup(models.Model):
@@ -72,7 +95,7 @@ class Tariff(models.Model):
     price = models.IntegerField(help_text='قیمت به تومان (برای کل مجموعه اگر group باشد)')
     is_active = models.BooleanField(
         default=True,
-        help_text='اگر لینک‌یار ادمین نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
+        help_text='اگر ادمین لازم نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
     )
 
     class Meta:
