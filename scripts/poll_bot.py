@@ -37,6 +37,7 @@ from bot_flow import manager_panel as mpanel  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
+from miniapp.launch import send_miniapp_entry  # noqa: E402
 from orders.cart import expire_timed_out_items, process_manager_item  # noqa: E402
 from orders.execution import (  # noqa: E402
     customer_confirm_execution,
@@ -155,6 +156,10 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             )
         return True
 
+    if text in ('/miniapp', '/minapp', '/مینی', '/مینیاپ'):
+        send_miniapp_entry(chat_id, 'پنل مدیر (مینی‌اپ):')
+        return True
+
     if text.startswith('/payout_file') and is_operator(bale_uid):
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if not user:
@@ -181,7 +186,6 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         return True
 
     if text in ('/wallet', '/کیف') or text.startswith('/wallet'):
-        # full wallet panel for anyone with balance flow
         mpanel.try_handle_text(chat_id, bale_uid, '/panel')
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if user:
@@ -393,7 +397,7 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start نقش\n/panel پنل مدیر\n/free روز خالی\n/wallet موجودی',
+            '/start نقش\n/panel پنل متنی\n/miniapp مینی‌اپ\n/free روز خالی\n/wallet موجودی',
         )
 
 
