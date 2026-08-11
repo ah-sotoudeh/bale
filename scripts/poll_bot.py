@@ -33,6 +33,7 @@ from django.utils import timezone  # noqa: E402
 
 from bot_flow import customer as cust  # noqa: E402
 from bot_flow import handlers as flow  # noqa: E402
+from bot_flow import manager_panel as mpanel  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
@@ -180,10 +181,11 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         return True
 
     if text in ('/wallet', '/کیف') or text.startswith('/wallet'):
+        # full wallet panel for anyone with balance flow
+        mpanel.try_handle_text(chat_id, bale_uid, '/panel')
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if user:
-            bal = available_balance(user)
-            bc.send_message(chat_id, f'💰 موجودی قابل برداشت: {bal:,} تومان')
+            mpanel.show_wallet(chat_id, user)
         return True
 
     if text.startswith('/audit_admin') and is_operator(bale_uid):
@@ -207,6 +209,11 @@ def handle_callback_query(cq: dict) -> None:
 
     if cust.handle_customer_callback(
         chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None
+    ):
+        return
+
+    if mpanel.try_handle_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
     ):
         return
 
@@ -239,7 +246,7 @@ def handle_callback_query(cq: dict) -> None:
         sess.state = 'mgr_edit_date'
         sess.data = d
         sess.save()
-        bc.send_message(chat_id, f'تاریخ جدید آیتم #{item_id}: 2026-08-15')
+        bc.send_message(chat_id, f'تاریخ جدید آیتم #{item_id}: 1405/05/20')
         return
     if data.startswith('paid:'):
         r = process_payment_paid(int(data.split(':')[1]))
@@ -251,7 +258,6 @@ def handle_callback_query(cq: dict) -> None:
         )
         return
 
-    # manual publish confirm: published:ITEM_ID or published:ITEM_ID:CHANNEL_ID
     if data.startswith('published:'):
         parts = data.split(':')
         item_id = int(parts[1])
@@ -375,6 +381,9 @@ def handle_update(update: dict) -> None:
     if handle_legacy_commands(chat_id, bale_uid, norm):
         return
 
+    if mpanel.try_handle_text(chat_id, bale_uid, text, username=username):
+        return
+
     if cust.try_handle_customer_text(chat_id, bale_uid, text):
         return
 
@@ -384,7 +393,7 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start نقش\n/free روز خالی\n/wallet موجودی',
+            '/start نقش\n/panel پنل مدیر\n/free روز خالی\n/wallet موجودی',
         )
 
 
