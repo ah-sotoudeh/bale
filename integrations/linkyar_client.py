@@ -1,6 +1,6 @@
 """لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN.
 
-ارسال بدون نقل‌قول: SendMessage / send_document(use_own_content=True)
+ارسال بدون نقل‌قول: SendMessage / send_photo / send_document
 نه ForwardMessages.
 """
 from __future__ import annotations
@@ -90,7 +90,7 @@ def _run(coro):
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_runner).result(timeout=90)
+            return pool.submit(_runner).result(timeout=180)
     except RuntimeError:
         return _runner()
 
@@ -159,19 +159,15 @@ async def _search_contact_raw(client, uname: str) -> Dict[str, Any]:
 
 
 async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
-    """همیشه ترجیح با SearchContact تا access_hash داشته باشیم."""
     ref = str(channel_ref).strip()
     if ref.lstrip('-').isdigit():
-        # بدون hash — فقط id؛ ممکن است send fail شود
         return {'ok': True, 'peer_id': int(ref), 'access_hash': None, 'source': 'numeric'}
 
     uname = ref.lstrip('@')
-    # 1) SearchContact (مثل bale-ai) — hash مهم است
     sc = await _search_contact_raw(client, uname)
     if sc.get('ok'):
         return sc
 
-    # 2) search_username
     try:
         resp = await client.search_username(uname)
         g = getattr(resp, 'group', None)
@@ -206,8 +202,6 @@ def resolve_channel(username: str) -> Dict[str, Any]:
 
 
 def diagnose_channel(channel_ref: str) -> Dict[str, Any]:
-    """resolve + join + permissions — برای دیباگ InvalidArgument."""
-
     async def _fn(client):
         out: Dict[str, Any] = {'user_id': client.id}
         resolved = await _resolve_peer(client, channel_ref)
@@ -254,8 +248,6 @@ async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text:
     errors: List[str] = []
     mid = generate_id()
     content = MessageContent(text=TextMessage(value=text))
-
-    # ترکیب‌های محتمل peer / chat
     combos = [
         (PeerType.GROUP, ChatType.GROUP),
         (PeerType.GROUP, ChatType.CHANNEL),
@@ -268,12 +260,7 @@ async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text:
             peer_kwargs['access_hash'] = int(access_hash)
         peer = Peer(**peer_kwargs)
         chat = Chat(id=peer_id, type=ctype)
-        call = SendMessage(
-            peer=peer,
-            message_id=mid,
-            content=content,
-            chat=chat,
-        )
+        call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
         try:
             result = await client(call)
             msg = getattr(result, 'message', result)
@@ -282,37 +269,13 @@ async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text:
                 'message_id': getattr(msg, 'message_id', mid),
                 'date': getattr(msg, 'date', None),
                 'peer_id': peer_id,
-                'access_hash': access_hash,
                 'combo': f'{ptype}/{ctype}',
                 'without_quote': True,
             }
         except Exception as e:
             errors.append(f'{ptype}/{ctype}: {e}')
 
-        # بدون access_hash هم یک‌بار
-        if access_hash is not None:
-            peer2 = Peer(type=ptype, id=peer_id)
-            call2 = SendMessage(
-                peer=peer2,
-                message_id=generate_id(),
-                content=content,
-                chat=chat,
-            )
-            try:
-                result = await client(call2)
-                msg = getattr(result, 'message', result)
-                return {
-                    'ok': True,
-                    'message_id': getattr(msg, 'message_id', None),
-                    'date': getattr(msg, 'date', None),
-                    'peer_id': peer_id,
-                    'combo': f'{ptype}/{ctype}/nohash',
-                    'without_quote': True,
-                }
-            except Exception as e:
-                errors.append(f'{ptype}/{ctype}/nohash: {e}')
-
-    return {'ok': False, 'error': 'send_failed', 'tries': errors, 'peer_id': peer_id, 'access_hash': access_hash}
+    return {'ok': False, 'error': 'send_failed', 'tries': errors, 'peer_id': peer_id}
 
 
 def send_text_to_channel(channel_ref: str, text: str) -> Dict[str, Any]:
@@ -323,36 +286,70 @@ def send_text_to_channel(channel_ref: str, text: str) -> Dict[str, Any]:
 
         peer_id = int(resolved['peer_id'])
         access_hash = resolved.get('access_hash')
+        try:
+            await client.join_public_chat(peer_id)
+        except Exception as e:
+            logger.info('join: %s', e)
+        return await _send_text_raw(client, peer_id, access_hash, text)
 
+    return _run(_with_client(_fn))
+
+
+def send_local_file_to_channel(
+    channel_ref: str,
+    file_path: str,
+    caption: str = '',
+    kind: str = 'photo',
+) -> Dict[str, Any]:
+    """آپلود فایل محلی به کانال (بدون نقل‌قول) — مسیر download/upload."""
+
+    async def _fn(client):
+        from aiobale.enums import ChatType
+        from aiobale.types import FileInput
+
+        path = Path(file_path)
+        if not path.exists():
+            return {'ok': False, 'error': f'file_missing: {file_path}'}
+
+        resolved = await _resolve_peer(client, channel_ref)
+        if not resolved.get('ok'):
+            return {'ok': False, 'error': resolved.get('error')}
+        peer_id = int(resolved['peer_id'])
         try:
             await client.join_public_chat(peer_id)
         except Exception as e:
             logger.info('join: %s', e)
 
-        # اگر ادمین نیست، پیام واضح‌تر
-        try:
-            perms = await client.get_member_permissions(peer_id, client.id)
-            dump = perms.model_dump() if hasattr(perms, 'model_dump') else {}
-
-            def _b(key):
-                v = dump.get(key)
-                if isinstance(v, dict):
-                    return bool(v.get('value') or v.get('1'))
-                return bool(v)
-
-            if not (_b('send_message') or _b('send_media')):
+        fin = FileInput(str(path))
+        errors: List[str] = []
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+            try:
+                if kind == 'photo':
+                    msg = await client.send_photo(
+                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
+                    )
+                elif kind == 'video':
+                    msg = await client.send_video(
+                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
+                    )
+                else:
+                    msg = await client.send_document(
+                        fin, chat_id=peer_id, chat_type=ctype, caption=caption or None
+                    )
                 return {
-                    'ok': False,
-                    'error': 'not_admin_or_no_send_permission',
+                    'ok': True,
+                    'message_id': getattr(msg, 'message_id', None),
+                    'date': getattr(msg, 'date', None),
                     'peer_id': peer_id,
-                    'access_hash': access_hash,
-                    'permissions': dump,
-                    'hint': 'کاربر لینک‌یار را در کانال ادمین کنید (با حق ارسال پیام).',
+                    'chat_type': str(ctype),
+                    'without_quote': True,
+                    'method': f'send_{kind}',
                 }
-        except Exception as e:
-            logger.info('perms before send: %s', e)
+            except Exception as e:
+                errors.append(f'{ctype}: {e}')
+                logger.info('send_%s %s failed: %s', kind, ctype, e)
 
-        return await _send_text_raw(client, peer_id, access_hash, text)
+        return {'ok': False, 'error': 'upload_send_failed', 'tries': errors}
 
     return _run(_with_client(_fn))
 
