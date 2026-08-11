@@ -76,11 +76,6 @@ def _bot_url(path: str) -> str:
 
 
 def inline_keyboard(rows: Sequence[Sequence[Dict[str, str]]]) -> Dict[str, Any]:
-    """Build Telegram/Bale-style InlineKeyboardMarkup.
-
-    Each button dict needs 'text' and either 'callback_data' or 'url'.
-    callback_data should stay under 64 bytes.
-    """
     return {'inline_keyboard': [list(row) for row in rows]}
 
 
@@ -162,7 +157,6 @@ def answer_callback_query(
     text: Optional[str] = None,
     show_alert: bool = False,
 ) -> Dict[str, Any]:
-    """Stop the loading spinner on an inline button; optional toast/alert."""
     url = _bot_url('answerCallbackQuery')
     body: Dict[str, Any] = {'callback_query_id': callback_query_id}
     if text is not None:
@@ -213,6 +207,66 @@ def forward_message(to_chat_id: str, from_chat_id: str, message_id: int) -> Dict
     except requests.RequestException as e:
         logger.exception('forward_message failed')
         return {'error': str(e)}
+
+
+def copy_message(
+    to_chat_id: str,
+    from_chat_id: str,
+    message_id: int,
+    caption: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Copy without forward attribution (Bot API copyMessage)."""
+    url = _bot_url('copyMessage')
+    payload: Dict[str, Any] = {
+        'chat_id': to_chat_id,
+        'from_chat_id': from_chat_id,
+        'message_id': message_id,
+    }
+    if caption is not None:
+        payload['caption'] = caption
+    try:
+        r = requests.post(url, json=payload, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        logger.exception('copy_message failed')
+        try:
+            return {'error': str(e), 'body': r.text if 'r' in dir() else None, 'ok': False}
+        except Exception:
+            return {'error': str(e), 'ok': False}
+
+
+def get_file(file_id: str) -> Dict[str, Any]:
+    url = _bot_url('getFile')
+    try:
+        r = requests.get(url, params={'file_id': file_id}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        logger.exception('get_file failed')
+        return {'error': str(e), 'ok': False}
+
+
+def download_file_bytes(file_path: str) -> Optional[bytes]:
+    """Download file body. file_path is the path from getFile result."""
+    token = _token()
+    base = _api_base().rstrip('/')
+    # Bale/Telegram style: /file/bot<token>/<path>
+    url = f'{base}/file/bot{token}/{file_path.lstrip("/")}'
+    try:
+        r = requests.get(url, timeout=120)
+        r.raise_for_status()
+        return r.content
+    except requests.RequestException as e:
+        logger.exception('download_file_bytes failed url=%s', url)
+        # fallback some deployments use different layout
+        try:
+            url2 = f'{base}/bot{token}/file/{file_path.lstrip("/")}'
+            r2 = requests.get(url2, timeout=120)
+            r2.raise_for_status()
+            return r2.content
+        except requests.RequestException:
+            return None
 
 
 def get_chat_info(chat_id: str) -> Dict[str, Any]:
