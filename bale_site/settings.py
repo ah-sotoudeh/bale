@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'channels_app',
     'orders',
     'wallet',
+    'miniapp',
 ]
 
 MIDDLEWARE = [
@@ -100,7 +101,7 @@ STATIC_URL = '/static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# لینک‌سازه = بازوی گفتگو
+# لینک‌ساز = بازوی گفتگو
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 # لینک‌یار = کاربر شخصی (JWT سشن web.bale.ai) — همان BALE_TOKEN در bale-ai
 BALE_TOKEN = os.environ.get('BALE_TOKEN', '') or os.environ.get('LINKYAR_TOKEN', '')
@@ -113,6 +114,10 @@ OPERATOR_BALE_ID = os.environ.get('OPERATOR_BALE_ID', '')
 PLATFORM_FEE_PERCENT = int(os.environ.get('PLATFORM_FEE_PERCENT', '14'))
 MIN_PAYOUT_TOMAN = int(os.environ.get('MIN_PAYOUT_TOMAN', '100000'))
 
+# HTTPS public URL of this server for Mini App (e.g. https://xxx.ngrok-free.app)
+MINIAPP_BASE_URL = os.environ.get('MINIAPP_BASE_URL', '').rstrip('/')
+MINIAPP_MANAGER_PATH = '/miniapp/manager/'
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework.authentication.SessionAuthentication',
@@ -123,3 +128,6 @@ REST_FRAMEWORK = {
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Allow Bale web to embed miniapp iframe in DEBUG
+X_FRAME_OPTIONS = 'ALLOWALL' if DEBUG else 'SAMEORIGIN'
