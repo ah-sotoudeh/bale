@@ -100,7 +100,8 @@ def role_keyboard() -> Dict[str, Any]:
         [
             {'text': '📢 مدیر کانال هستم', 'callback_data': 'role:manager'},
             {'text': '🛒 مشتری هستم', 'callback_data': 'role:customer'},
-        ]
+        ],
+        [{'text': '🎛️ پنل مدیر', 'callback_data': 'mgr:home'}],
     ])
 
 
@@ -143,7 +144,7 @@ def start_message(user: User) -> Tuple[str, Dict[str, Any]]:
     text = (
         'سلام 👋 به ربات تبلیغات بله خوش آمدید.\n\n'
         f'آیدی شما: {handle}\n\n'
-        'نقش خود را انتخاب کنید.'
+        'نقش خود را انتخاب کنید یا پنل مدیر را باز کنید.'
     )
     return text, role_keyboard()
 
@@ -175,6 +176,12 @@ def handle_role_callback(
         return
 
     if role == 'manager':
+        # اگر قبلاً کانال دارد → پنل؛ وگرنه ثبت لینک
+        if Channel.objects.filter(manager=user).exists():
+            from bot_flow.manager_panel import open_panel
+
+            open_panel(chat_id, bale_user_id, username)
+            return
         save_session(sess, STATE_AWAIT_LINKS, role='manager', verified_ids=[])
         proof = user.bale_handle or user.bale_user_id
         bc.send_message(
@@ -510,12 +517,10 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     elif not pub.get('error'):
         bc.send_message(str(chat_id), f'✅ «{label}» در {reference_channel()}')
 
-    save_session(sess, STATE_AWAIT_LINKS, role='manager', package_mode=False)
-    kb = bc.inline_keyboard([
-        [{'text': '📅 روزهای خالی', 'callback_data': 'free:list'}],
-        [{'text': '⚙️ تغییر حالت انتشار', 'callback_data': 'pmode_edit:start'}],
-    ])
-    bc.send_message(str(chat_id), 'ادامه یا /free', reply_markup=kb)
+    save_session(sess, STATE_IDLE, role='manager', package_mode=False)
+    from bot_flow.manager_panel import open_panel
+
+    open_panel(chat_id, bale_user_id)
     return True
 
 
