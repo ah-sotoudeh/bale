@@ -56,6 +56,7 @@ class OrderItem(models.Model):
         ('none', 'none'),
         ('paid', 'paid'),
         ('remind_sent', 'remind_sent'),
+        ('awaiting_manager_publish', 'awaiting_manager_publish'),
         ('awaiting_customer_confirm', 'awaiting_customer_confirm'),
         ('awaiting_operator', 'awaiting_operator'),
         ('executed', 'executed'),
@@ -83,7 +84,8 @@ class OrderItem(models.Model):
     published_link = models.CharField(max_length=500, blank=True, default='')
     customer_confirm_deadline = models.DateTimeField(null=True, blank=True)
     executed_at = models.DateTimeField(null=True, blank=True)
-    channel_message_id = models.CharField(max_length=64, null=True, blank=True)
+    # JSON list of posts: [{channel_id, ref, message_id, date, permalink}, ...]
+    channel_message_id = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f'Item #{self.id} of Order #{self.order_id}'
