@@ -1,4 +1,4 @@
-"""Manager registration: single channels or multi-channel packages."""
+"""Manager registration: single channels or multi-channel packages + publish mode."""
 from __future__ import annotations
 
 import logging
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 STATE_IDLE = 'idle'
 STATE_AWAIT_ROLE = 'await_role'
 STATE_AWAIT_LINKS = 'await_links'
+STATE_AWAIT_PUBLISH_MODE = 'await_publish_mode'
 STATE_AWAIT_GROUP_NAME = 'await_group_name'
 STATE_AWAIT_TARIFFS = 'await_tariffs'
 
@@ -101,6 +102,40 @@ def role_keyboard() -> Dict[str, Any]:
             {'text': '🛒 مشتری هستم', 'callback_data': 'role:customer'},
         ]
     ])
+
+
+def publish_mode_keyboard() -> Dict[str, Any]:
+    return bc.inline_keyboard([
+        [{
+            'text': '✅ ۱) لینک‌ساز ادمین (پیشنهادی)',
+            'callback_data': f'pmode:{Channel.PUBLISH_BOT}',
+        }],
+        [{
+            'text': '۲) لینک‌یار ادمین',
+            'callback_data': f'pmode:{Channel.PUBLISH_LINKYAR}',
+        }],
+        [{
+            'text': '۳) ارسال دستی خودم',
+            'callback_data': f'pmode:{Channel.PUBLISH_MANUAL}',
+        }],
+    ])
+
+
+def publish_mode_help_text() -> str:
+    from integrations import linkyar_client as ly
+
+    bot_name = '@linkbank_bot'
+    ly_name = ly.linkyar_username()
+    return (
+        'نحوهٔ انتشار تبلیغ در کانال(ها) را انتخاب کنید:\n\n'
+        f'1️⃣ *لینک‌ساز ادمین* (پایدارترین)\n'
+        f'   {bot_name} را در کانال ادمین کنید تا خودش بفرستد.\n\n'
+        f'2️⃣ *لینک‌یار ادمین*\n'
+        f'   اگر ظرفیت add member پر است، {ly_name} را ادمین کنید.\n\n'
+        f'3️⃣ *ارسال دستی*\n'
+        f'   خودتان می‌فرستید؛ قبل از موعد یادآوری می‌شود و دکمه «منتشر شد» می‌زنید.\n\n'
+        'گزارش به مشتری همیشه فقط از لینک‌ساز است.'
+    )
 
 
 def start_message(user: User) -> Tuple[str, Dict[str, Any]]:
@@ -192,6 +227,17 @@ def _verify_and_register_channels(
     return ok, fail, notes
 
 
+def _ask_publish_mode(chat_id: str, sess: BotSession, channel_ids: List[int], package: bool) -> None:
+    save_session(
+        sess,
+        STATE_AWAIT_PUBLISH_MODE,
+        role='manager',
+        pending_channel_ids=channel_ids,
+        package_mode=package,
+    )
+    bc.send_message(str(chat_id), publish_mode_help_text(), reply_markup=publish_mode_keyboard())
+
+
 def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     sess = get_session(bale_user_id)
     if sess.state != STATE_AWAIT_LINKS:
@@ -216,38 +262,89 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         bc.send_message(str(chat_id), '\n\n'.join(parts))
         return True
 
-    channel_ids = [c.id for c in ok]
+    if parts:
+        bc.send_message(str(chat_id), '\n\n'.join(parts))
 
-    if len(ok) > 1:
+    channel_ids = [c.id for c in ok]
+    _ask_publish_mode(chat_id, sess, channel_ids, package=len(ok) > 1)
+    return True
+
+
+def handle_publish_mode_callback(
+    chat_id: str,
+    bale_user_id: str,
+    mode: str,
+    cq_id: Optional[str] = None,
+) -> None:
+    if cq_id:
+        bc.answer_callback_query(str(cq_id), text='ثبت شد')
+
+    sess = get_session(bale_user_id)
+    if sess.state != STATE_AWAIT_PUBLISH_MODE:
+        bc.send_message(str(chat_id), 'الان انتخاب حالت انتشار لازم نیست. /start')
+        return
+
+    if mode not in (
+        Channel.PUBLISH_BOT,
+        Channel.PUBLISH_LINKYAR,
+        Channel.PUBLISH_MANUAL,
+    ):
+        bc.send_message(str(chat_id), 'حالت نامعتبر.')
+        return
+
+    manager = ensure_user(bale_user_id)
+    ids = list(sess.data.get('pending_channel_ids') or [])
+    channels = list(Channel.objects.filter(id__in=ids, manager=manager))
+    if not channels:
+        bc.send_message(str(chat_id), 'کانال پیدا نشد. /start')
+        save_session(sess, STATE_AWAIT_LINKS)
+        return
+
+    Channel.objects.filter(id__in=[c.id for c in channels]).update(publish_mode=mode)
+    label = dict(Channel.PUBLISH_MODE_CHOICES).get(mode, mode)
+
+    hint = ''
+    if mode == Channel.PUBLISH_BOT:
+        hint = '\nلطفاً @linkbank_bot را در کانال(ها) ادمین کنید.'
+    elif mode == Channel.PUBLISH_LINKYAR:
+        from integrations import linkyar_client as ly
+
+        hint = f'\nلطفاً {ly.linkyar_username()} را در کانال(ها) ادمین کنید.'
+
+    bc.send_message(str(chat_id), f'حالت انتشار: {label} ✅{hint}')
+
+    package_mode = bool(sess.data.get('package_mode')) and len(channels) > 1
+    if package_mode:
         save_session(
             sess,
             STATE_AWAIT_GROUP_NAME,
             role='manager',
-            pending_channel_ids=channel_ids,
+            pending_channel_ids=ids,
             package_mode=True,
+            publish_mode=mode,
         )
-        names = '\n'.join(f'{i+1}. {c.name} — {c.link}' for i, c in enumerate(ok))
-        parts.append(
-            f'\n📦 مجموعه ({len(ok)} کانال)\n{names}\n\nنام مجموعه را بفرستید:'
+        names = '\n'.join(f'{i+1}. {c.name} — {c.link}' for i, c in enumerate(channels))
+        bc.send_message(
+            str(chat_id),
+            f'📦 مجموعه ({len(channels)} کانال)\n{names}\n\nنام مجموعه را بفرستید:',
         )
-        bc.send_message(str(chat_id), '\n\n'.join(parts))
-        return True
+        return
 
     save_session(
         sess,
         STATE_AWAIT_TARIFFS,
         role='manager',
         package_mode=False,
-        tariff_channel_id=ok[0].id,
+        tariff_channel_id=channels[0].id,
         tariff_group_id=None,
-        pending_channel_ids=channel_ids,
+        pending_channel_ids=ids,
+        publish_mode=mode,
     )
-    parts.append(
-        f'\nتعرفه «{ok[0].name}»:\nنام | مدت_ساعت | قیمت_تومان\n'
-        'مثال: روزانه | 24 | 300'
+    bc.send_message(
+        str(chat_id),
+        f'تعرفه «{channels[0].name}»:\nنام | مدت_ساعت | قیمت_تومان\n'
+        'مثال: روزانه | 24 | 300',
     )
-    bc.send_message(str(chat_id), '\n\n'.join(parts))
-    return True
 
 
 def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
@@ -414,9 +511,52 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         bc.send_message(str(chat_id), f'✅ «{label}» در {reference_channel()}')
 
     save_session(sess, STATE_AWAIT_LINKS, role='manager', package_mode=False)
-    kb = bc.inline_keyboard([[{'text': '📅 روزهای خالی', 'callback_data': 'free:list'}]])
+    kb = bc.inline_keyboard([
+        [{'text': '📅 روزهای خالی', 'callback_data': 'free:list'}],
+        [{'text': '⚙️ تغییر حالت انتشار', 'callback_data': 'pmode_edit:start'}],
+    ])
     bc.send_message(str(chat_id), 'ادامه یا /free', reply_markup=kb)
     return True
+
+
+def handle_pmode_edit_start(chat_id: str, bale_user_id: str, cq_id: Optional[str] = None) -> None:
+    if cq_id:
+        bc.answer_callback_query(str(cq_id))
+    manager = ensure_user(bale_user_id)
+    channels = list(Channel.objects.filter(manager=manager).order_by('id')[:20])
+    if not channels:
+        bc.send_message(str(chat_id), 'کانالی ثبت نشده.')
+        return
+    rows = []
+    for ch in channels:
+        rows.append([{
+            'text': f'{ch.name} ({ch.publish_mode})',
+            'callback_data': f'pmode_ch:{ch.id}',
+        }])
+    bc.send_message(
+        str(chat_id),
+        'کانال را برای تغییر حالت انتشار انتخاب کنید:',
+        reply_markup=bc.inline_keyboard(rows),
+    )
+
+
+def handle_pmode_channel_pick(
+    chat_id: str, bale_user_id: str, channel_id: int, cq_id: Optional[str] = None
+) -> None:
+    if cq_id:
+        bc.answer_callback_query(str(cq_id))
+    manager = ensure_user(bale_user_id)
+    ch = Channel.objects.filter(id=channel_id, manager=manager).first()
+    if not ch:
+        bc.send_message(str(chat_id), 'کانال یافت نشد.')
+        return
+    sess = get_session(bale_user_id)
+    save_session(sess, STATE_AWAIT_PUBLISH_MODE, pending_channel_ids=[ch.id], package_mode=False)
+    bc.send_message(
+        str(chat_id),
+        f'حالت فعلی «{ch.name}»: {ch.publish_mode_label}\n' + publish_mode_help_text(),
+        reply_markup=publish_mode_keyboard(),
+    )
 
 
 def try_handle_callback(
@@ -433,6 +573,19 @@ def try_handle_callback(
     if data.startswith('role:'):
         handle_role_callback(
             chat_id, bale_user_id, data.split(':', 1)[1], cq_id=cq_id, username=username
+        )
+        return True
+    if data.startswith('pmode:') and not data.startswith('pmode_'):
+        handle_publish_mode_callback(
+            chat_id, bale_user_id, data.split(':', 1)[1], cq_id=cq_id
+        )
+        return True
+    if data == 'pmode_edit:start':
+        handle_pmode_edit_start(chat_id, bale_user_id, cq_id=cq_id)
+        return True
+    if data.startswith('pmode_ch:'):
+        handle_pmode_channel_pick(
+            chat_id, bale_user_id, int(data.split(':')[1]), cq_id=cq_id
         )
         return True
     return False
