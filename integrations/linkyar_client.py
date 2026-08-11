@@ -1,9 +1,7 @@
 """لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN.
 
-ارسال بدون نقل‌قول: SendMessage / send_photo / send_document
 پیوند مطلب: https://ble.ir/{username}/{message_id}/{date_ms}
-  message_id و date باید از load_history (aiobale) گرفته شوند —
-  message_id برگشتی Bot API با شناسه داخلی یکی نیست.
+message_id داخلی بله ≠ message_id برگشتی Bot API.
 """
 from __future__ import annotations
 
@@ -51,11 +49,7 @@ def linkyar_username() -> str:
 
 
 def message_permalink(channel_username: str, message_id: int, date_ms: int) -> str:
-    """پیوند رونوشت مطلب — همان فرمت وب بله.
-
-    مثال واقعی:
-      https://ble.ir/linktest/4694750267996327172/1786442151499
-    """
+    """https://ble.ir/linktest/4694750267996327172/1786442151499"""
     uname = str(channel_username).lstrip('@').strip()
     return f'https://ble.ir/{uname}/{int(message_id)}/{int(date_ms)}'
 
@@ -197,57 +191,146 @@ async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
     return sc if sc else {'ok': False, 'error': 'resolve_failed'}
 
 
-def _summarize_aiobale_message(msg, channel_username: str) -> Dict[str, Any]:
-    """Extract fields needed for permalink + debugging."""
-    mid = getattr(msg, 'message_id', None)
-    date = getattr(msg, 'date', None)
-    sender = getattr(msg, 'sender_id', None)
-    content = getattr(msg, 'content', None)
+def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[str, Any]]:
+    """Parse one MessageData dict from raw LoadHistory (aliases as str keys)."""
+    if not isinstance(item, dict):
+        return None
+
+    def g(*keys):
+        for k in keys:
+            if k in item:
+                return item[k]
+            sk = str(k)
+            if sk in item:
+                return item[sk]
+        return None
+
+    sender = g(1, '1')
+    mid = g(2, '2')
+    date = g(3, '3')
+    content = g(4, '4')
+
+    if mid is None:
+        return None
+
     kind = 'unknown'
     preview = ''
     mime = None
     file_id = None
 
-    if content is not None:
-        text = getattr(content, 'text', None)
-        doc = getattr(content, 'document', None)
-        if text is not None:
+    if isinstance(content, dict):
+        # MessageContent: text alias 1, document alias 2 (approx)
+        text = content.get(1) or content.get('1')
+        doc = content.get(2) or content.get('2')
+        if isinstance(text, dict):
             kind = 'text'
-            preview = (getattr(text, 'value', None) or '')[:120]
-        elif doc is not None:
-            mime = getattr(doc, 'mime_type', None) or ''
-            file_id = getattr(doc, 'file_id', None)
-            name = getattr(doc, 'name', None)
+            preview = str(text.get(1) or text.get('1') or '')[:120]
+        elif isinstance(doc, dict):
+            mime = str(doc.get(5) or doc.get('5') or '')
+            file_id = doc.get(1) or doc.get('1')
+            name = doc.get(4) or doc.get('4')
             if isinstance(name, dict):
                 name = str(name)
-            cap = getattr(doc, 'caption', None)
+            cap = doc.get(8) or doc.get('8')
             cap_text = ''
-            if cap is not None:
-                cap_text = getattr(cap, 'content', None) or ''
-            if mime.startswith('image/') or (isinstance(name, str) and name.lower().endswith(
-                ('.jpg', '.jpeg', '.png', '.webp')
-            )):
+            if isinstance(cap, dict):
+                cap_text = str(cap.get(1) or cap.get('1') or '')
+            if mime.startswith('image/') or (
+                isinstance(name, str) and name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))
+            ):
                 kind = 'photo'
             elif mime.startswith('video/'):
                 kind = 'video'
             else:
                 kind = 'document'
-            preview = (cap_text or name or mime or '')[:120]
+            preview = (cap_text or (name if isinstance(name, str) else '') or mime)[:120]
+
+    try:
+        mid_i = int(mid)
+    except (TypeError, ValueError):
+        return None
+    try:
+        date_i = int(date) if date is not None else None
+    except (TypeError, ValueError):
+        date_i = None
+    try:
+        sender_i = int(sender) if sender is not None else None
+    except (TypeError, ValueError):
+        sender_i = None
 
     permalink = None
-    if mid is not None and date is not None and channel_username:
-        permalink = message_permalink(channel_username, int(mid), int(date))
+    if date_i is not None and channel_username:
+        permalink = message_permalink(channel_username, mid_i, date_i)
 
     return {
-        'message_id': mid,
-        'date': date,
-        'sender_id': sender,
+        'message_id': mid_i,
+        'date': date_i,
+        'sender_id': sender_i,
         'kind': kind,
         'preview': preview,
         'mime_type': mime,
         'file_id': file_id,
         'permalink': permalink,
+        'raw_keys': list(item.keys()) if isinstance(item, dict) else None,
     }
+
+
+async def _load_history_raw(
+    client,
+    peer_id: int,
+    access_hash: Optional[int],
+    limit: int = 6,
+) -> Dict[str, Any]:
+    """Call LoadHistory and decode without pydantic MessageContent validation."""
+    from aiobale.enums import PeerType, ListLoadMode, Services
+    from aiobale.utils import clean_grpc
+    from aiobale.utils.grpc_post import add_header
+    import aiohttp
+
+    session = client.session
+    if not session.session or session.session.closed:
+        session.session = aiohttp.ClientSession()
+
+    peer: Dict[str, Any] = {'1': int(PeerType.GROUP), '2': int(peer_id)}
+    if access_hash is not None:
+        peer['3'] = int(access_hash)
+
+    body = {
+        '1': peer,
+        '2': -1,  # offset_date
+        '4': int(ListLoadMode.BACKWARD),
+        '5': int(limit),
+    }
+
+    headers = {
+        'User-Agent': session.user_agent,
+        'Origin': 'https://web.bale.ai',
+        'content-type': 'application/grpc-web+proto',
+        **{k[0].upper() + k[1:]: v for k, v in session._get_meta().items()},
+        **session._build_headers(client.token),
+    }
+    service = Services.MESSAGING.value
+    url = f'{session.post_url}/{service}/LoadHistory'
+    payload = add_header(session.encoder(body))
+    req = await session.session.post(url=url, headers=headers, data=payload)
+    content = await req.read()
+    grpc_err = req.headers.get('grpc-message')
+    if grpc_err:
+        return {'ok': False, 'error': grpc_err}
+
+    raw = session.decoder(clean_grpc(content))
+    data = (raw or {}).get('1') or (raw or {}).get(1)
+    if data is None:
+        return {'ok': False, 'error': 'empty_history', 'raw_keys': list((raw or {}).keys())}
+
+    if isinstance(data, dict):
+        items = [data]
+    elif isinstance(data, list):
+        items = data
+    else:
+        return {'ok': False, 'error': f'unexpected_data_type:{type(data)}', 'raw': str(data)[:500]}
+
+    return {'ok': True, 'items': items, 'raw_count': len(items)}
 
 
 def get_me() -> Dict[str, Any]:
@@ -305,11 +388,9 @@ def is_admin_of_channel(channel_ref: str) -> bool:
 
 
 def load_channel_history(channel_ref: str, limit: int = 6) -> Dict[str, Any]:
-    """آخرین پیام‌های کانال + پیوند واقعی ble.ir برای هر کدام."""
+    """آخرین پیام‌های کانال + پیوند واقعی ble.ir (raw parser)."""
 
     async def _fn(client):
-        from aiobale.enums import ChatType, ListLoadMode
-
         ref = str(channel_ref).strip()
         uname = ref.lstrip('@') if not ref.lstrip('-').isdigit() else ''
 
@@ -318,47 +399,35 @@ def load_channel_history(channel_ref: str, limit: int = 6) -> Dict[str, Any]:
             return {'ok': False, 'error': resolved.get('error'), 'resolved': resolved}
 
         peer_id = int(resolved['peer_id'])
+        access_hash = resolved.get('access_hash')
         try:
             await client.join_public_chat(peer_id)
         except Exception as e:
             logger.info('join: %s', e)
 
-        errors: List[str] = []
-        messages: List[Any] = []
-        used_type = None
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
-            try:
-                messages = await client.load_history(
-                    chat_id=peer_id,
-                    chat_type=ctype,
-                    limit=int(limit),
-                    offset_date=-1,
-                    load_mode=ListLoadMode.BACKWARD,
-                )
-                used_type = str(ctype)
-                break
-            except Exception as e:
-                errors.append(f'{ctype}: {e}')
-                logger.info('load_history %s failed: %s', ctype, e)
-
-        if not messages and errors:
+        raw = await _load_history_raw(client, peer_id, access_hash, limit=int(limit))
+        if not raw.get('ok'):
             return {
                 'ok': False,
-                'error': 'load_history_failed',
-                'tries': errors,
+                'error': raw.get('error'),
                 'peer_id': peer_id,
+                'detail': raw,
             }
 
-        items = [_summarize_aiobale_message(m, uname) for m in (messages or [])]
-        # newest first is typical for BACKWARD; keep API order
+        items = []
+        for it in raw.get('items') or []:
+            parsed = _parse_raw_message_item(it, uname)
+            if parsed:
+                items.append(parsed)
+
         return {
             'ok': True,
             'peer_id': peer_id,
-            'access_hash': resolved.get('access_hash'),
-            'chat_type': used_type,
+            'access_hash': access_hash,
             'username': uname,
             'count': len(items),
             'messages': items,
+            'parser': 'raw_load_history',
         }
 
     return _run(_with_client(_fn))
@@ -487,7 +556,6 @@ async def _send_uploaded_document(
             }
         except Exception as e:
             errors.append(f'raw/{ctype}: {e}')
-            logger.info('raw media send %s failed: %s', ctype, e)
 
     return {'ok': False, 'error': 'raw_send_failed', 'tries': errors}
 
@@ -541,7 +609,6 @@ def send_local_file_to_channel(
             errors.extend(raw.get('tries') or [raw.get('error')])
         except Exception as e:
             errors.append(f'upload_or_raw: {e}')
-            logger.info('upload/raw path failed: %s', e)
 
         try:
             if kind == 'photo':
@@ -561,61 +628,18 @@ def send_local_file_to_channel(
                 'message_id': getattr(msg, 'message_id', None),
                 'date': getattr(msg, 'date', None),
                 'peer_id': peer_id,
-                'chat_type': 'GROUP',
-                'without_quote': True,
                 'method': f'send_{kind}_highlevel',
             }
         except Exception as e:
             errors.append(f'highlevel_GROUP: {e}')
 
-        # حتی اگر API error داد ولی پیام رفته باشد: تاریخچه را چک کن
         return {
             'ok': False,
             'error': 'upload_send_failed',
             'tries': errors,
             'peer_id': peer_id,
-            'access_hash': access_hash,
-            'hint': 'after send, call load_channel_history to recover real message_id/date',
+            'hint': 'use load_channel_history after send to recover real ids',
         }
-
-    return _run(_with_client(_fn))
-
-
-def send_document_without_quote(
-    channel_ref: str,
-    document_message,
-    caption: Optional[str] = None,
-) -> Dict[str, Any]:
-    async def _fn(client):
-        from aiobale.enums import ChatType
-
-        resolved = await _resolve_peer(client, channel_ref)
-        if not resolved.get('ok'):
-            return {'ok': False, 'error': resolved.get('error')}
-        peer_id = int(resolved['peer_id'])
-        try:
-            await client.join_public_chat(peer_id)
-        except Exception:
-            pass
-        errors = []
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL):
-            try:
-                msg = await client.send_document(
-                    document_message,
-                    chat_id=peer_id,
-                    chat_type=ctype,
-                    caption=caption,
-                    use_own_content=True,
-                )
-                return {
-                    'ok': True,
-                    'message_id': getattr(msg, 'message_id', None),
-                    'date': getattr(msg, 'date', None),
-                    'without_quote': True,
-                }
-            except Exception as e:
-                errors.append(str(e))
-        return {'ok': False, 'error': 'send_document_failed', 'tries': errors}
 
     return _run(_with_client(_fn))
 
