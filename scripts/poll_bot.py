@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling: لینک‌سازه (Bot API) + لینک‌یار (aiobale user)."""
+"""Long-polling: لینک‌ساز (Bot API) + لینک‌یار (aiobale user)."""
 from __future__ import annotations
 
 import logging
@@ -37,7 +37,18 @@ from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
 from orders.cart import expire_timed_out_items, process_manager_item  # noqa: E402
-from orders.publish import daily_admin_audit, delete_expired_posts, publish_due_items  # noqa: E402
+from orders.execution import (  # noqa: E402
+    customer_confirm_execution,
+    escalate_unconfirmed,
+    operator_resolve,
+    send_publish_reminders,
+)
+from orders.publish import (  # noqa: E402
+    daily_admin_audit,
+    delete_expired_posts,
+    publish_due_items,
+    verify_manager_published,
+)
 from orders.services import process_payment_paid  # noqa: E402
 from users.models import BotSession, User  # noqa: E402
 from wallet.services import (  # noqa: E402
@@ -76,15 +87,15 @@ def _cmd_id(m: re.Match) -> str | None:
 def ensure_token() -> None:
     token = _token()
     if not token:
-        log.error('BALE_BOT_TOKEN missing (لینک‌سازه)')
+        log.error('BALE_BOT_TOKEN missing (لینک‌ساز)')
         sys.exit(1)
-    log.info('لینک‌سازه bot token length=%d', len(token))
+    log.info('لینک‌ساز bot token length=%d', len(token))
 
     ut = ly.user_token()
     if not ut:
         log.warning(
             'BALE_TOKEN missing — لینک‌یار (کاربر) وصل نیست. '
-            'ارسال خودکار کانال کار نمی‌کند تا JWT سشن را در .env بگذارید.'
+            'حالت linkyar و تأیید تاریخچه محدود می‌شود.'
         )
     else:
         log.info('لینک‌یار user token length=%d', len(ut))
@@ -98,10 +109,10 @@ def ensure_token() -> None:
 def prepare_polling() -> None:
     me = bc.get_me()
     if me.get('error') or not me.get('ok', True):
-        log.error('لینک‌سازه getMe failed: %s', me)
+        log.error('لینک‌ساز getMe failed: %s', me)
         sys.exit(1)
     result = me.get('result') or me
-    log.info('لینک‌سازه OK → id=%s @%s', result.get('id'), result.get('username'))
+    log.info('لینک‌ساز OK → id=%s @%s', result.get('id'), result.get('username'))
     info = bc.get_webhook_info()
     url = (info.get('result') or {}).get('url') or ''
     if url:
@@ -240,6 +251,44 @@ def handle_callback_query(cq: dict) -> None:
         )
         return
 
+    # manual publish confirm: published:ITEM_ID or published:ITEM_ID:CHANNEL_ID
+    if data.startswith('published:'):
+        parts = data.split(':')
+        item_id = int(parts[1])
+        channel_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+        r = verify_manager_published(item_id, bale_uid, channel_id=channel_id)
+        if cq_id:
+            bc.answer_callback_query(
+                str(cq_id),
+                text='تأیید شد' if r.get('ok') else 'بررسی نشد',
+            )
+        if r.get('ok'):
+            links = r.get('permalinks') or []
+            bc.send_message(
+                chat_id,
+                '✅ انتشار تأیید شد.\n' + '\n'.join(str(x) for x in links if x),
+            )
+        else:
+            bc.send_message(chat_id, f'❌ {r.get("error") or r}')
+        return
+
+    if data.startswith('execok:') or data.startswith('execno:'):
+        item_id = int(data.split(':')[1])
+        ok = data.startswith('execok:')
+        r = customer_confirm_execution(item_id, bale_uid, ok)
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text='ثبت شد' if r.get('ok') else 'خطا')
+        bc.send_message(chat_id, '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')
+        return
+
+    if data.startswith('opok:') or data.startswith('opno:'):
+        item_id = int(data.split(':')[1])
+        r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
+        if cq_id:
+            bc.answer_callback_query(str(cq_id), text='OK' if r.get('ok') else 'خطا')
+        bc.send_message(chat_id, f'{r}')
+        return
+
     if cq_id:
         bc.answer_callback_query(str(cq_id), text='؟')
 
@@ -346,20 +395,28 @@ def run_background_jobs() -> None:
         if n:
             log.info('expired manager timeouts: %s', n)
 
-        if ly.user_token():
-            pub = publish_due_items()
-            if pub.get('published') or pub.get('failed_channels'):
-                log.info('publish job: %s', pub)
+        reminded = send_publish_reminders()
+        if reminded:
+            log.info('publish reminders: %s', reminded)
 
+        pub = publish_due_items()
+        if any(pub.get(k) for k in ('published', 'failed_channels', 'manual_reminded')):
+            log.info('publish job: %s', pub)
+
+        if ly.user_token():
             deleted = delete_expired_posts()
             if deleted:
                 log.info('deleted channel posts: %s', deleted)
 
-            today = timezone.localdate()
-            if _last_daily_audit_date != today:
-                audit = daily_admin_audit()
-                log.info('daily admin audit: %s', audit)
-                _last_daily_audit_date = today
+        escalated = escalate_unconfirmed()
+        if escalated:
+            log.info('escalated unconfirmed: %s', escalated)
+
+        today = timezone.localdate()
+        if _last_daily_audit_date != today:
+            audit = daily_admin_audit()
+            log.info('daily admin audit: %s', audit)
+            _last_daily_audit_date = today
     except Exception:
         log.exception('background jobs')
 
