@@ -1,17 +1,18 @@
-"""Ad execution lifecycle: remind → published → customer/operator confirm → wallet."""
+"""Ad execution lifecycle: remind (manual) → published verify → wallet."""
 from __future__ import annotations
 
 import logging
 import os
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from django.db import transaction
 from django.utils import timezone
 
+from channels_app.models import Channel
 from integrations import bale_client as bc
 from orders.models import OrderItem
-from users.models import User
+from orders.publish import targets_for_item
 from wallet.services import (
     OPERATOR_BALE_ID,
     apply_manager_penalty,
@@ -33,10 +34,9 @@ def _item_qs():
 
 
 def send_publish_reminders() -> int:
-    """Remind managers 2h before slot start for paid items not yet reminded."""
+    """Remind managers ~2h before slot for paid items on *manual* channels only."""
     now = timezone.now()
     window_end = now + timedelta(hours=REMIND_HOURS_BEFORE)
-    # paid items whose start is within next REMIND_HOURS and not yet reminded
     items = _item_qs().filter(
         execution_status='paid',
         requested_start__lte=window_end,
@@ -46,17 +46,25 @@ def send_publish_reminders() -> int:
     for it in items:
         if not it.manager or not it.manager.bale_user_id:
             continue
+        channels = targets_for_item(it)
+        manual_chs = [c for c in channels if (c.publish_mode or Channel.PUBLISH_BOT) == Channel.PUBLISH_MANUAL]
+        if not manual_chs:
+            continue
         owner = (
             it.tariff.group.name
             if it.tariff.group_id
             else (it.channel.name if it.channel else '?')
         )
-        kb = bc.inline_keyboard([
-            [{'text': '✅ منتشر شد', 'callback_data': f'published:{it.id}'}]
-        ])
+        rows = []
+        for ch in manual_chs:
+            rows.append([{
+                'text': f'✅ منتشر شد — {ch.name[:20]}',
+                'callback_data': f'published:{it.id}:{ch.id}',
+            }])
+        kb = bc.inline_keyboard(rows)
         bc.send_message(
             it.manager.bale_user_id,
-            f'⏰ یادآوری انتشار\n'
+            f'⏰ یادآوری انتشار (حالت دستی)\n'
             f'آیتم #{it.id} — {owner}\n'
             f'زمان: {timezone.localtime(it.effective_start)}\n'
             f'پس از ارسال بنر در کانال، دکمه زیر را بزنید.',
@@ -70,45 +78,10 @@ def send_publish_reminders() -> int:
 
 @transaction.atomic
 def mark_published(item_id: int, manager_bale_id: str, channel_link: str = '') -> Dict[str, Any]:
-    try:
-        it = _item_qs().get(id=item_id)
-    except OrderItem.DoesNotExist:
-        return {'ok': False, 'error': 'not_found'}
+    """Legacy entry — prefer orders.publish.verify_manager_published."""
+    from orders.publish import verify_manager_published
 
-    if it.manager and str(it.manager.bale_user_id) != str(manager_bale_id):
-        return {'ok': False, 'error': 'not_manager'}
-    if it.execution_status not in ('paid', 'remind_sent'):
-        return {'ok': False, 'error': 'bad_status', 'status': it.execution_status}
-
-    it.execution_status = 'awaiting_customer_confirm'
-    it.published_at = timezone.now()
-    it.customer_confirm_deadline = timezone.now() + timedelta(hours=CUSTOMER_CONFIRM_HOURS)
-    if channel_link:
-        it.published_link = channel_link[:500]
-    elif it.channel and it.channel.link:
-        it.published_link = it.channel.link[:500]
-    it.save()
-
-    cust = it.order.customer.bale_user_id
-    owner = (
-        it.tariff.group.name if it.tariff.group_id else (it.channel.name if it.channel else '?')
-    )
-    link = it.published_link or ''
-    kb = bc.inline_keyboard([
-        [
-            {'text': '✅ تأیید انتشار', 'callback_data': f'execok:{it.id}'},
-            {'text': '❌ منتشر نشده', 'callback_data': f'execno:{it.id}'},
-        ]
-    ])
-    if cust:
-        bc.send_message(
-            cust,
-            f'📢 بنر شما در «{owner}» ارسال شد.\n'
-            f'{("لینک: " + link) if link else ""}\n'
-            f'لطفاً تأیید کنید (مهلت {CUSTOMER_CONFIRM_HOURS} ساعت).',
-            reply_markup=kb,
-        )
-    return {'ok': True, 'item_id': it.id}
+    return verify_manager_published(item_id, manager_bale_id)
 
 
 @transaction.atomic
@@ -125,7 +98,6 @@ def customer_confirm_execution(item_id: int, customer_bale_id: str, ok: bool) ->
 
     if ok:
         return _finalize_executed(it)
-    # customer says not published → operator review
     it.execution_status = 'awaiting_operator'
     it.save(update_fields=['execution_status'])
     _notify_operator_review(it)
@@ -171,7 +143,6 @@ def _notify_operator_review(it: OrderItem) -> None:
         f'مبلغ: {it.price:,} ت'
     )
     bc.send_message(OPERATOR_BALE_ID, text, reply_markup=kb)
-    # forward banner if possible
     order = it.order
     if order.banner_message_id and order.banner_from_chat_id:
         try:
@@ -198,7 +169,6 @@ def operator_resolve(item_id: int, operator_bale_id: str, executed: bool) -> Dic
     if executed:
         return _finalize_executed(it)
 
-    # not executed: refund customer full price, penalize manager 14%
     it.execution_status = 'failed_publish'
     it.save(update_fields=['execution_status'])
     credit_customer_refund(
@@ -222,7 +192,6 @@ def operator_resolve(item_id: int, operator_bale_id: str, executed: bool) -> Dic
 
 
 def escalate_unconfirmed() -> int:
-    """After 12h without customer confirm → operator."""
     now = timezone.now()
     items = _item_qs().filter(
         execution_status='awaiting_customer_confirm',
