@@ -1,6 +1,9 @@
 """لینک‌یار = حساب کاربری شخصی via aiobale + BALE_TOKEN.
 
 ارسال بدون نقل‌قول: SendMessage / send_photo / send_document
+پیوند مطلب: https://ble.ir/{username}/{message_id}/{date_ms}
+  message_id و date باید از load_history (aiobale) گرفته شوند —
+  message_id برگشتی Bot API با شناسه داخلی یکی نیست.
 """
 from __future__ import annotations
 
@@ -45,6 +48,16 @@ def linkyar_username() -> str:
     if u and not u.startswith('@'):
         u = '@' + u
     return u or '@linkyar'
+
+
+def message_permalink(channel_username: str, message_id: int, date_ms: int) -> str:
+    """پیوند رونوشت مطلب — همان فرمت وب بله.
+
+    مثال واقعی:
+      https://ble.ir/linktest/4694750267996327172/1786442151499
+    """
+    uname = str(channel_username).lstrip('@').strip()
+    return f'https://ble.ir/{uname}/{int(message_id)}/{int(date_ms)}'
 
 
 def _inject_token(client, token: str) -> None:
@@ -184,6 +197,59 @@ async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
     return sc if sc else {'ok': False, 'error': 'resolve_failed'}
 
 
+def _summarize_aiobale_message(msg, channel_username: str) -> Dict[str, Any]:
+    """Extract fields needed for permalink + debugging."""
+    mid = getattr(msg, 'message_id', None)
+    date = getattr(msg, 'date', None)
+    sender = getattr(msg, 'sender_id', None)
+    content = getattr(msg, 'content', None)
+    kind = 'unknown'
+    preview = ''
+    mime = None
+    file_id = None
+
+    if content is not None:
+        text = getattr(content, 'text', None)
+        doc = getattr(content, 'document', None)
+        if text is not None:
+            kind = 'text'
+            preview = (getattr(text, 'value', None) or '')[:120]
+        elif doc is not None:
+            mime = getattr(doc, 'mime_type', None) or ''
+            file_id = getattr(doc, 'file_id', None)
+            name = getattr(doc, 'name', None)
+            if isinstance(name, dict):
+                name = str(name)
+            cap = getattr(doc, 'caption', None)
+            cap_text = ''
+            if cap is not None:
+                cap_text = getattr(cap, 'content', None) or ''
+            if mime.startswith('image/') or (isinstance(name, str) and name.lower().endswith(
+                ('.jpg', '.jpeg', '.png', '.webp')
+            )):
+                kind = 'photo'
+            elif mime.startswith('video/'):
+                kind = 'video'
+            else:
+                kind = 'document'
+            preview = (cap_text or name or mime or '')[:120]
+
+    permalink = None
+    if mid is not None and date is not None and channel_username:
+        permalink = message_permalink(channel_username, int(mid), int(date))
+
+    return {
+        'message_id': mid,
+        'date': date,
+        'sender_id': sender,
+        'kind': kind,
+        'preview': preview,
+        'mime_type': mime,
+        'file_id': file_id,
+        'permalink': permalink,
+    }
+
+
 def get_me() -> Dict[str, Any]:
     async def _fn(client):
         me = await client.get_me()
@@ -236,6 +302,66 @@ def is_admin_of_channel(channel_ref: str) -> bool:
         return bool(v)
 
     return _b('send_message') or _b('send_media')
+
+
+def load_channel_history(channel_ref: str, limit: int = 6) -> Dict[str, Any]:
+    """آخرین پیام‌های کانال + پیوند واقعی ble.ir برای هر کدام."""
+
+    async def _fn(client):
+        from aiobale.enums import ChatType, ListLoadMode
+
+        ref = str(channel_ref).strip()
+        uname = ref.lstrip('@') if not ref.lstrip('-').isdigit() else ''
+
+        resolved = await _resolve_peer(client, channel_ref)
+        if not resolved.get('ok'):
+            return {'ok': False, 'error': resolved.get('error'), 'resolved': resolved}
+
+        peer_id = int(resolved['peer_id'])
+        try:
+            await client.join_public_chat(peer_id)
+        except Exception as e:
+            logger.info('join: %s', e)
+
+        errors: List[str] = []
+        messages: List[Any] = []
+        used_type = None
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                messages = await client.load_history(
+                    chat_id=peer_id,
+                    chat_type=ctype,
+                    limit=int(limit),
+                    offset_date=-1,
+                    load_mode=ListLoadMode.BACKWARD,
+                )
+                used_type = str(ctype)
+                break
+            except Exception as e:
+                errors.append(f'{ctype}: {e}')
+                logger.info('load_history %s failed: %s', ctype, e)
+
+        if not messages and errors:
+            return {
+                'ok': False,
+                'error': 'load_history_failed',
+                'tries': errors,
+                'peer_id': peer_id,
+            }
+
+        items = [_summarize_aiobale_message(m, uname) for m in (messages or [])]
+        # newest first is typical for BACKWARD; keep API order
+        return {
+            'ok': True,
+            'peer_id': peer_id,
+            'access_hash': resolved.get('access_hash'),
+            'chat_type': used_type,
+            'username': uname,
+            'count': len(items),
+            'messages': items,
+        }
+
+    return _run(_with_client(_fn))
 
 
 async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text: str) -> Dict[str, Any]:
@@ -302,8 +428,7 @@ async def _send_uploaded_document(
     caption: str,
     kind: str,
 ) -> Dict[str, Any]:
-    """Send already-uploaded FileDetails via raw SendMessage with access_hash."""
-    from aiobale.enums import ChatType, PeerType, SendType
+    from aiobale.enums import ChatType, PeerType
     from aiobale.types import (
         Chat,
         Peer,
@@ -373,8 +498,6 @@ def send_local_file_to_channel(
     caption: str = '',
     kind: str = 'photo',
 ) -> Dict[str, Any]:
-    """آپلود فایل محلی به کانال (بدون نقل‌قول)."""
-
     async def _fn(client):
         from aiobale.enums import ChatType, SendType
         from aiobale.types import FileInput
@@ -388,12 +511,6 @@ def send_local_file_to_channel(
             return {'ok': False, 'error': resolved.get('error'), 'resolved': resolved}
         peer_id = int(resolved['peer_id'])
         access_hash = resolved.get('access_hash')
-        logger.info(
-            'send_local resolve peer_id=%s access_hash=%s source=%s',
-            peer_id,
-            access_hash,
-            resolved.get('source'),
-        )
 
         try:
             await client.join_public_chat(peer_id)
@@ -409,19 +526,12 @@ def send_local_file_to_channel(
 
         errors: List[str] = []
 
-        # 1) upload explicitly with GROUP, then raw SendMessage (+ access_hash)
         try:
             file_info = await client.upload_file(
                 file=fin,
                 chat_id=peer_id,
                 chat_type=ChatType.GROUP,
                 send_type=send_type,
-            )
-            logger.info(
-                'upload ok file_id=%s size=%s mime=%s',
-                getattr(file_info, 'file_id', None),
-                getattr(file_info, 'size', None),
-                getattr(file_info, 'mime_type', None),
             )
             raw = await _send_uploaded_document(
                 client, peer_id, access_hash, file_info, caption or '', kind
@@ -433,7 +543,6 @@ def send_local_file_to_channel(
             errors.append(f'upload_or_raw: {e}')
             logger.info('upload/raw path failed: %s', e)
 
-        # 2) high-level helpers (GROUP only — CHANNEL often crashes decoder)
         try:
             if kind == 'photo':
                 msg = await client.send_photo(
@@ -458,14 +567,15 @@ def send_local_file_to_channel(
             }
         except Exception as e:
             errors.append(f'highlevel_GROUP: {e}')
-            logger.info('highlevel GROUP failed: %s', e)
 
+        # حتی اگر API error داد ولی پیام رفته باشد: تاریخچه را چک کن
         return {
             'ok': False,
             'error': 'upload_send_failed',
             'tries': errors,
             'peer_id': peer_id,
             'access_hash': access_hash,
+            'hint': 'after send, call load_channel_history to recover real message_id/date',
         }
 
     return _run(_with_client(_fn))
