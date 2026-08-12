@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 def _secret_ok(request: HttpRequest) -> bool:
-    """اختیاری: ?token= یا هدر X-Bale-Secret برابر WEBHOOK_SECRET."""
     expected = os.environ.get('WEBHOOK_SECRET', '').strip()
     if not expected:
         return True
@@ -44,12 +43,10 @@ def bale_webhook(request: HttpRequest) -> HttpResponse:
         return JsonResponse({'ok': False, 'error': 'bad_body'}, status=400)
 
     try:
-        # همان منطق poll_bot
-        from scripts.poll_bot_logic import handle_update
+        from bot_flow.dispatch import handle_update
 
         handle_update(update)
     except Exception:
         logger.exception('webhook handle_update failed update_id=%s', update.get('update_id'))
-        # به بله 200 برمی‌گردانیم تا بی‌وقفه retry نکند؛ خطا در لاگ است
 
     return JsonResponse({'ok': True})
