@@ -66,3 +66,7 @@ def bale_user_id_from_init(init_data: str) -> Optional[str]:
         return None
     uid = (payload.get('user') or {}).get('id')
     return str(uid) if uid is not None else None
+
+
+def allow_debug_auth() -> bool:
+    return os.environ.get('ALLOW_MINIAPP_DEBUG', '').strip() in ('1', 'true', 'True', 'yes')
