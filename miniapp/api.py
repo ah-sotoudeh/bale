@@ -42,11 +42,10 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
     init_data = _init_from_request(request)
     ok, payload = validate_init_data(init_data)
     if not ok:
-        # dev fallback: ?debug_bale_id= when DEBUG and ALLOW_MINIAPP_DEBUG=1
-        from django.conf import settings
-        import os
+        # dev fallback: ?debug_bale_id= when ALLOW_MINIAPP_DEBUG=1 (no DEBUG required)
+        from miniapp.auth import allow_debug_auth
 
-        if getattr(settings, 'DEBUG', False) and os.environ.get('ALLOW_MINIAPP_DEBUG') == '1':
+        if allow_debug_auth():
             debug_id = request.GET.get('debug_bale_id') or _json_body(request).get('debug_bale_id')
             if debug_id:
                 user, _ = User.objects.get_or_create(
@@ -267,7 +266,6 @@ def api_mark_busy(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    # date: YYYY-MM-DD gregorian preferred; or jalali y/m/d
     day = None
     if body.get('date'):
         try:
