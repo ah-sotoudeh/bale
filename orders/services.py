@@ -8,12 +8,80 @@ from typing import Any, Dict, Optional
 
 from django.utils.dateparse import parse_datetime
 
-from integrations import bale_client
+from integrations import bale_client as bale_client
 from orders.availability import effective_window, has_slot_conflict
 from orders.models import ManagerResponse, Order, OrderItem
 from users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_banner_on_reference(order: Order) -> Dict[str, Any]:
+    """پس از پرداخت: بنر را در کانال مرجع (فعلاً @linktest) با فوروارد نگه می‌داریم.
+
+    زمان انتشار از همین پیام با نقل‌قول به کانال‌های هدف می‌رود.
+    اگر CustomerBanner از قبل در مرجع باشد، همان استفاده می‌شود.
+    """
+    from orders.banner_publish import linkbank_channel
+
+    ref = linkbank_channel()
+    cb = order.customer_banner
+
+    if cb and cb.from_linkbank and cb.linkbank_message_id:
+        # قبلاً روی مرجع است
+        return {
+            'ok': True,
+            'ref_chat': cb.linkbank_chat_id or ref,
+            'ref_message_id': cb.linkbank_message_id,
+            'reused': True,
+        }
+
+    if not order.banner_message_id or not order.banner_from_chat_id:
+        return {'ok': False, 'error': 'no_banner'}
+
+    try:
+        mid = int(order.banner_message_id)
+    except (TypeError, ValueError):
+        return {'ok': False, 'error': 'bad_banner_id'}
+
+    # فوروارد با نقل‌قول = برند مرجع دیده می‌شود
+    fwd = bale_client.forward_message(ref, str(order.banner_from_chat_id), mid)
+    if not fwd.get('ok'):
+        logger.error('ensure_banner_on_reference forward failed order=%s', order.id)
+        return {'ok': False, 'error': 'ref_publish_failed'}
+
+    result = fwd.get('result') or {}
+    ref_mid = str(result.get('message_id') or '')
+    if not ref_mid:
+        return {'ok': False, 'error': 'ref_no_message_id'}
+
+    if cb:
+        cb.from_linkbank = True
+        cb.linkbank_chat_id = ref
+        cb.linkbank_message_id = ref_mid
+        cb.save(update_fields=['from_linkbank', 'linkbank_chat_id', 'linkbank_message_id'])
+    else:
+        from orders.models import CustomerBanner
+
+        cb = CustomerBanner.objects.create(
+            customer=order.customer,
+            caption=order.banner_caption or '',
+            storage_chat_id=str(order.banner_from_chat_id),
+            storage_message_id=str(order.banner_message_id),
+            from_linkbank=True,
+            linkbank_chat_id=ref,
+            linkbank_message_id=ref_mid,
+            is_active=True,
+        )
+        order.customer_banner = cb
+        order.save(update_fields=['customer_banner'])
+
+    # برای publish: منبع ترجیحی پیام روی مرجع
+    order.banner_from_chat_id = ref
+    order.banner_message_id = ref_mid
+    order.save(update_fields=['banner_from_chat_id', 'banner_message_id'])
+
+    return {'ok': True, 'ref_chat': ref, 'ref_message_id': ref_mid, 'reused': False}
 
 
 def process_manager_response(
@@ -126,7 +194,7 @@ def process_manager_response(
 
     paid_cmd = f'/paid_{order.id}'
     pay_kb = bale_client.payment_done_keyboard(order.id)
-    amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount} تومان'
+    amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount:,} تومان'
 
     if payment.get('payment_url'):
         bale_client.send_message(
@@ -154,17 +222,30 @@ def process_manager_response(
 
 def process_payment_paid(order_id: int) -> Dict[str, Any]:
     try:
-        order = Order.objects.prefetch_related('items__channel', 'items__manager').get(id=order_id)
+        order = Order.objects.prefetch_related(
+            'items__channel', 'items__manager', 'items__tariff', 'customer_banner'
+        ).select_related('customer', 'customer_banner').get(id=order_id)
     except Order.DoesNotExist:
         return {'ok': False, 'error': 'order_not_found'}
+
+    if order.status == 'paid':
+        return {'ok': True, 'order_id': order.id, 'order_status': 'paid', 'already': True}
 
     order.status = 'paid'
     order.save(update_fields=['status'])
 
+    ref = ensure_banner_on_reference(order)
+    if not ref.get('ok'):
+        logger.warning(
+            'order %s paid but reference banner failed: %s',
+            order.id,
+            ref.get('error'),
+        )
+        # پرداخت می‌ماند؛ انتشار ممکن است از چت خصوصی تلاش کند
+
     for item in order.items.filter(manager_status='approved'):
         item.execution_status = 'paid'
         item.save(update_fields=['execution_status'])
-        # Notify manager: wait for publish reminder near slot time
         if item.manager and item.manager.bale_user_id:
             target = item.channel.name if item.channel else '?'
             if item.tariff_id and item.tariff.group_id:
@@ -174,16 +255,26 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
                 f'💳 سفارش پرداخت شد.\n'
                 f'آیتم #{item.id} — {target}\n'
                 f'زمان انتشار: {item.effective_start}\n'
-                f'۲ ساعت قبل یادآوری + دکمه «منتشر شد» می‌آید.',
+                f'در حالت خودکار سر ساعت ارسال می‌شود؛ در حالت دستی یادآوری می‌آید.',
             )
 
     if order.customer.bale_user_id:
+        extra = ''
+        if ref.get('ok'):
+            extra = f'\nبنر روی کانال مرجع ({ref.get("ref_chat")}) ثبت شد.'
+        elif ref.get('error'):
+            extra = '\n(ثبت روی کانال مرجع فعلاً ممکن نشد؛ پیگیری فنی)'
         bale_client.send_message(
             order.customer.bale_user_id,
-            f'سفارش #{order.id} پرداخت شد. در زمان مقرر منتشر می‌شود.',
+            f'سفارش #{order.id} پرداخت شد. در زمان مقرر منتشر می‌شود.{extra}',
         )
 
-    return {'ok': True, 'order_id': order.id, 'order_status': order.status}
+    return {
+        'ok': True,
+        'order_id': order.id,
+        'order_status': order.status,
+        'reference': {'ok': ref.get('ok'), 'error': ref.get('error')},
+    }
 
 
 def notify_managers_for_order(order: Order) -> None:
@@ -191,18 +282,18 @@ def notify_managers_for_order(order: Order) -> None:
         if not item.manager or not item.manager.bale_user_id:
             continue
         manager_id = item.manager.bale_user_id
-        if item.banner_message_id and order.customer.bale_user_id:
+        if order.banner_message_id and order.banner_from_chat_id:
             try:
-                msg_id = int(item.banner_message_id)
+                msg_id = int(order.banner_message_id)
                 bale_client.forward_message(
                     to_chat_id=manager_id,
-                    from_chat_id=order.customer.bale_user_id,
+                    from_chat_id=order.banner_from_chat_id,
                     message_id=msg_id,
                 )
             except (TypeError, ValueError):
                 logger.warning('banner_message_id not int, skip forward: %s', item.banner_message_id)
 
-        target = item.channel.name
+        target = item.channel.name if item.channel else '?'
         if item.tariff and item.tariff.group_id:
             target = f'مجموعه «{item.tariff.group.name}»'
 
@@ -212,7 +303,7 @@ def notify_managers_for_order(order: Order) -> None:
             f'📢 درخواست تبلیغ جدید\n'
             f'هدف: {target}\n'
             f'زمان: {item.requested_start} تا {item.requested_end}\n'
-            f'مبلغ: {item.price} تومان\n'
+            f'مبلغ: {item.price:,} تومان\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}',
             reply_markup=kb,
         )
