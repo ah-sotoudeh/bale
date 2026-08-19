@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -57,6 +58,17 @@ def _api_base() -> str:
     )
 
 
+def _redact(s: str) -> str:
+    """Never expose bot token in error strings."""
+    if not s:
+        return s
+    tok = _token()
+    if tok and tok in s:
+        s = s.replace(tok, '***')
+    s = re.sub(r'/bot[0-9]+:[A-Za-z0-9_-]+', '/bot***', s)
+    return s
+
+
 TOKEN = _token()
 CARD_NUMBER = _card_number()
 BALE_API_BASE = _api_base()
@@ -102,7 +114,7 @@ def get_me() -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_me failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def get_updates(offset: Optional[int] = None, limit: int = 100, timeout: int = 30) -> Dict[str, Any]:
@@ -116,7 +128,7 @@ def get_updates(offset: Optional[int] = None, limit: int = 100, timeout: int = 3
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_updates failed')
-        return {'error': str(e), 'ok': False}
+        return {'error': _redact(str(e)), 'ok': False}
 
 
 def get_webhook_info() -> Dict[str, Any]:
@@ -127,7 +139,7 @@ def get_webhook_info() -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_webhook_info failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def set_webhook(url: str) -> Dict[str, Any]:
@@ -138,7 +150,7 @@ def set_webhook(url: str) -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('set_webhook failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def delete_webhook() -> Dict[str, Any]:
@@ -149,7 +161,7 @@ def delete_webhook() -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('delete_webhook failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def answer_callback_query(
@@ -158,18 +170,22 @@ def answer_callback_query(
     show_alert: bool = False,
 ) -> Dict[str, Any]:
     url = _bot_url('answerCallbackQuery')
-    body: Dict[str, Any] = {'callback_query_id': callback_query_id}
-    if text is not None:
-        body['text'] = text[:200]
+    body: Dict[str, Any] = {'callback_query_id': str(callback_query_id)}
+    if text:
+        cleaned = str(text).replace('\u2026', '.').strip()
+        if cleaned:
+            body['text'] = cleaned[:200]
     if show_alert:
         body['show_alert'] = True
     try:
         r = requests.post(url, json=body, timeout=10)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            logger.warning('answer_callback_query %s %s', r.status_code, _redact((r.text or '')[:200]))
+            return {'ok': False, 'error': 'callback_answer_failed', '_http': r.status_code}
         return r.json()
     except requests.RequestException as e:
-        logger.exception('answer_callback_query failed')
-        return {'error': str(e)}
+        logger.warning('answer_callback_query failed: %s', _redact(str(e)))
+        return {'error': _redact(str(e))}
 
 
 def send_message(
@@ -190,7 +206,7 @@ def send_message(
         return r.json()
     except requests.RequestException as e:
         logger.exception('send_message failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def forward_message(to_chat_id: str, from_chat_id: str, message_id: int) -> Dict[str, Any]:
@@ -206,7 +222,7 @@ def forward_message(to_chat_id: str, from_chat_id: str, message_id: int) -> Dict
         return r.json()
     except requests.RequestException as e:
         logger.exception('forward_message failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e)), 'ok': False}
 
 
 def copy_message(
@@ -215,7 +231,6 @@ def copy_message(
     message_id: int,
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Copy without forward attribution (Bot API copyMessage)."""
     url = _bot_url('copyMessage')
     payload: Dict[str, Any] = {
         'chat_id': to_chat_id,
@@ -230,10 +245,29 @@ def copy_message(
         return r.json()
     except requests.RequestException as e:
         logger.exception('copy_message failed')
-        try:
-            return {'error': str(e), 'body': r.text if 'r' in dir() else None, 'ok': False}
-        except Exception:
-            return {'error': str(e), 'ok': False}
+        return {'error': _redact(str(e)), 'ok': False}
+
+
+def edit_message_caption(
+    chat_id: str,
+    message_id: int,
+    caption: str,
+) -> Dict[str, Any]:
+    url = _bot_url('editMessageCaption')
+    payload = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+        'caption': caption or '',
+    }
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code >= 400:
+            logger.warning('editMessageCaption %s', r.status_code)
+            return {'ok': False, 'error': 'edit_failed', '_http': r.status_code}
+        return r.json()
+    except requests.RequestException as e:
+        logger.exception('edit_message_caption failed')
+        return {'error': _redact(str(e))}
 
 
 def get_file(file_id: str) -> Dict[str, Any]:
@@ -244,22 +278,19 @@ def get_file(file_id: str) -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_file failed')
-        return {'error': str(e), 'ok': False}
+        return {'error': _redact(str(e)), 'ok': False}
 
 
 def download_file_bytes(file_path: str) -> Optional[bytes]:
-    """Download file body. file_path is the path from getFile result."""
     token = _token()
     base = _api_base().rstrip('/')
-    # Bale/Telegram style: /file/bot<token>/<path>
     url = f'{base}/file/bot{token}/{file_path.lstrip("/")}'
     try:
         r = requests.get(url, timeout=120)
         r.raise_for_status()
         return r.content
-    except requests.RequestException as e:
-        logger.exception('download_file_bytes failed url=%s', url)
-        # fallback some deployments use different layout
+    except requests.RequestException:
+        logger.exception('download_file_bytes failed')
         try:
             url2 = f'{base}/bot{token}/file/{file_path.lstrip("/")}'
             r2 = requests.get(url2, timeout=120)
@@ -277,7 +308,7 @@ def get_chat_info(chat_id: str) -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_chat_info failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def get_channel_info(channel_link: str) -> Dict[str, Any]:
@@ -286,7 +317,6 @@ def get_channel_info(channel_link: str) -> Dict[str, Any]:
         return raw
     if not raw.get('ok', True):
         return {'error': raw.get('description') or 'getChat failed', 'raw': raw}
-
     result = raw.get('result') or raw
     return {
         'id': result.get('id'),
@@ -308,7 +338,7 @@ def get_chat_member(chat_id: str, user_id: str) -> Dict[str, Any]:
         return r.json()
     except requests.RequestException as e:
         logger.exception('get_chat_member failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def bot_is_channel_admin(channel_id: str) -> bool:
@@ -319,14 +349,10 @@ def bot_is_channel_admin(channel_id: str) -> bool:
     if not bot_id:
         bot_id = me.get('id')
     if not bot_id:
-        logger.warning('bot_is_channel_admin: cannot resolve bot id from getMe: %s', me)
         return False
-
     member = get_chat_member(str(channel_id), str(bot_id))
     if member.get('error') or not member.get('ok', True):
-        logger.info('bot_is_channel_admin: getChatMember failed for %s: %s', channel_id, member)
         return False
-
     status_name = (member.get('result') or {}).get('status') or ''
     return status_name in ('administrator', 'creator')
 
@@ -358,7 +384,7 @@ def send_invoice(
         return r.json()
     except requests.RequestException as e:
         logger.exception('send_invoice failed')
-        return {'error': str(e)}
+        return {'error': _redact(str(e))}
 
 
 def create_payment_request(
@@ -371,7 +397,6 @@ def create_payment_request(
 ) -> Dict[str, Any]:
     provider = _card_number()
     inv_payload = payload or f'order-pay-{chat_id}-{amount}'
-
     if provider:
         inv = send_invoice(
             chat_id=str(chat_id),
@@ -384,12 +409,9 @@ def create_payment_request(
         )
         if not inv.get('error') and inv.get('ok', True):
             return {'ok': True, 'invoice': inv, 'payment_url': None}
-        logger.warning('create_payment_request: sendInvoice failed, fallback: %s', inv)
-        inv_error = inv.get('error') or inv.get('description') or str(inv)
+        inv_error = inv.get('error') or inv.get('description') or 'invoice_failed'
     else:
         inv_error = 'BALE_CARD_NUMBER not configured'
-        logger.warning(inv_error)
-
     text = (
         f'{title}\n'
         f'مبلغ قابل پرداخت: {amount} ریال\n'
@@ -422,5 +444,5 @@ def schedule_message(
         r.raise_for_status()
         return r.json()
     except requests.RequestException as e:
-        logger.info('schedule_message failed or unsupported: %s', e)
-        return {'error': str(e)}
+        logger.info('schedule_message failed or unsupported')
+        return {'error': _redact(str(e))}
