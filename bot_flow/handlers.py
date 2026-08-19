@@ -95,30 +95,24 @@ def bio_matches_owner(bio: str, manager: User) -> bool:
     return any(tok.lower() in text_lower for tok in ownership_tokens(manager))
 
 
-def role_keyboard() -> Dict[str, Any]:
-    return bc.inline_keyboard([
+def role_keyboard(is_operator: bool = False) -> Dict[str, Any]:
+    rows = [
         [
-            {'text': '📢 مدیر کانال هستم', 'callback_data': 'role:manager'},
-            {'text': '🛒 مشتری هستم', 'callback_data': 'role:customer'},
+            {'text': '🛒 پنل مشتری', 'callback_data': 'role:customer'},
+            {'text': '📢 پنل مدیر کانال', 'callback_data': 'role:manager'},
         ],
-        [{'text': '🎛️ پنل مدیر', 'callback_data': 'mgr:home'}],
-    ])
+    ]
+    if is_operator:
+        rows.append([{'text': '🛠️ پنل اپراتور', 'callback_data': 'op:home'}])
+    rows.append([{'text': 'ℹ️ راهنما', 'callback_data': 'nav:help'}])
+    return bc.inline_keyboard(rows)
 
 
 def publish_mode_keyboard() -> Dict[str, Any]:
     return bc.inline_keyboard([
-        [{
-            'text': '✅ ۱) لینک‌ساز ادمین (پیشنهادی)',
-            'callback_data': f'pmode:{Channel.PUBLISH_BOT}',
-        }],
-        [{
-            'text': '۲) لینک‌یار ادمین',
-            'callback_data': f'pmode:{Channel.PUBLISH_LINKYAR}',
-        }],
-        [{
-            'text': '۳) ارسال دستی خودم',
-            'callback_data': f'pmode:{Channel.PUBLISH_MANUAL}',
-        }],
+        [{'text': '✅ ۱) لینک‌ساز ادمین (پیشنهادی)', 'callback_data': f'pmode:{Channel.PUBLISH_BOT}'}],
+        [{'text': '۲) لینک‌یار ادمین', 'callback_data': f'pmode:{Channel.PUBLISH_LINKYAR}'}],
+        [{'text': '۳) ارسال دستی خودم', 'callback_data': f'pmode:{Channel.PUBLISH_MANUAL}'}],
     ])
 
 
@@ -134,19 +128,22 @@ def publish_mode_help_text() -> str:
         f'2️⃣ *لینک‌یار ادمین*\n'
         f'   اگر ظرفیت add member پر است، {ly_name} را ادمین کنید.\n\n'
         f'3️⃣ *ارسال دستی*\n'
-        f'   خودتان می‌فرستید؛ قبل از موعد یادآوری می‌شود و دکمه «منتشر شد» می‌زنید.\n\n'
+        f'   خودتان می‌فرستید؛ قبل از موعد یادآوری می‌شود.\n\n'
         'گزارش به مشتری همیشه فقط از لینک‌ساز است.'
     )
 
 
 def start_message(user: User) -> Tuple[str, Dict[str, Any]]:
+    from wallet.services import is_operator
+
     handle = user.bale_handle or user.bale_user_id or '—'
     text = (
-        'سلام 👋 به ربات تبلیغات بله خوش آمدید.\n\n'
+        'سلام 👋\n'
+        'به سامانه تبلیغات لینک‌بانک خوش آمدید.\n\n'
         f'آیدی شما: {handle}\n\n'
-        'نقش خود را انتخاب کنید یا پنل مدیر را باز کنید.'
+        'یک پنل را باز کنید:'
     )
-    return text, role_keyboard()
+    return text, role_keyboard(is_operator=is_operator(user.bale_user_id or ''))
 
 
 def handle_start(chat_id: str, bale_user_id: str, username: str = '') -> None:
@@ -176,7 +173,6 @@ def handle_role_callback(
         return
 
     if role == 'manager':
-        # اگر قبلاً کانال دارد → پنل؛ وگرنه ثبت لینک
         if Channel.objects.filter(manager=user).exists():
             from bot_flow.manager_panel import open_panel
 
@@ -198,8 +194,7 @@ def handle_role_callback(
 
 
 def _verify_and_register_channels(
-    manager: User,
-    refs: List[str],
+    manager: User, refs: List[str]
 ) -> Tuple[List[Channel], List[str], List[str]]:
     ok: List[Channel] = []
     fail: List[str] = []
@@ -278,10 +273,7 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
 
 def handle_publish_mode_callback(
-    chat_id: str,
-    bale_user_id: str,
-    mode: str,
-    cq_id: Optional[str] = None,
+    chat_id: str, bale_user_id: str, mode: str, cq_id: Optional[str] = None
 ) -> None:
     if cq_id:
         bc.answer_callback_query(str(cq_id), text='ثبت شد')
@@ -291,11 +283,7 @@ def handle_publish_mode_callback(
         bc.send_message(str(chat_id), 'الان انتخاب حالت انتشار لازم نیست. /start')
         return
 
-    if mode not in (
-        Channel.PUBLISH_BOT,
-        Channel.PUBLISH_LINKYAR,
-        Channel.PUBLISH_MANUAL,
-    ):
+    if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
         bc.send_message(str(chat_id), 'حالت نامعتبر.')
         return
 
@@ -349,8 +337,7 @@ def handle_publish_mode_callback(
     )
     bc.send_message(
         str(chat_id),
-        f'تعرفه «{channels[0].name}»:\nنام | مدت_ساعت | قیمت_تومان\n'
-        'مثال: روزانه | 24 | 300',
+        f'تعرفه «{channels[0].name}»:\nنام | مدت_ساعت | قیمت_تومان\nمثال: روزانه | 24 | 300',
     )
 
 
@@ -386,8 +373,7 @@ def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     )
     bc.send_message(
         str(chat_id),
-        f'مجموعه «{group.name}» ذخیره شد.\n'
-        'تعرفه مشترک:\nنام | مدت | قیمت\nمثال: روزانه | 24 | 300',
+        f'مجموعه «{group.name}» ذخیره شد.\nتعرفه مشترک:\nنام | مدت | قیمت\nمثال: روزانه | 24 | 300',
     )
     return True
 
@@ -574,6 +560,21 @@ def try_handle_callback(
     from bot_flow.calendar_ui import handle_free_callback
 
     if handle_free_callback(chat_id, bale_user_id, data, cq_id=cq_id):
+        return True
+    if data == 'nav:start':
+        handle_start(chat_id, bale_user_id, username)
+        return True
+    if data == 'nav:help':
+        if cq_id:
+            bc.answer_callback_query(str(cq_id))
+        bc.send_message(
+            str(chat_id),
+            'راهنما:\n'
+            '• مشتری: بنر → فهرست → سبد → پرداخت\n'
+            '• مدیر: کانال/تعرفه/تقویم/مالی\n'
+            '• اپراتور: تسویه و تأیید بنر\n\n'
+            '/start منوی اصلی\n/customer پنل مشتری\n/panel پنل مدیر',
+        )
         return True
     if data.startswith('role:'):
         handle_role_callback(
