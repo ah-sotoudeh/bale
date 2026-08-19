@@ -4,6 +4,44 @@ from django.db import models
 from channels_app.models import Channel, Tariff
 
 
+class CustomerBanner(models.Model):
+    """بنر ذخیره‌شده مشتری — قابل استفاده مجدد در سفارش‌ها.
+
+    معمولاً پیام بازارسال‌شده/ارسال‌شده به لینک‌ساز در چت خصوصی است.
+    اگر از کانال لینک‌بانک آمده باشد، شناسه مبدأ هم نگه داشته می‌شود.
+    """
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='banners'
+    )
+    title = models.CharField(max_length=120, blank=True, default='')
+    caption = models.TextField(blank=True, default='')
+    # پیام نزد لینک‌ساز (چت خصوصی مشتری با بازو)
+    storage_chat_id = models.CharField(max_length=64)
+    storage_message_id = models.CharField(max_length=64)
+    # اگر از @linkbank بازارسال شده
+    from_linkbank = models.BooleanField(default=False)
+    linkbank_chat_id = models.CharField(max_length=64, blank=True, default='')
+    linkbank_message_id = models.CharField(max_length=64, blank=True, default='')
+    media_kind = models.CharField(max_length=20, blank=True, default='')  # photo|video|document|text
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+
+    def __str__(self):
+        return f'Banner #{self.id} user={self.customer_id}'
+
+    def display_title(self) -> str:
+        if self.title:
+            return self.title
+        cap = (self.caption or '').strip().replace('\n', ' ')
+        if cap:
+            return (cap[:40] + '…') if len(cap) > 40 else cap
+        return f'بنر #{self.id}'
+
+
 class Order(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft'),
@@ -24,6 +62,13 @@ class Order(models.Model):
     banner_from_chat_id = models.CharField(max_length=64, null=True, blank=True)
     banner_caption = models.TextField(blank=True, default='')
     banner_edit_count = models.PositiveSmallIntegerField(default=0)
+    customer_banner = models.ForeignKey(
+        CustomerBanner,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='orders',
+    )
     managers_deadline = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
