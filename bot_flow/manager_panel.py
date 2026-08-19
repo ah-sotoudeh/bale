@@ -1,13 +1,4 @@
-"""پنل مدیر کانال — منوی اصلی و زیربخش‌ها.
-
-بخش‌ها:
-  • کانال‌ها / مجموعه‌ها + حالت انتشار
-  • تعرفه‌ها
-  • فهرست سفارش‌ها
-  • تقویم روزهای خالی
-  • اعلام روز پر (خارج از سیستم)
-  • مالی: موجودی، شبا، درخواست تسویه
-"""
+"""پنل مدیر کانال — منوی اصلی و زیربخش‌ها."""
 from __future__ import annotations
 
 import logging
@@ -33,9 +24,7 @@ STATE_MGR_BANK_HOLDER = 'mgr_bank_holder'
 STATE_MGR_BUSY_DATE = 'mgr_busy_date'
 STATE_MGR_TARIFF = 'mgr_add_tariff'
 
-JALALI_DATE = re.compile(
-    r'^\s*(\d{3,4})[\-/](\d{1,2})[\-/](\d{1,2})\s*$'
-)
+JALALI_DATE = re.compile(r'^\s*(\d{3,4})[\-/](\d{1,2})[\-/](\d{1,2})\s*$')
 
 
 def _sess(bale_user_id: str) -> BotSession:
@@ -79,12 +68,12 @@ def main_keyboard(is_operator: bool = False) -> Dict[str, Any]:
             {'text': '⚙️ حالت انتشار', 'callback_data': 'pmode_edit:start'},
             {'text': '➕ ثبت کانال', 'callback_data': 'mgr:add_channel'},
         ],
+        [
+            {'text': '🏠 خانه', 'callback_data': 'mgr:home'},
+            {'text': '🔄 منوی اصلی', 'callback_data': 'nav:start'},
+        ],
     ]
-    if is_operator:
-        rows.append([
-            {'text': '📁 فایل تسویه (اپراتور)', 'callback_data': 'mgr:op_payout_file'},
-        ])
-    rows.append([{'text': '🏠 خانه', 'callback_data': 'mgr:home'}])
+    # فایل تسویه فقط در پنل اپراتور — اینجا نمایش داده نمی‌شود
     return bc.inline_keyboard(rows)
 
 
@@ -92,25 +81,17 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
     user = _ensure_user(bale_user_id, username)
     bal = ws.available_balance(user)
     n_ch = Channel.objects.filter(manager=user).count()
-    n_pending = OrderItem.objects.filter(
-        manager=user, manager_status='pending'
-    ).count()
+    n_pending = OrderItem.objects.filter(manager=user, manager_status='pending').count()
     text = (
-        '🎛️ *پنل مدیر کانال*\n\n'
+        '🎛️ پنل مدیر کانال\n\n'
         f'آیدی: {user.bale_handle or user.bale_user_id}\n'
         f'کانال‌ها: {n_ch}\n'
         f'سفارش در انتظار: {n_pending}\n'
         f'موجودی قابل برداشت: {bal:,} تومان\n\n'
         'یک گزینه را انتخاب کنید:'
     )
-    bc.send_message(
-        str(chat_id),
-        text,
-        reply_markup=main_keyboard(is_operator=ws.is_operator(bale_user_id)),
-    )
+    bc.send_message(str(chat_id), text, reply_markup=main_keyboard())
 
-
-# ── کانال‌ها ──────────────────────────────────────────────
 
 def show_channels(chat_id: str, user: User) -> None:
     channels = list(Channel.objects.filter(manager=user).order_by('id')[:30])
@@ -119,7 +100,7 @@ def show_channels(chat_id: str, user: User) -> None:
         bc.send_message(
             str(chat_id),
             'هنوز کانالی ندارید.\nاز «ثبت کانال» شروع کنید.',
-            reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
+            reply_markup=main_keyboard(),
         )
         return
     lines = ['📢 کانال‌های شما:']
@@ -133,20 +114,20 @@ def show_channels(chat_id: str, user: User) -> None:
         lines.append('\n📦 مجموعه‌ها:')
         for g in groups:
             lines.append(f'• {g.name} ({g.channel_count} کانال) — تعرفه: {g.tariffs.count()}')
-    bc.send_message(
-        str(chat_id),
-        '\n'.join(lines),
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
-    )
+    bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=main_keyboard())
 
 
-# ── تعرفه‌ها ──────────────────────────────────────────────
+def models_q_manager(user: User):
+    from django.db.models import Q
+
+    return Q(channel__manager=user) | Q(group__manager=user)
+
 
 def show_tariffs(chat_id: str, user: User) -> None:
     tariffs = list(
-        Tariff.objects.filter(
-            models_q_manager(user)
-        ).select_related('channel', 'group').order_by('-id')[:40]
+        Tariff.objects.filter(models_q_manager(user))
+        .select_related('channel', 'group')
+        .order_by('-id')[:40]
     )
     if not tariffs:
         bc.send_message(str(chat_id), 'تعرفه‌ای ثبت نشده. ابتدا کانال ثبت کنید.')
@@ -158,20 +139,13 @@ def show_tariffs(chat_id: str, user: User) -> None:
         hour = f'{t.start_hour:02d}:00' if t.start_hour is not None else '—'
         active = '✅' if t.is_active else '⏸'
         lines.append(
-            f'{active} #{t.id} {owner} | {t.name} | {hour} | {t.duration_hours}س | {t.price:,} ت'
+            f'{active} #{t.id} {owner} | {t.name} | ارسال {hour} | {t.duration_hours}س | {t.price:,} ت'
         )
-    # quick add on first channel
     ch = Channel.objects.filter(manager=user).order_by('id').first()
     if ch:
         rows.append([{'text': f'➕ تعرفه برای {ch.name[:20]}', 'callback_data': f'mgr:addtariff:{ch.id}'}])
     rows.append([{'text': '🏠 خانه', 'callback_data': 'mgr:home'}])
     bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=bc.inline_keyboard(rows))
-
-
-def models_q_manager(user: User):
-    from django.db.models import Q
-
-    return Q(channel__manager=user) | Q(group__manager=user)
 
 
 def start_add_tariff(chat_id: str, user: User, channel_id: int) -> None:
@@ -184,9 +158,9 @@ def start_add_tariff(chat_id: str, user: User, channel_id: int) -> None:
     bc.send_message(
         str(chat_id),
         f'تعرفه جدید برای «{ch.name}»:\n'
-        f'فرمت: نام | ساعت_شروع | مدت_ساعت | قیمت_تومان\n'
-        f'مثال: روزانه | 10 | 24 | 50000\n'
-        f'یا بدون ساعت: روزانه | 24 | 50000',
+        f'فرمت: نام | ساعت_ارسال | مدت_باقی‌ماندن | قیمت_تومان\n'
+        f'مثال: طرح عادی | 10 | 24 | 200\n'
+        f'یا: طرح عادی | ساعت 10 | 24 ساعت | 200 تومن',
     )
 
 
@@ -202,17 +176,34 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         return True
 
     parts = [p.strip() for p in re.split(r'[|،,]', text) if p.strip()]
+
+    def _num(s: str) -> Optional[int]:
+        m = re.search(r'(\d{1,4})', s or '')
+        return int(m.group(1)) if m else None
+
     start_hour = None
     try:
-        if len(parts) == 4:
-            name, sh, dur, price = parts[0], int(parts[1]), int(parts[2]), int(parts[3])
-            start_hour = sh
+        if len(parts) >= 4:
+            name = parts[0]
+            start_hour = _num(parts[1])
+            dur = _num(parts[2])
+            price = _num(parts[3])
+            if start_hour is None or dur is None or price is None:
+                raise ValueError('nums')
+            if not (0 <= start_hour <= 23):
+                bc.send_message(str(chat_id), 'ساعت ارسال باید بین ۰ تا ۲۳ باشد.')
+                return True
         elif len(parts) == 3:
-            name, dur, price = parts[0], int(parts[1]), int(parts[2])
+            name, dur, price = parts[0], _num(parts[1]), _num(parts[2])
+            if dur is None or price is None:
+                raise ValueError('nums')
         else:
-            bc.send_message(str(chat_id), 'فرمت نامعتبر. مثال: روزانه | 10 | 24 | 50000')
+            bc.send_message(
+                str(chat_id),
+                'فرمت: نام | ساعت_ارسال | مدت | قیمت\nمثال: طرح عادی | 10 | 24 | 200',
+            )
             return True
-    except ValueError:
+    except (ValueError, TypeError):
         bc.send_message(str(chat_id), 'اعداد نامعتبر.')
         return True
 
@@ -220,20 +211,19 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         channel=ch,
         name=name[:100],
         start_hour=start_hour,
-        duration_hours=dur,
-        price=price,
+        duration_hours=int(dur),
+        price=int(price),
         is_active=True,
     )
     _save(sess, 'idle')
+    hour_s = f'{t.start_hour:02d}:00' if t.start_hour is not None else '—'
     bc.send_message(
         str(chat_id),
-        f'✅ تعرفه #{t.id} ذخیره شد: {t.name} — {t.price:,} تومان',
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
+        f'✅ تعرفه #{t.id}: {t.name}\nارسال {hour_s} | {t.duration_hours} ساعت | {t.price:,} تومان',
+        reply_markup=main_keyboard(),
     )
     return True
 
-
-# ── سفارش‌ها ──────────────────────────────────────────────
 
 def show_orders(chat_id: str, user: User) -> None:
     items = list(
@@ -258,22 +248,14 @@ def show_orders(chat_id: str, user: User) -> None:
             f'  مدیر:{it.manager_status} | اجرا:{it.execution_status}\n'
             f'  {start_s} | {it.price:,} ت'
         )
-    bc.send_message(
-        str(chat_id),
-        '\n'.join(lines)[:3900],
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
-    )
+    bc.send_message(str(chat_id), '\n'.join(lines)[:3900], reply_markup=main_keyboard())
 
-
-# ── تقویم ────────────────────────────────────────────────
 
 def show_calendar_entry(chat_id: str, user: User) -> None:
     from bot_flow.calendar_ui import send_manager_channel_picker
 
     send_manager_channel_picker(chat_id, user)
 
-
-# ── روز پر ───────────────────────────────────────────────
 
 def start_busy_flow(chat_id: str, user: User) -> None:
     channels = list(Channel.objects.filter(manager=user).order_by('name')[:20])
@@ -296,17 +278,10 @@ def start_busy_flow(chat_id: str, user: User) -> None:
 
 def ask_busy_date(chat_id: str, user: User, *, channel_id=None, group_id=None) -> None:
     sess = _sess(user.bale_user_id or '')
-    _save(
-        sess,
-        STATE_MGR_BUSY_DATE,
-        busy_channel_id=channel_id,
-        busy_group_id=group_id,
-    )
+    _save(sess, STATE_MGR_BUSY_DATE, busy_channel_id=channel_id, busy_group_id=group_id)
     bc.send_message(
         str(chat_id),
-        'تاریخ شمسی روز پر را بفرستید:\n'
-        'مثال: 1405/05/20\n'
-        '(کل آن روز برای همه تعرفه‌های این هدف مسدود می‌شود)',
+        'تاریخ شمسی روز پر را بفرستید:\nمثال: 1405/05/20',
     )
 
 
@@ -316,7 +291,6 @@ def _jalali_to_gregorian(jy: int, jm: int, jd: int):
 
         return jdatetime.date(jy, jm, jd).togregorian()
     except Exception:
-        # rough fallback via pure python inverse is heavy; require jdatetime
         return None
 
 
@@ -331,7 +305,7 @@ def handle_busy_date_text(chat_id: str, user: User, text: str) -> bool:
     jy, jm, jd = int(m.group(1)), int(m.group(2)), int(m.group(3))
     gday = _jalali_to_gregorian(jy, jm, jd)
     if not gday:
-        bc.send_message(str(chat_id), 'تاریخ نامعتبر (jdatetime لازم است).')
+        bc.send_message(str(chat_id), 'تاریخ نامعتبر.')
         return True
 
     data = sess.data or {}
@@ -349,36 +323,28 @@ def handle_busy_date_text(chat_id: str, user: User, text: str) -> bool:
     start = timezone.make_aware(datetime.combine(gday, dtime(0, 0)))
     end = start + timedelta(days=1)
     slot = mark_external_busy(
-        start,
-        end,
-        channel=ch,
-        group=group,
-        note='رزرو خارج از سیستم (پنل مدیر)',
+        start, end, channel=ch, group=group, note='رزرو خارج از سیستم (پنل مدیر)'
     )
     _save(sess, 'idle')
     label = ch.name if ch else group.name
     bc.send_message(
         str(chat_id),
         f'🔒 روز {format_jalali(gday)} برای «{label}» پر ثبت شد (#{slot.id}).',
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
+        reply_markup=main_keyboard(),
     )
     return True
 
 
-# ── مالی ─────────────────────────────────────────────────
-
 def show_wallet(chat_id: str, user: User) -> None:
     br = ws.balance_breakdown(user)
-    pending = list(
-        PayoutRequest.objects.filter(user=user, status='pending').order_by('-id')[:5]
-    )
+    pending = list(PayoutRequest.objects.filter(user=user, status='pending').order_by('-id')[:5])
     banks = list(BankAccount.objects.filter(user=user).order_by('-is_default', '-id')[:10])
     lines = [
-        '💰 کیف پول مدیر',
+        '💰 کیف پول',
         f'قابل برداشت: {br["available"]:,} تومان',
         f'در انتظار تسویه: {br["locked_pending"]:,} تومان',
         f'تسویه‌شده (مجموع): {br["paid_out"]:,} تومان',
-        f'حداقل تسویه: {ws.MIN_PAYOUT_TOMAN:,} تومان | سقف هفتگی: یک‌بار',
+        f'حداقل تسویه: {ws.MIN_PAYOUT_TOMAN:,} تومان',
         f'کارمزد پلتفرم: {ws.PLATFORM_FEE_PERCENT}%',
         '',
         'شباهای ثبت‌شده:' if banks else 'شبا ثبت نشده.',
@@ -436,7 +402,7 @@ def handle_bank_holder(chat_id: str, user: User, text: str) -> bool:
     bc.send_message(
         str(chat_id),
         f'✅ شبا ذخیره شد: {acc.holder_name} — ...{acc.iban[-6:]}',
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
+        reply_markup=main_keyboard(),
     )
     return True
 
@@ -446,8 +412,8 @@ def start_payout(chat_id: str, user: User) -> None:
     if not ok:
         msg = {
             'already_pending': 'یک درخواست تسویه باز دارید.',
-            'weekly_limit': 'سقف هفتگی: بعد از تسویه قبلی حداقل ۷ روز صبر کنید.',
-            'below_minimum': f'موجودی کمتر از حداقل ({ws.MIN_PAYOUT_TOMAN:,} تومان) است.',
+            'weekly_limit': 'سقف هفتگی: حداقل ۷ روز از تسویه قبلی.',
+            'below_minimum': f'موجودی کمتر از حداقل ({ws.MIN_PAYOUT_TOMAN:,} تومان).',
             'no_bank': 'ابتدا شبا ثبت کنید.',
         }.get(reason, reason)
         bc.send_message(str(chat_id), f'❌ {msg}')
@@ -482,9 +448,8 @@ def confirm_payout(chat_id: str, user: User, bank_id: int) -> None:
     bc.send_message(
         str(chat_id),
         f'✅ درخواست تسویه #{pr.id} ثبت شد.\n'
-        f'{pr.amount_toman:,} تومان → {pr.holder_name}\n'
-        f'پس از پرداخت بانک، پیام پایا برایتان می‌آید.',
-        reply_markup=main_keyboard(ws.is_operator(user.bale_user_id or '')),
+        f'{pr.amount_toman:,} تومان → {pr.holder_name}',
+        reply_markup=main_keyboard(),
     )
 
 
@@ -504,14 +469,12 @@ def operator_payout_file(chat_id: str, user: User) -> None:
     )
     bc.send_message(
         str(chat_id),
-        f'پس از واریز بانک دکمه را بزنید:',
+        'پس از واریز بانک دکمه را بزنید:',
         reply_markup=bc.inline_keyboard([
             [{'text': '✅ پرداخت انجام شد', 'callback_data': f'mgr:op_paid:{batch.id}'}]
         ]),
     )
 
-
-# ── router ───────────────────────────────────────────────
 
 def try_handle_callback(
     chat_id: str,
