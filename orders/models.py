@@ -5,25 +5,19 @@ from channels_app.models import Channel, Tariff
 
 
 class CustomerBanner(models.Model):
-    """بنر ذخیره‌شده مشتری — قابل استفاده مجدد در سفارش‌ها.
-
-    معمولاً پیام بازارسال‌شده/ارسال‌شده به لینک‌ساز در چت خصوصی است.
-    اگر از کانال لینک‌بانک آمده باشد، شناسه مبدأ هم نگه داشته می‌شود.
-    """
+    """بنر ذخیره‌شده مشتری — فقط بنرهای منتشرشده در لینک‌بانک برای سفارش معتبرند."""
 
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='banners'
     )
     title = models.CharField(max_length=120, blank=True, default='')
     caption = models.TextField(blank=True, default='')
-    # پیام نزد لینک‌ساز (چت خصوصی مشتری با بازو)
     storage_chat_id = models.CharField(max_length=64)
     storage_message_id = models.CharField(max_length=64)
-    # اگر از @linkbank بازارسال شده
     from_linkbank = models.BooleanField(default=False)
     linkbank_chat_id = models.CharField(max_length=64, blank=True, default='')
     linkbank_message_id = models.CharField(max_length=64, blank=True, default='')
-    media_kind = models.CharField(max_length=20, blank=True, default='')  # photo|video|document|text
+    media_kind = models.CharField(max_length=20, blank=True, default='')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -40,6 +34,38 @@ class CustomerBanner(models.Model):
         if cap:
             return (cap[:40] + '…') if len(cap) > 40 else cap
         return f'بنر #{self.id}'
+
+
+class BannerPublishRequest(models.Model):
+    """درخواست بررسی و انتشار بنر در کانال لینک‌بانک."""
+
+    STATUS = [
+        ('pending', 'pending'),
+        ('approved', 'approved'),
+        ('rejected', 'rejected'),
+    ]
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='banner_requests'
+    )
+    storage_chat_id = models.CharField(max_length=64)
+    storage_message_id = models.CharField(max_length=64)
+    caption = models.TextField(blank=True, default='')
+    media_kind = models.CharField(max_length=20, blank=True, default='')
+    fee_toman = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS, default='pending')
+    linkbank_message_id = models.CharField(max_length=64, blank=True, default='')
+    customer_banner = models.ForeignKey(
+        CustomerBanner,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='publish_requests',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f'BannerReq #{self.id} {self.status}'
 
 
 class Order(models.Model):
@@ -121,7 +147,6 @@ class OrderItem(models.Model):
     price = models.IntegerField(default=0)
     banner_forwarded = models.BooleanField(default=False)
     banner_message_id = models.CharField(max_length=255, null=True, blank=True)
-
     execution_status = models.CharField(
         max_length=32, choices=EXECUTION_STATUS, default='none'
     )
@@ -129,7 +154,6 @@ class OrderItem(models.Model):
     published_link = models.CharField(max_length=500, blank=True, default='')
     customer_confirm_deadline = models.DateTimeField(null=True, blank=True)
     executed_at = models.DateTimeField(null=True, blank=True)
-    # JSON list of posts: [{channel_id, ref, message_id, date, permalink}, ...]
     channel_message_id = models.TextField(null=True, blank=True)
 
     def __str__(self):
