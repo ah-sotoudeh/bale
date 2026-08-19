@@ -1,8 +1,8 @@
 """Scheduled publish by mode + daily admin health check + permalink recovery.
 
 Modes on Channel.publish_mode:
-  bot     — لینک‌ساز ادمین کانال است؛ forward/copy سپس لینک از تاریخچه
-  linkyar — لینک‌یار ادمین است؛ ارسال با user client سپس تأیید تاریخچه
+  bot     — لینک‌ساز ادمین کانال است؛ forward با نقل‌قول از کانال مرجع
+  linkyar — لینک‌یار ادمین است؛ ارسال سپس تأیید تاریخچه
   manual  — مدیر دستی می‌فرستد؛ فقط یادآوری + دکمه منتشر شد
 
 گزارش به مشتری همیشه فقط از لینک‌ساز (Bot API).
@@ -26,7 +26,7 @@ from wallet.services import credit_manager_for_execution, OPERATOR_BALE_ID
 
 logger = logging.getLogger(__name__)
 
-# sender ids seen on channel posts (for history matching)
+
 def _bot_numeric_id() -> Optional[int]:
     me = bc.get_me()
     result = me.get('result') or me
@@ -84,7 +84,6 @@ def deactivate_tariffs_for_channel(ch: Channel, reason: str) -> int:
 
 
 def daily_admin_audit() -> Dict[str, int]:
-    """Verify required admin per publish_mode."""
     channel_ids: Set[int] = set(
         Tariff.objects.filter(is_active=True, channel__isnull=False).values_list(
             'channel_id', flat=True
@@ -139,7 +138,6 @@ def recover_permalink(
     preferred_senders: Optional[List[int]] = None,
     limit: int = 12,
 ) -> Optional[Dict[str, Any]]:
-    """Read channel history via linkyar and return newest matching post with permalink."""
     hist = ly.load_channel_history(channel_ref(ch), limit=limit)
     if not hist.get('ok'):
         logger.warning('recover_permalink history fail ch=%s %s', ch.id, hist.get('error'))
@@ -155,7 +153,6 @@ def recover_permalink(
         if preferred_senders:
             sid = m.get('sender_id')
             if sid is not None and int(sid) not in preferred_senders:
-                # still accept if no better match later — skip for now
                 continue
         link = m.get('permalink') or ly.message_permalink(
             (ch.link or '').lstrip('@').split('/')[-1] if ch.link else '',
@@ -170,7 +167,6 @@ def recover_permalink(
             'channel_id': ch.id,
             'ref': channel_ref(ch),
         }
-    # second pass without sender filter
     if preferred_senders:
         for m in messages:
             mid = m.get('message_id')
@@ -206,19 +202,17 @@ def _notify_customer_executed(item: OrderItem, ch: Channel, permalink: str) -> N
 
 def _post_via_bot(ch: Channel, from_chat_id: str, message_id: int, caption: str = '') -> Dict[str, Any]:
     ref = channel_ref(ch)
-    # prefer copy without quote
-    result = bc.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
+    # ترجیح: فوروارد با نقل‌قول از کانال مرجع
+    result = bc.forward_message(ref, from_chat_id, int(message_id))
     if not result.get('ok'):
-        result = bc.forward_message(ref, from_chat_id, int(message_id))
+        result = bc.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
 
 def _post_via_linkyar(
     ch: Channel, from_chat_id: str, message_id: int, caption: str = ''
 ) -> Dict[str, Any]:
-    """Best-effort post; verification is always via history."""
     ref = channel_ref(ch)
-    # try forward from private banner chat if we have date — often missing
     result = ly.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
@@ -250,11 +244,16 @@ def _finalize_channel_ok(
 
 @transaction.atomic
 def publish_due_items() -> Dict[str, int]:
-    """Publish paid items due now according to each channel's publish_mode."""
     now = timezone.now()
     items = (
         OrderItem.objects.select_related(
-            'order', 'order__customer', 'channel', 'tariff', 'tariff__group', 'manager'
+            'order',
+            'order__customer',
+            'order__customer_banner',
+            'channel',
+            'tariff',
+            'tariff__group',
+            'manager',
         )
         .filter(execution_status='paid', manager_status='approved')
         .filter(
@@ -287,10 +286,24 @@ def publish_due_items() -> Dict[str, int]:
         any_manual = False
         t0_ms = int(time.time() * 1000)
 
+        from_chat = str(order.banner_from_chat_id)
+        try:
+            msg_id = int(order.banner_message_id)
+        except (TypeError, ValueError):
+            continue
+
+        # اگر بنر مرجع جداگانه روی CustomerBanner باشد
+        cb = order.customer_banner
+        if cb and cb.from_linkbank and cb.linkbank_message_id:
+            from_chat = str(cb.linkbank_chat_id or from_chat)
+            try:
+                msg_id = int(cb.linkbank_message_id)
+            except (TypeError, ValueError):
+                pass
+
         for ch in channels:
             mode = ch.publish_mode or Channel.PUBLISH_BOT
 
-            # ── manual: only remind manager ──
             if mode == Channel.PUBLISH_MANUAL:
                 any_manual = True
                 if item.manager and item.manager.bale_user_id:
@@ -306,18 +319,12 @@ def publish_due_items() -> Dict[str, int]:
                     )
                 continue
 
-            # ── bot auto ──
             if mode == Channel.PUBLISH_BOT:
                 if not check_bot_admin(ch):
                     _fail_one_channel(item, ch, 'لینک‌ساز ادمین کانال نیست')
                     failed += 1
                     continue
-                res = _post_via_bot(
-                    ch,
-                    order.banner_from_chat_id,
-                    int(order.banner_message_id),
-                    caption=order.banner_caption or '',
-                )
+                res = _post_via_bot(ch, from_chat, msg_id, caption=order.banner_caption or '')
                 time.sleep(1.5)
                 preferred = [x for x in [bot_id] if x]
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=preferred)
@@ -325,7 +332,6 @@ def publish_due_items() -> Dict[str, int]:
                     any_ok = True
                     _finalize_channel_ok(item, ch, meta, posts)
                 elif res.get('ok'):
-                    # posted but link not recovered yet
                     any_ok = True
                     posts.append({'channel_id': ch.id, 'ref': channel_ref(ch), 'permalink': ''})
                     cust = order.customer.bale_user_id
@@ -335,24 +341,16 @@ def publish_due_items() -> Dict[str, int]:
                             f'✅ بنر در «{ch.name}» ارسال شد (لینک به‌زودی تکمیل می‌شود).',
                         )
                 else:
-                    _fail_one_channel(
-                        item, ch, str((res.get('api') or {}).get('error') or 'bot_send_failed')
-                    )
+                    _fail_one_channel(item, ch, 'ارسال بازو ناموفق بود')
                     failed += 1
                 continue
 
-            # ── linkyar auto ──
             if mode == Channel.PUBLISH_LINKYAR:
                 if not check_linkyar_admin(ch):
                     _fail_one_channel(item, ch, 'لینک‌یار ادمین کانال نیست')
                     failed += 1
                     continue
-                res = _post_via_linkyar(
-                    ch,
-                    order.banner_from_chat_id,
-                    int(order.banner_message_id),
-                    caption=order.banner_caption or '',
-                )
+                res = _post_via_linkyar(ch, from_chat, msg_id, caption=order.banner_caption or '')
                 time.sleep(2)
                 preferred = [x for x in [ly_id] if x]
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=preferred)
@@ -360,17 +358,12 @@ def publish_due_items() -> Dict[str, int]:
                     any_ok = True
                     _finalize_channel_ok(item, ch, meta, posts)
                 else:
-                    # API often errors even when post landed — try history once more without filter
                     meta2 = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=None)
                     if meta2 and meta2.get('permalink'):
                         any_ok = True
                         _finalize_channel_ok(item, ch, meta2, posts)
                     else:
-                        _fail_one_channel(
-                            item,
-                            ch,
-                            str((res.get('api') or {}).get('error') or 'linkyar_send_or_verify_failed'),
-                        )
+                        _fail_one_channel(item, ch, 'ارسال یا تأیید لینک‌یار ناموفق بود')
                         failed += 1
                 continue
 
@@ -415,7 +408,6 @@ def verify_manager_published(
     manager_bale_id: str,
     channel_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """After manager presses «منتشر شد»: verify via history, notify customer via bot only."""
     try:
         item = OrderItem.objects.select_related(
             'order', 'order__customer', 'channel', 'tariff', 'tariff__group', 'manager'
@@ -474,7 +466,6 @@ def verify_manager_published(
 
 
 def delete_expired_posts() -> int:
-    """Delete channel posts after requested_end (bot/linkyar modes)."""
     now = timezone.now()
     items = (
         OrderItem.objects.filter(execution_status='executed', requested_end__lte=now)
