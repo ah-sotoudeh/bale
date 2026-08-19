@@ -10,6 +10,7 @@ from django.utils import timezone
 from bot_flow import customer as cust
 from bot_flow import handlers as flow
 from bot_flow import manager_panel as mpanel
+from bot_flow import operator_panel as opanel
 from integrations import bale_client as bc
 from miniapp.launch import send_miniapp_entry
 from orders.cart import process_manager_item
@@ -91,6 +92,10 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         send_miniapp_entry(chat_id, 'پنل مدیر (مینی‌اپ):')
         return True
 
+    if text in ('/operator', '/op', '/اپراتور') and is_operator(bale_uid):
+        opanel.open_panel(chat_id, bale_uid)
+        return True
+
     if text.startswith('/payout_file') and is_operator(bale_uid):
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if not user:
@@ -148,11 +153,15 @@ def handle_callback_query(cq: dict) -> None:
         req_id = int(data.split(':')[1])
         r = operator_decide(req_id, bale_uid, approve=data.startswith('bappr:'))
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
-        # فقط پیام امن — هرگز dict خام / URL / توکن
         msg_out = r.get('message') or (
             '✅ انجام شد.' if r.get('ok') else '❌ انجام نشد. جزئیات در لاگ سرور.'
         )
         bc.send_message(chat_id, msg_out)
+        return
+
+    if opanel.try_handle_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
+    ):
         return
 
     if cust.handle_customer_callback(
@@ -333,5 +342,5 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start نقش\n/panel پنل متنی\n/miniapp مینی‌اپ\n/free روز خالی\n/wallet موجودی',
+            '/start منوی اصلی\n/customer مشتری\n/panel مدیر\n/operator اپراتور\n/wallet کیف پول',
         )
