@@ -142,14 +142,17 @@ def handle_callback_query(cq: dict) -> None:
 
     log.info('callback %r user=%s', data, bale_uid)
 
-    # تأیید بنر لینک‌بانک توسط اپراتور
     if data.startswith('bappr:') or data.startswith('brej:'):
         from orders.banner_publish import operator_decide
 
         req_id = int(data.split(':')[1])
         r = operator_decide(req_id, bale_uid, approve=data.startswith('bappr:'))
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
-        bc.send_message(chat_id, f'نتیجه درخواست بنر: {r}')
+        # فقط پیام امن — هرگز dict خام / URL / توکن
+        msg_out = r.get('message') or (
+            '✅ انجام شد.' if r.get('ok') else '❌ انجام نشد. جزئیات در لاگ سرور.'
+        )
+        bc.send_message(chat_id, msg_out)
         return
 
     if cust.handle_customer_callback(
@@ -212,7 +215,7 @@ def handle_callback_query(cq: dict) -> None:
                 '✅ انتشار تأیید شد.\n' + '\n'.join(str(x) for x in links if x),
             )
         else:
-            bc.send_message(chat_id, f'❌ {r.get("error") or r}')
+            bc.send_message(chat_id, '❌ تأیید انتشار ممکن نشد.')
         return
 
     if data.startswith('execok:') or data.startswith('execno:'):
@@ -220,14 +223,17 @@ def handle_callback_query(cq: dict) -> None:
         ok = data.startswith('execok:')
         r = customer_confirm_execution(item_id, bale_uid, ok)
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
-        bc.send_message(chat_id, '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')
+        bc.send_message(chat_id, '✅ ثبت شد' if r.get('ok') else '❌ خطا در ثبت')
         return
 
     if data.startswith('opok:') or data.startswith('opno:'):
         item_id = int(data.split(':')[1])
         r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
-        bc.send_message(chat_id, f'{r}')
+        if r.get('ok'):
+            bc.send_message(chat_id, '✅ ثبت شد')
+        else:
+            bc.send_message(chat_id, f'❌ {r.get("error") or "خطا"}')
         return
 
     _answer(cq_id, 'OK')
