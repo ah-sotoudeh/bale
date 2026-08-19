@@ -48,6 +48,11 @@ def _cmd_id(m: re.Match) -> str | None:
     return m.group(1) or m.group(2)
 
 
+def _answer(cq_id, text: str = 'OK') -> None:
+    if cq_id:
+        bc.answer_callback_query(str(cq_id), text=text)
+
+
 def run_mgr(action: str, bale_uid: str, item_id: int, new_start=None) -> str:
     result = process_manager_item(item_id, bale_uid, action, new_start=new_start)
     log.info('%s item=%s → %s', action, item_id, result)
@@ -137,6 +142,16 @@ def handle_callback_query(cq: dict) -> None:
 
     log.info('callback %r user=%s', data, bale_uid)
 
+    # تأیید بنر لینک‌بانک توسط اپراتور
+    if data.startswith('bappr:') or data.startswith('brej:'):
+        from orders.banner_publish import operator_decide
+
+        req_id = int(data.split(':')[1])
+        r = operator_decide(req_id, bale_uid, approve=data.startswith('bappr:'))
+        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
+        bc.send_message(chat_id, f'نتیجه درخواست بنر: {r}')
+        return
+
     if cust.handle_customer_callback(
         chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None
     ):
@@ -154,20 +169,17 @@ def handle_callback_query(cq: dict) -> None:
 
     if data.startswith('approve:'):
         text = run_mgr('approve', bale_uid, int(data.split(':')[1]))
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK')
+        _answer(cq_id)
         bc.send_message(chat_id, text)
         return
     if data.startswith('reject:'):
         text = run_mgr('reject', bale_uid, int(data.split(':')[1]))
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK')
+        _answer(cq_id)
         bc.send_message(chat_id, text)
         return
     if data.startswith('editask:'):
         item_id = int(data.split(':')[1])
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='تاریخ')
+        _answer(cq_id, 'date')
         sess, _ = BotSession.objects.get_or_create(
             bale_user_id=bale_uid, defaults={'state': 'idle', 'data': {}}
         )
@@ -180,8 +192,7 @@ def handle_callback_query(cq: dict) -> None:
         return
     if data.startswith('paid:'):
         r = process_payment_paid(int(data.split(':')[1]))
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK')
+        _answer(cq_id)
         bc.send_message(
             chat_id,
             '💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
@@ -193,11 +204,7 @@ def handle_callback_query(cq: dict) -> None:
         item_id = int(parts[1])
         channel_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
         r = verify_manager_published(item_id, bale_uid, channel_id=channel_id)
-        if cq_id:
-            bc.answer_callback_query(
-                str(cq_id),
-                text='تأیید شد' if r.get('ok') else 'بررسی نشد',
-            )
+        _answer(cq_id, 'OK' if r.get('ok') else 'NO')
         if r.get('ok'):
             links = r.get('permalinks') or []
             bc.send_message(
@@ -212,21 +219,18 @@ def handle_callback_query(cq: dict) -> None:
         item_id = int(data.split(':')[1])
         ok = data.startswith('execok:')
         r = customer_confirm_execution(item_id, bale_uid, ok)
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='ثبت شد' if r.get('ok') else 'خطا')
+        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
         bc.send_message(chat_id, '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')
         return
 
     if data.startswith('opok:') or data.startswith('opno:'):
         item_id = int(data.split(':')[1])
         r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
-        if cq_id:
-            bc.answer_callback_query(str(cq_id), text='OK' if r.get('ok') else 'خطا')
+        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
         bc.send_message(chat_id, f'{r}')
         return
 
-    if cq_id:
-        bc.answer_callback_query(str(cq_id), text='؟')
+    _answer(cq_id, 'OK')
 
 
 def _parse_manager_date(text: str):
