@@ -6,7 +6,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('orders', '0004_alter_orderitem_channel_message_id'),
+        ('orders', '0001_initial'),
     ]
 
     operations = [
@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
                 ('storage_message_id', models.CharField(max_length=64)),
                 ('from_linkbank', models.BooleanField(default=False)),
                 ('linkbank_chat_id', models.CharField(blank=True, default='', max_length=64)),
-                ('linkbank_message_id', models.CharField(blank=True, default='', max_length=64)),
+                ('linkbank_message_id', models.CharField(max_length=64, blank=True, default='')),
                 ('media_kind', models.CharField(blank=True, default='', max_length=20)),
                 ('is_active', models.BooleanField(default=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
