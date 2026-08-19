@@ -34,10 +34,7 @@ def net_manager_earn(price_toman: int) -> int:
 
 
 def balance_breakdown(user: User) -> Dict[str, int]:
-    """available = sum(ledger) where locks reduce available."""
     qs = WalletLedger.objects.filter(user=user)
-    earned_types = ('earn', 'refund', 'adjust', 'spend', 'penalty', 'payout_paid', 'payout_unlock')
-    # Simpler: available = sum of all except pure informational; payout_lock is negative
     total = qs.aggregate(s=Sum('amount'))['s'] or 0
     locked = (
         PayoutRequest.objects.filter(user=user, status='pending').aggregate(s=Sum('amount_toman'))[
@@ -45,7 +42,6 @@ def balance_breakdown(user: User) -> Dict[str, int]:
         ]
         or 0
     )
-    # total already includes -locked amounts if we posted payout_lock
     paid = (
         PayoutRequest.objects.filter(user=user, status='paid').aggregate(s=Sum('amount_toman'))['s']
         or 0
@@ -92,7 +88,9 @@ def credit_manager_for_execution(manager: User, price_toman: int, order_item_id:
     )
 
 
-def credit_customer_refund(customer: User, amount: int, order_item_id: int, reason: str) -> WalletLedger:
+def credit_customer_refund(
+    customer: User, amount: int, order_item_id: int, reason: str
+) -> WalletLedger:
     return credit(
         customer,
         amount,
@@ -104,6 +102,8 @@ def credit_customer_refund(customer: User, amount: int, order_item_id: int, reas
 
 def apply_manager_penalty(manager: User, price_toman: int, order_item_id: int) -> WalletLedger:
     pen = fee_amount(price_toman)
+    if pen <= 0:
+        pen = 1
     return credit(
         manager,
         -pen,
@@ -117,7 +117,9 @@ def validate_iban(iban: str) -> bool:
     return bool(IBAN_RE.match((iban or '').replace(' ', '').upper()))
 
 
-def save_bank_account(user: User, iban: str, holder_name: str, make_default: bool = True) -> BankAccount:
+def save_bank_account(
+    user: User, iban: str, holder_name: str, make_default: bool = True
+) -> BankAccount:
     iban = iban.replace(' ', '').upper()
     if not validate_iban(iban):
         raise ValueError('invalid_iban')
@@ -154,12 +156,12 @@ def can_request_payout(user: User) -> Tuple[bool, str]:
 
 
 @transaction.atomic
-def request_payout(user: User, bank: BankAccount, amount: Optional[int] = None) -> Dict[str, Any]:
+def request_payout(
+    user: User, bank: BankAccount, amount: Optional[int] = None
+) -> Dict[str, Any]:
     ok, reason = can_request_payout(user)
-    if not ok and reason != 'ok':
-        # re-check bank handled
-        if reason != 'no_bank':
-            return {'ok': False, 'error': reason}
+    if not ok:
+        return {'ok': False, 'error': reason}
 
     avail = available_balance(user)
     if amount is None:
@@ -169,7 +171,6 @@ def request_payout(user: User, bank: BankAccount, amount: Optional[int] = None) 
     if amount > avail:
         return {'ok': False, 'error': 'insufficient'}
 
-    # lock
     credit(user, -amount, 'payout_lock', ref='payout:new', note='قفل درخواست تسویه')
     pr = PayoutRequest.objects.create(
         user=user,
@@ -179,7 +180,6 @@ def request_payout(user: User, bank: BankAccount, amount: Optional[int] = None) 
         holder_name=bank.holder_name,
         status='pending',
     )
-    # fix ref
     WalletLedger.objects.filter(user=user, ref='payout:new').order_by('-id').update(
         ref=f'payout:{pr.id}'
     )
@@ -188,13 +188,14 @@ def request_payout(user: User, bank: BankAccount, amount: Optional[int] = None) 
 
 @transaction.atomic
 def build_payout_batch(operator: User) -> Dict[str, Any]:
-    pending = list(PayoutRequest.objects.filter(status='pending', batch__isnull=True).select_related('user'))
+    pending = list(
+        PayoutRequest.objects.filter(status='pending', batch__isnull=True).select_related('user')
+    )
     if not pending:
         return {'ok': False, 'error': 'no_pending'}
 
     lines: List[str] = []
     for pr in pending:
-        # amount_rial,IBAN,,holder_name
         lines.append(f'{pr.amount_rial},{pr.iban},,{pr.holder_name}')
 
     text = '\n'.join(lines)
@@ -225,15 +226,7 @@ def mark_batch_paid(batch_id: int) -> Dict[str, Any]:
         pr.status = 'paid'
         pr.paid_at = now
         pr.save(update_fields=['status', 'paid_at'])
-        # convert lock to paid (already deducted on lock; payout_paid 0 or note)
-        credit(
-            pr.user,
-            0,
-            'payout_paid',
-            ref=f'payout:{pr.id}',
-            note=f'پایا {pr.amount_toman} ت',
-        )
-        # amount 0 is invalid — skip zero ledger; just notify
+        # موجودی قبلاً با payout_lock کم شده
         if pr.user.bale_user_id:
             bc.send_message(
                 pr.user.bale_user_id,
