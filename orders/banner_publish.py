@@ -1,9 +1,9 @@
-"""درخواست انتشار بنر در کانال مرجع لینک‌بانک (@linkbank)."""
+"""درخواست انتشار بنر در کانال مرجع (فعلاً @linktest برای تست؛ پروداکشن @linkbank)."""
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from django.db import transaction
 from django.utils import timezone
@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 def linkbank_channel() -> str:
-    raw = (os.environ.get('LINKBANK_CHANNEL') or '@linkbank').strip()
+    """کانال مرجع بنر. تست: @linktest — پروداکشن: LINKBANK_CHANNEL=@linkbank"""
+    raw = (
+        os.environ.get('LINKBANK_CHANNEL')
+        or os.environ.get('BANNER_REFERENCE_CHANNEL')
+        or '@linktest'  # موقت تا بازو روی لینک‌بانک ادمین شود
+    ).strip()
     if raw and not raw.startswith('@') and not raw.lstrip('-').isdigit():
         raw = '@' + raw
     return raw
@@ -41,15 +46,25 @@ def count_linkbank_banners(user: User) -> int:
 
 
 def fee_for_user(user: User) -> int:
-    """اولین بنر رایگان؛ بعدی‌ها تعرفه."""
     if count_linkbank_banners(user) == 0:
-        # درخواست‌های تأییدشده در صف هم حساب شوند
-        approved_pending = BannerPublishRequest.objects.filter(
-            customer=user, status='approved'
-        ).count()
-        if approved_pending == 0 and count_linkbank_banners(user) == 0:
-            return 0
+        return 0
     return banner_fee_toman()
+
+
+def user_facing_error(code: str) -> str:
+    """پیام امن برای کاربر/اپراتور — بدون URL و توکن."""
+    mapping = {
+        'not_found': 'درخواست پیدا نشد.',
+        'already_handled': 'این درخواست قبلاً رسیدگی شده.',
+        'not_operator': 'فقط اپراتور می‌تواند این کار را انجام دهد.',
+        'publish_failed': (
+            f'ارسال به کانال مرجع ({linkbank_channel()}) ناموفق بود. '
+            'بازو باید در آن کانال ادمین باشد و حق ارسال داشته باشد.'
+        ),
+        'banned': 'متن شامل عبارت غیرمجاز است.',
+        'forbidden': 'اجازه این کار را ندارید.',
+    }
+    return mapping.get(code, 'خطایی رخ داد. جزئیات در لاگ سرور است.')
 
 
 def create_publish_request(
@@ -84,18 +99,19 @@ def _notify_operator(req: BannerPublishRequest) -> None:
     except Exception:
         logger.exception('forward to operator failed')
     fee_txt = 'رایگان (بنر اول)' if req.fee_toman == 0 else f'{req.fee_toman:,} تومان'
+    ch = linkbank_channel()
     kb = bc.inline_keyboard([
         [
-            {'text': '✅ تأیید و ارسال به لینک‌بانک', 'callback_data': f'bappr:{req.id}'},
+            {'text': '✅ تأیید و ارسال', 'callback_data': f'bappr:{req.id}'},
             {'text': '❌ رد', 'callback_data': f'brej:{req.id}'},
         ]
     ])
     bc.send_message(
         op,
-        f'🆕 درخواست بنر لینک‌بانک\n'
-        f'#{req.id} | مشتری `{req.customer.bale_user_id}`\n'
+        f'🆕 درخواست بنر\n'
+        f'#{req.id} | مشتری {req.customer.bale_user_id}\n'
         f'هزینه ثبت: {fee_txt}\n'
-        f'پس از تأیید در {linkbank_channel()} منتشر می‌شود و حذف نمی‌شود.',
+        f'پس از تأیید در {ch} منتشر می‌شود (دائمی).',
         reply_markup=kb,
     )
 
@@ -105,13 +121,21 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     try:
         req = BannerPublishRequest.objects.select_related('customer').get(id=req_id)
     except BannerPublishRequest.DoesNotExist:
-        return {'ok': False, 'error': 'not_found'}
+        return {'ok': False, 'error': 'not_found', 'message': user_facing_error('not_found')}
     if req.status != 'pending':
-        return {'ok': False, 'error': 'already_handled'}
+        return {
+            'ok': False,
+            'error': 'already_handled',
+            'message': user_facing_error('already_handled'),
+        }
 
     op = operator_chat_id()
     if op and str(operator_bale_id) != str(op):
-        return {'ok': False, 'error': 'not_operator'}
+        return {
+            'ok': False,
+            'error': 'not_operator',
+            'message': user_facing_error('not_operator'),
+        }
 
     cust = req.customer.bale_user_id
     if not approve:
@@ -120,17 +144,21 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         req.save(update_fields=['status', 'reviewed_at'])
         if cust:
             bc.send_message(cust, f'❌ درخواست بنر #{req.id} رد شد.')
-        return {'ok': True, 'status': 'rejected'}
+        return {'ok': True, 'status': 'rejected', 'message': f'درخواست #{req.id} رد شد.'}
 
-    # انتشار در لینک‌بانک با فوروارد (نقل‌قول از چت مشتری/بازو)
     lb = linkbank_channel()
     fwd = bc.forward_message(lb, req.storage_chat_id, int(req.storage_message_id))
     if not fwd.get('ok'):
-        # fallback copy
         fwd = bc.copy_message(lb, req.storage_chat_id, int(req.storage_message_id))
     if not fwd.get('ok'):
-        logger.error('publish to linkbank failed: %s', fwd)
-        return {'ok': False, 'error': 'publish_failed', 'detail': fwd}
+        # فقط در لاگ سرور — هرگز detail خام به کاربر نرود
+        logger.error('publish to %s failed (sanitized log): ok=False error_code-ish', lb)
+        logger.debug('publish detail keys=%s', list(fwd.keys()) if isinstance(fwd, dict) else type(fwd))
+        return {
+            'ok': False,
+            'error': 'publish_failed',
+            'message': user_facing_error('publish_failed'),
+        }
 
     result = fwd.get('result') or {}
     lb_mid = str(result.get('message_id') or '')
@@ -153,14 +181,21 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     req.save()
 
     if cust:
-        fee_note = '' if req.fee_toman == 0 else f'\n(تعرفه ثبت: {req.fee_toman:,} ت — پرداخت جداگانه در نسخه بعدی کیف پول)'
+        fee_note = ''
+        if req.fee_toman:
+            fee_note = f'\n(تعرفه ثبت: {req.fee_toman:,} ت — پرداخت کیف پول در نسخه بعد)'
         bc.send_message(
             cust,
             f'✅ بنر شما در {lb} ثبت شد و دائمی است.{fee_note}\n'
-            f'بنر «{banner.display_title()}» آماده سفارش تبلیغ است.\n'
+            f'«{banner.display_title()}» آماده سفارش است.\n'
             f'/banners',
         )
-    return {'ok': True, 'status': 'approved', 'banner_id': banner.id}
+    return {
+        'ok': True,
+        'status': 'approved',
+        'banner_id': banner.id,
+        'message': f'تأیید شد و در {lb} منتشر شد (بنر #{banner.id}).',
+    }
 
 
 def edit_banner_caption(
@@ -168,24 +203,22 @@ def edit_banner_caption(
     customer_bale_id: str,
     new_caption: str,
 ) -> Dict[str, Any]:
-    """فقط متن؛ رسانه قابل ویرایش نیست. رایگان."""
     from bot_flow.banned_words import is_allowed
 
     try:
         banner = CustomerBanner.objects.select_related('customer').get(id=banner_id)
     except CustomerBanner.DoesNotExist:
-        return {'ok': False, 'error': 'not_found'}
+        return {'ok': False, 'error': 'not_found', 'message': user_facing_error('not_found')}
     if str(banner.customer.bale_user_id) != str(customer_bale_id):
-        return {'ok': False, 'error': 'forbidden'}
+        return {'ok': False, 'error': 'forbidden', 'message': user_facing_error('forbidden')}
 
     ok, hits = is_allowed(new_caption or '')
     if not ok:
-        return {'ok': False, 'error': 'banned', 'hits': hits}
+        return {'ok': False, 'error': 'banned', 'message': user_facing_error('banned')}
 
     banner.caption = new_caption or ''
     banner.save(update_fields=['caption'])
 
-    # تلاش برای edit روی پیام ذخیره‌شده نزد بازو
     try:
         bc.edit_message_caption(
             banner.storage_chat_id,
@@ -195,8 +228,7 @@ def edit_banner_caption(
     except Exception:
         logger.exception('edit storage caption failed')
 
-    # روی لینک‌بانک اگر message_id عددی Bot API باشد (ممکن است داخلی بزرگ باشد و fail شود)
-    if banner.linkbank_message_id and banner.linkbank_message_id.isdigit():
+    if banner.linkbank_message_id and str(banner.linkbank_message_id).isdigit():
         try:
             bc.edit_message_caption(
                 banner.linkbank_chat_id or linkbank_channel(),
@@ -204,6 +236,6 @@ def edit_banner_caption(
                 new_caption or ' ',
             )
         except Exception:
-            logger.exception('edit linkbank caption failed')
+            logger.exception('edit channel caption failed')
 
-    return {'ok': True, 'banner_id': banner.id}
+    return {'ok': True, 'banner_id': banner.id, 'message': 'متن به‌روز شد.'}
