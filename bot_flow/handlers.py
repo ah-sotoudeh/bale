@@ -27,6 +27,12 @@ TARIFF_LINE = re.compile(
     r'|^\s*(.+?)\s+(\d+)\s+(\d+)\s*$'
 )
 
+TARIFF_HELP = (
+    'نام | ساعت_ارسال | مدت_ساعت | قیمت_تومان\n'
+    'مثال: طرح عادی | 10 | 24 | 200\n'
+    'یا: طرح عادی | ساعت 10 | 24 ساعت | 200 تومن'
+)
+
 
 def reference_channel() -> str:
     return os.environ.get('REFERENCE_CHANNEL', '@linktest')
@@ -53,14 +59,12 @@ def save_session(sess: BotSession, state: Optional[str] = None, **data_updates) 
 def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
     uid = str(bale_user_id)
     handle = (username_hint or '').lstrip('@').strip() or None
-
     user = User.objects.filter(bale_user_id=uid).first()
     if user:
         if handle and user.bale_username != handle:
             user.bale_username = handle
             user.save(update_fields=['bale_username'])
         return user
-
     base = (handle or f'bale_{uid}')[:30]
     candidate = base
     n = 0
@@ -337,7 +341,7 @@ def handle_publish_mode_callback(
     )
     bc.send_message(
         str(chat_id),
-        f'تعرفه «{channels[0].name}»:\nنام | مدت_ساعت | قیمت_تومان\nمثال: روزانه | 24 | 300',
+        f'تعرفه «{channels[0].name}»:\n{TARIFF_HELP}',
     )
 
 
@@ -373,16 +377,39 @@ def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     )
     bc.send_message(
         str(chat_id),
-        f'مجموعه «{group.name}» ذخیره شد.\nتعرفه مشترک:\nنام | مدت | قیمت\nمثال: روزانه | 24 | 300',
+        f'مجموعه «{group.name}» ذخیره شد.\nتعرفه مشترک:\n{TARIFF_HELP}',
     )
     return True
 
 
-def parse_tariff_lines(text: str) -> List[Tuple[str, int, int]]:
-    rows: List[Tuple[str, int, int]] = []
+def _extract_int(s: str) -> Optional[int]:
+    m = re.search(r'(\d{1,4})', s or '')
+    return int(m.group(1)) if m else None
+
+
+def parse_tariff_lines(text: str) -> List[Tuple[str, Optional[int], int, int]]:
+    """نام | ساعت_ارسال | مدت | قیمت — چهارتایی یا سه‌تایی قدیمی."""
+    rows: List[Tuple[str, Optional[int], int, int]] = []
     for line in (text or '').splitlines():
         line = line.strip()
         if not line:
+            continue
+        parts = [p.strip() for p in re.split(r'[|،,]', line) if p.strip()]
+        if len(parts) >= 4:
+            name = parts[0]
+            hour = _extract_int(parts[1])
+            dur = _extract_int(parts[2])
+            price = _extract_int(parts[3])
+            if name and hour is not None and dur is not None and price is not None:
+                if 0 <= hour <= 23 and dur > 0 and price >= 0:
+                    rows.append((name, hour, dur, price))
+            continue
+        if len(parts) == 3:
+            name = parts[0]
+            dur = _extract_int(parts[1])
+            price = _extract_int(parts[2])
+            if name and dur is not None and price is not None and dur > 0:
+                rows.append((name, None, dur, price))
             continue
         m = TARIFF_LINE.match(line)
         if not m:
@@ -391,7 +418,7 @@ def parse_tariff_lines(text: str) -> List[Tuple[str, int, int]]:
             name, hours, price = m.group(1), m.group(2), m.group(3)
         else:
             name, hours, price = m.group(4), m.group(5), m.group(6)
-        rows.append((name.strip(), int(hours), int(price)))
+        rows.append((name.strip(), None, int(hours), int(price)))
     return rows
 
 
@@ -414,7 +441,8 @@ def publish_package_to_reference(group: ChannelGroup) -> Dict[str, Any]:
         lines.append(f'{i}. {ch.name} . {_channel_handle(ch)}')
     lines.append(f'💳 تعرفه ({len(channels)} کانال با هم)')
     for t in tariffs:
-        lines.append(f'• {t.name} . {t.duration_hours}س . {t.price:,} ت')
+        hour = f'{t.start_hour:02d}:00' if t.start_hour is not None else '—'
+        lines.append(f'• {t.name} . ارسال {hour} . {t.duration_hours}س . {t.price:,} ت')
     rows = [
         [{'text': f'{t.name} — {t.price:,} ت', 'callback_data': f'order_tariff:{t.id}'}]
         for t in tariffs
@@ -431,7 +459,8 @@ def publish_channel_to_reference(channel: Channel) -> Dict[str, Any]:
         return {'error': 'no_tariffs'}
     lines = [f'📢 {channel.name}', _channel_handle(channel), '', 'تعرفه‌ها:']
     for t in tariffs:
-        lines.append(f'• {t.name}: {t.price:,} ت / {t.duration_hours}س')
+        hour = f'{t.start_hour:02d}:00' if t.start_hour is not None else '—'
+        lines.append(f'• {t.name}: ارسال {hour} | {t.duration_hours}س | {t.price:,} ت')
     rows = [
         [{'text': f'{t.name} — {t.price:,} ت', 'callback_data': f'order_tariff:{t.id}'}]
         for t in tariffs
@@ -449,7 +478,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     rows = parse_tariff_lines(text)
     if not rows:
-        bc.send_message(str(chat_id), 'فرمت: روزانه | 24 | 300')
+        bc.send_message(str(chat_id), f'فرمت نامعتبر.\n{TARIFF_HELP}')
         return True
 
     package_mode = bool(sess.data.get('package_mode'))
@@ -464,19 +493,20 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
             bc.send_message(str(chat_id), 'مجموعه نیست. /start')
             return True
         with transaction.atomic():
-            for name, hours, price in rows:
+            for name, start_hour, hours, price in rows:
                 t, _ = Tariff.objects.update_or_create(
                     group=group,
                     name=name,
-                    defaults={'channel': None, 'duration_hours': hours, 'price': price},
+                    defaults={
+                        'channel': None,
+                        'start_hour': start_hour,
+                        'duration_hours': hours,
+                        'price': price,
+                    },
                 )
                 created.append(t)
-        bc.send_message(
-            str(chat_id),
-            'ذخیره شد:\n' + '\n'.join(f'• {t.name}: {t.price}ت' for t in created),
-        )
-        pub = publish_package_to_reference(group)
         label = group.name
+        pub = publish_package_to_reference(group)
     else:
         try:
             channel = Channel.objects.get(id=ch_id)
@@ -484,19 +514,28 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
             bc.send_message(str(chat_id), 'کانال نیست. /start')
             return True
         with transaction.atomic():
-            for name, hours, price in rows:
+            for name, start_hour, hours, price in rows:
                 t, _ = Tariff.objects.update_or_create(
                     channel=channel,
                     name=name,
-                    defaults={'group': None, 'duration_hours': hours, 'price': price},
+                    defaults={
+                        'group': None,
+                        'start_hour': start_hour,
+                        'duration_hours': hours,
+                        'price': price,
+                    },
                 )
                 created.append(t)
-        bc.send_message(
-            str(chat_id),
-            'ذخیره شد:\n' + '\n'.join(f'• {t.name}: {t.price}ت' for t in created),
-        )
-        pub = publish_channel_to_reference(channel)
         label = channel.name
+        pub = publish_channel_to_reference(channel)
+
+    summary = '\n'.join(
+        f'• {x.name}: ارسال '
+        f'{x.start_hour if x.start_hour is not None else "—"} | '
+        f'{x.duration_hours}س | {x.price:,}ت'
+        for x in created
+    )
+    bc.send_message(str(chat_id), f'ذخیره شد:\n{summary}')
 
     if pub.get('error') and pub.get('error') != 'no_tariffs':
         bc.send_message(str(chat_id), f'انتشار ناموفق: {pub.get("error")}')
