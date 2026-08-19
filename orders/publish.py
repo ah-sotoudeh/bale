@@ -1,17 +1,11 @@
-"""Scheduled publish by mode + daily admin health check + permalink recovery.
-
-Modes on Channel.publish_mode:
-  bot     — لینک‌ساز ادمین کانال است؛ forward با نقل‌قول از کانال مرجع
-  linkyar — لینک‌یار ادمین است؛ ارسال سپس تأیید تاریخچه
-  manual  — مدیر دستی می‌فرستد؛ فقط یادآوری + دکمه منتشر شد
-
-گزارش به مشتری همیشه فقط از لینک‌ساز (Bot API).
-"""
+"""Scheduled publish by mode + daily admin health check + permalink recovery."""
 from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Set
 
 from django.db import transaction
@@ -22,7 +16,12 @@ from channels_app.models import Channel, ChannelGroup, Tariff
 from integrations import bale_client as bc
 from integrations import linkyar_client as ly
 from orders.models import OrderItem
-from wallet.services import credit_manager_for_execution, OPERATOR_BALE_ID
+from wallet.services import (
+    OPERATOR_BALE_ID,
+    apply_manager_penalty,
+    credit_customer_refund,
+    credit_manager_for_execution,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,32 +69,25 @@ def check_bot_admin(ch: Channel) -> bool:
 
 def deactivate_tariffs_for_channel(ch: Channel, reason: str) -> int:
     n = 0
-    qs = Tariff.objects.filter(channel=ch, is_active=True)
-    n += qs.update(is_active=False)
+    n += Tariff.objects.filter(channel=ch, is_active=True).update(is_active=False)
     for g in ch.groups.all():
         n += Tariff.objects.filter(group=g, is_active=True).update(is_active=False)
     if ch.manager and ch.manager.bale_user_id:
         bc.send_message(
             ch.manager.bale_user_id,
-            f'⚠️ تعرفه(های) مرتبط با «{ch.name}» موقتاً از فهرست خارج شد.\n'
-            f'علت: {reason}',
+            f'⚠️ تعرفه(های) «{ch.name}» موقتاً غیرفعال شد.\nعلت: {reason}',
         )
     return n
 
 
 def daily_admin_audit() -> Dict[str, int]:
     channel_ids: Set[int] = set(
-        Tariff.objects.filter(is_active=True, channel__isnull=False).values_list(
-            'channel_id', flat=True
-        )
+        Tariff.objects.filter(is_active=True, channel__isnull=False).values_list('channel_id', flat=True)
     )
-    for gid in Tariff.objects.filter(is_active=True, group__isnull=False).values_list(
-        'group_id', flat=True
-    ):
+    for gid in Tariff.objects.filter(is_active=True, group__isnull=False).values_list('group_id', flat=True):
         g = ChannelGroup.objects.filter(id=gid).first()
         if g:
             channel_ids.update(g.channels.values_list('id', flat=True))
-
     checked = 0
     deactivated = 0
     for cid in channel_ids:
@@ -106,17 +98,10 @@ def daily_admin_audit() -> Dict[str, int]:
         mode = ch.publish_mode or Channel.PUBLISH_BOT
         if mode == Channel.PUBLISH_MANUAL:
             continue
-        if mode == Channel.PUBLISH_BOT:
-            if not check_bot_admin(ch):
-                deactivated += deactivate_tariffs_for_channel(
-                    ch, 'لینک‌ساز دیگر مدیر کانال نیست — دوباره ادمین کنید یا حالت انتشار را عوض کنید'
-                )
-        elif mode == Channel.PUBLISH_LINKYAR:
-            if not check_linkyar_admin(ch):
-                deactivated += deactivate_tariffs_for_channel(
-                    ch,
-                    f'{ly.linkyar_username()} دیگر مدیر کانال نیست — دوباره ادمین کنید یا حالت انتشار را عوض کنید',
-                )
+        if mode == Channel.PUBLISH_BOT and not check_bot_admin(ch):
+            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌ساز ادمین نیست')
+        elif mode == Channel.PUBLISH_LINKYAR and not check_linkyar_admin(ch):
+            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌یار ادمین نیست')
     return {'checked': checked, 'deactivated_tariffs': deactivated}
 
 
@@ -132,20 +117,17 @@ def targets_for_item(item: OrderItem) -> List[Channel]:
 
 
 def recover_permalink(
-    ch: Channel,
-    *,
+    ch: Channel, *,
     min_date_ms: Optional[int] = None,
     preferred_senders: Optional[List[int]] = None,
     limit: int = 12,
 ) -> Optional[Dict[str, Any]]:
     hist = ly.load_channel_history(channel_ref(ch), limit=limit)
     if not hist.get('ok'):
-        logger.warning('recover_permalink history fail ch=%s %s', ch.id, hist.get('error'))
         return None
     messages = hist.get('messages') or []
     for m in messages:
-        mid = m.get('message_id')
-        date = m.get('date')
+        mid, date = m.get('message_id'), m.get('date')
         if mid is None or date is None:
             continue
         if min_date_ms is not None and int(date) < int(min_date_ms) - 15_000:
@@ -156,21 +138,15 @@ def recover_permalink(
                 continue
         link = m.get('permalink') or ly.message_permalink(
             (ch.link or '').lstrip('@').split('/')[-1] if ch.link else '',
-            int(mid),
-            int(date),
+            int(mid), int(date),
         )
         return {
-            'message_id': int(mid),
-            'date': int(date),
-            'sender_id': m.get('sender_id'),
-            'permalink': link,
-            'channel_id': ch.id,
-            'ref': channel_ref(ch),
+            'message_id': int(mid), 'date': int(date), 'sender_id': m.get('sender_id'),
+            'permalink': link, 'channel_id': ch.id, 'ref': channel_ref(ch),
         }
     if preferred_senders:
         for m in messages:
-            mid = m.get('message_id')
-            date = m.get('date')
+            mid, date = m.get('message_id'), m.get('date')
             if mid is None or date is None:
                 continue
             if min_date_ms is not None and int(date) < int(min_date_ms) - 15_000:
@@ -179,62 +155,41 @@ def recover_permalink(
             if not link:
                 continue
             return {
-                'message_id': int(mid),
-                'date': int(date),
-                'sender_id': m.get('sender_id'),
-                'permalink': link,
-                'channel_id': ch.id,
-                'ref': channel_ref(ch),
+                'message_id': int(mid), 'date': int(date), 'sender_id': m.get('sender_id'),
+                'permalink': link, 'channel_id': ch.id, 'ref': channel_ref(ch),
             }
     return None
 
 
 def _notify_customer_executed(item: OrderItem, ch: Channel, permalink: str) -> None:
     cust = item.order.customer.bale_user_id
-    if not cust:
-        return
-    bc.send_message(
-        cust,
-        f'✅ بنر شما در «{ch.name}» منتشر شد.\n'
-        f'🔗 {permalink}',
-    )
+    if cust:
+        bc.send_message(cust, f'✅ بنر شما در «{ch.name}» منتشر شد.\n🔗 {permalink}')
 
 
 def _post_via_bot(ch: Channel, from_chat_id: str, message_id: int, caption: str = '') -> Dict[str, Any]:
     ref = channel_ref(ch)
-    # ترجیح: فوروارد با نقل‌قول از کانال مرجع
     result = bc.forward_message(ref, from_chat_id, int(message_id))
     if not result.get('ok'):
         result = bc.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
 
-def _post_via_linkyar(
-    ch: Channel, from_chat_id: str, message_id: int, caption: str = ''
-) -> Dict[str, Any]:
+def _post_via_linkyar(ch: Channel, from_chat_id: str, message_id: int, caption: str = '') -> Dict[str, Any]:
     ref = channel_ref(ch)
     result = ly.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
 
 def _fail_one_channel(item: OrderItem, ch: Channel, reason: str) -> None:
-    msg = (
-        f'❌ ارسال تبلیغ آیتم #{item.id} در کانال «{ch.name}» ناموفق بود.\n'
-        f'علت: {reason}'
-    )
+    msg = f'❌ ارسال آیتم #{item.id} در «{ch.name}» ناموفق.\nعلت: {reason}'
     if ch.manager and ch.manager.bale_user_id:
         bc.send_message(ch.manager.bale_user_id, msg)
     if OPERATOR_BALE_ID:
         bc.send_message(OPERATOR_BALE_ID, msg)
-    logger.warning('publish fail item=%s channel=%s %s', item.id, ch.id, reason)
 
 
-def _finalize_channel_ok(
-    item: OrderItem,
-    ch: Channel,
-    post_meta: Dict[str, Any],
-    posts: List[Dict[str, Any]],
-) -> None:
+def _finalize_channel_ok(item: OrderItem, ch: Channel, post_meta: Dict[str, Any], posts: List) -> None:
     posts.append(post_meta)
     permalink = post_meta.get('permalink') or ''
     if permalink:
@@ -242,18 +197,28 @@ def _finalize_channel_ok(
         _notify_customer_executed(item, ch, permalink)
 
 
+def _refund_failed_item(item: OrderItem) -> None:
+    try:
+        order = item.order
+        credit_customer_refund(order.customer, item.price, item.id, f'عدم انتشار #{item.id}')
+        if item.manager:
+            apply_manager_penalty(item.manager, item.price, item.id)
+        if order.customer.bale_user_id:
+            bc.send_message(
+                order.customer.bale_user_id,
+                f'مبلغ {item.price:,} تومان بابت آیتم #{item.id} به کیف پول برگشت.',
+            )
+    except Exception:
+        logger.exception('refund failed item=%s', item.id)
+
+
 @transaction.atomic
 def publish_due_items() -> Dict[str, int]:
     now = timezone.now()
     items = (
         OrderItem.objects.select_related(
-            'order',
-            'order__customer',
-            'order__customer_banner',
-            'channel',
-            'tariff',
-            'tariff__group',
-            'manager',
+            'order', 'order__customer', 'order__customer_banner',
+            'channel', 'tariff', 'tariff__group', 'manager',
         )
         .filter(execution_status='paid', manager_status='approved')
         .filter(
@@ -261,38 +226,28 @@ def publish_due_items() -> Dict[str, int]:
             | Q(manager_edited_start__isnull=True, requested_start__lte=now)
         )
     )
-    published = 0
-    failed = 0
-    manual_reminded = 0
-    bot_id = _bot_numeric_id()
-    ly_id = _linkyar_numeric_id()
+    published = failed = manual_reminded = 0
+    bot_id, ly_id = _bot_numeric_id(), _linkyar_numeric_id()
 
     for item in items:
         order = item.order
         if not order.banner_message_id or not order.banner_from_chat_id:
-            logger.warning('item %s missing banner', item.id)
             continue
-
         start = item.effective_start
         if start and start > now:
             continue
-
         channels = targets_for_item(item)
         if not channels:
             continue
 
         posts: List[Dict[str, Any]] = []
-        any_ok = False
-        any_manual = False
+        any_ok = any_manual = False
         t0_ms = int(time.time() * 1000)
-
         from_chat = str(order.banner_from_chat_id)
         try:
             msg_id = int(order.banner_message_id)
         except (TypeError, ValueError):
             continue
-
-        # اگر بنر مرجع جداگانه روی CustomerBanner باشد
         cb = order.customer_banner
         if cb and cb.from_linkbank and cb.linkbank_message_id:
             from_chat = str(cb.linkbank_chat_id or from_chat)
@@ -303,69 +258,56 @@ def publish_due_items() -> Dict[str, int]:
 
         for ch in channels:
             mode = ch.publish_mode or Channel.PUBLISH_BOT
-
             if mode == Channel.PUBLISH_MANUAL:
                 any_manual = True
                 if item.manager and item.manager.bale_user_id:
-                    kb = bc.inline_keyboard([
-                        [{'text': '✅ منتشر شد', 'callback_data': f'published:{item.id}:{ch.id}'}]
-                    ])
+                    kb = bc.inline_keyboard([[{
+                        'text': '✅ منتشر شد', 'callback_data': f'published:{item.id}:{ch.id}'
+                    }]])
                     bc.send_message(
                         item.manager.bale_user_id,
-                        f'⏰ زمان انتشار آیتم #{item.id}\n'
-                        f'کانال: «{ch.name}»\n'
-                        f'لطفاً بنر را ارسال کنید و دکمه را بزنید.',
+                        f'⏰ زمان انتشار #{item.id} — «{ch.name}»',
                         reply_markup=kb,
                     )
                 continue
 
             if mode == Channel.PUBLISH_BOT:
                 if not check_bot_admin(ch):
-                    _fail_one_channel(item, ch, 'لینک‌ساز ادمین کانال نیست')
+                    _fail_one_channel(item, ch, 'لینک‌ساز ادمین نیست')
                     failed += 1
                     continue
-                res = _post_via_bot(ch, from_chat, msg_id, caption=order.banner_caption or '')
+                res = _post_via_bot(ch, from_chat, msg_id, order.banner_caption or '')
                 time.sleep(1.5)
-                preferred = [x for x in [bot_id] if x]
-                meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=preferred)
+                meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [bot_id] if x])
                 if meta and meta.get('permalink'):
                     any_ok = True
                     _finalize_channel_ok(item, ch, meta, posts)
                 elif res.get('ok'):
                     any_ok = True
                     posts.append({'channel_id': ch.id, 'ref': channel_ref(ch), 'permalink': ''})
-                    cust = order.customer.bale_user_id
-                    if cust:
-                        bc.send_message(
-                            cust,
-                            f'✅ بنر در «{ch.name}» ارسال شد (لینک به‌زودی تکمیل می‌شود).',
-                        )
+                    if order.customer.bale_user_id:
+                        bc.send_message(order.customer.bale_user_id, f'✅ بنر در «{ch.name}» ارسال شد.')
                 else:
-                    _fail_one_channel(item, ch, 'ارسال بازو ناموفق بود')
+                    _fail_one_channel(item, ch, 'ارسال ناموفق')
                     failed += 1
                 continue
 
             if mode == Channel.PUBLISH_LINKYAR:
                 if not check_linkyar_admin(ch):
-                    _fail_one_channel(item, ch, 'لینک‌یار ادمین کانال نیست')
+                    _fail_one_channel(item, ch, 'لینک‌یار ادمین نیست')
                     failed += 1
                     continue
-                res = _post_via_linkyar(ch, from_chat, msg_id, caption=order.banner_caption or '')
+                _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '')
                 time.sleep(2)
-                preferred = [x for x in [ly_id] if x]
-                meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=preferred)
+                meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [ly_id] if x])
+                if not (meta and meta.get('permalink')):
+                    meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=None)
                 if meta and meta.get('permalink'):
                     any_ok = True
                     _finalize_channel_ok(item, ch, meta, posts)
                 else:
-                    meta2 = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=None)
-                    if meta2 and meta2.get('permalink'):
-                        any_ok = True
-                        _finalize_channel_ok(item, ch, meta2, posts)
-                    else:
-                        _fail_one_channel(item, ch, 'ارسال یا تأیید لینک‌یار ناموفق بود')
-                        failed += 1
-                continue
+                    _fail_one_channel(item, ch, 'تأیید لینک‌یار ناموفق')
+                    failed += 1
 
         if any_manual and not any_ok:
             item.execution_status = 'awaiting_manager_publish'
@@ -380,33 +322,23 @@ def publish_due_items() -> Dict[str, int]:
             item.channel_message_id = json.dumps(posts, ensure_ascii=False)[:4000]
             if posts and posts[0].get('permalink'):
                 item.published_link = str(posts[0]['permalink'])[:500]
-            item.save(
-                update_fields=[
-                    'execution_status',
-                    'executed_at',
-                    'published_at',
-                    'channel_message_id',
-                    'published_link',
-                ]
-            )
+            item.save(update_fields=[
+                'execution_status', 'executed_at', 'published_at',
+                'channel_message_id', 'published_link',
+            ])
             if item.manager:
                 credit_manager_for_execution(item.manager, item.price, item.id)
             published += 1
         elif not any_manual:
             item.execution_status = 'failed_publish'
             item.save(update_fields=['execution_status'])
+            _refund_failed_item(item)
 
-    return {
-        'published': published,
-        'failed_channels': failed,
-        'manual_reminded': manual_reminded,
-    }
+    return {'published': published, 'failed_channels': failed, 'manual_reminded': manual_reminded}
 
 
 def verify_manager_published(
-    item_id: int,
-    manager_bale_id: str,
-    channel_id: Optional[int] = None,
+    item_id: int, manager_bale_id: str, channel_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     try:
         item = OrderItem.objects.select_related(
@@ -414,34 +346,25 @@ def verify_manager_published(
         ).get(id=item_id)
     except OrderItem.DoesNotExist:
         return {'ok': False, 'error': 'not_found'}
-
     if item.manager and str(item.manager.bale_user_id) != str(manager_bale_id):
         return {'ok': False, 'error': 'not_manager'}
-    if item.execution_status not in (
-        'paid',
-        'remind_sent',
-        'awaiting_manager_publish',
-    ):
-        return {'ok': False, 'error': 'bad_status', 'status': item.execution_status}
-
+    if item.execution_status not in ('paid', 'remind_sent', 'awaiting_manager_publish'):
+        return {'ok': False, 'error': 'bad_status'}
     channels = targets_for_item(item)
     if channel_id:
         channels = [c for c in channels if c.id == int(channel_id)]
     if not channels:
         return {'ok': False, 'error': 'no_channel'}
-
     posts: List[Dict[str, Any]] = []
     any_ok = False
     min_ms = int((item.effective_start.timestamp() - 3600) * 1000) if item.effective_start else None
-
     for ch in channels:
         meta = recover_permalink(ch, min_date_ms=min_ms, preferred_senders=None)
         if meta and meta.get('permalink'):
             any_ok = True
             _finalize_channel_ok(item, ch, meta, posts)
         else:
-            _fail_one_channel(item, ch, 'بنر در پیام‌های اخیر کانال پیدا نشد')
-
+            _fail_one_channel(item, ch, 'بنر در تاریخچه پیدا نشد')
     if any_ok:
         item.execution_status = 'executed'
         item.executed_at = timezone.now()
@@ -449,41 +372,43 @@ def verify_manager_published(
         item.channel_message_id = json.dumps(posts, ensure_ascii=False)[:4000]
         if posts and posts[0].get('permalink'):
             item.published_link = str(posts[0]['permalink'])[:500]
-        item.save(
-            update_fields=[
-                'execution_status',
-                'executed_at',
-                'published_at',
-                'channel_message_id',
-                'published_link',
-            ]
-        )
+        item.save(update_fields=[
+            'execution_status', 'executed_at', 'published_at',
+            'channel_message_id', 'published_link',
+        ])
         if item.manager:
             credit_manager_for_execution(item.manager, item.price, item.id)
         return {'ok': True, 'permalinks': [p.get('permalink') for p in posts]}
-
     return {'ok': False, 'error': 'not_found_in_history'}
 
 
 def delete_expired_posts() -> int:
+    """حذف پست کانال پس از پایان مدت — یا TEST_AD_TTL_MINUTES برای تست کوتاه."""
     now = timezone.now()
-    items = (
-        OrderItem.objects.filter(execution_status='executed', requested_end__lte=now)
-        .exclude(channel_message_id__isnull=True)
-        .exclude(channel_message_id='')
-    )
+    ttl_min = int(os.environ.get('TEST_AD_TTL_MINUTES', '0') or '0')
+    if ttl_min > 0:
+        cutoff = now - timedelta(minutes=ttl_min)
+        items = (
+            OrderItem.objects.filter(execution_status='executed', published_at__lte=cutoff)
+            .exclude(channel_message_id__isnull=True)
+            .exclude(channel_message_id='')
+        )
+    else:
+        items = (
+            OrderItem.objects.filter(execution_status='executed', requested_end__lte=now)
+            .exclude(channel_message_id__isnull=True)
+            .exclude(channel_message_id='')
+        )
     n = 0
     for item in items:
         try:
-            posts = json.loads(item.channel_message_id)
+            posts = json.loads(item.channel_message_id or '[]')
         except Exception:
             posts = []
         if not isinstance(posts, list):
             posts = []
         for p in posts:
-            mid = p.get('message_id')
-            date = p.get('date') or 0
-            ref = p.get('ref')
+            mid, date, ref = p.get('message_id'), p.get('date') or 0, p.get('ref')
             if mid and ref:
                 ly.delete_message(str(ref), int(mid), message_date=int(date or 0))
                 n += 1
