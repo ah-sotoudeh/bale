@@ -54,8 +54,9 @@ def to_jalali(d: date) -> Tuple[int, int, int]:
 
 
 def format_jalali(d: date) -> str:
-    """e.g. شنبه ۱۴۰۵/۰۵/۱۷"""
+    """مثال: سه‌شنبه ۱۴۰۵/۰۵/۲۰"""
+    from bot_flow.messages import fa_num
+
     jy, jm, jd = to_jalali(d)
     weekday = WEEKDAY_FA[d.weekday()]
-    # Arabic-Indic digits optional; keep Western digits for readability in bots
-    return f'{weekday} {jy}/{jm:02d}/{jd:02d}'
+    return fa_num(f'{weekday} {jy}/{jm:02d}/{jd:02d}')
