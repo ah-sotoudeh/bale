@@ -1,7 +1,4 @@
-"""Customer-side: بنرهای لینک‌بانک → فهرست → سبد.
-
-لینک‌بانک=@linkbank مرجع بنر | لینک‌بان=@linkban فهرست تعرفه | لینک‌ساز=بازو | لینک‌یار=کاربر
-"""
+"""Customer-side: بنر → فهرست → سبد + کیف پول."""
 from __future__ import annotations
 
 import logging
@@ -29,7 +26,11 @@ STATE_CUST_EDIT_CAPTION = 'cust_edit_caption'
 
 
 def linkbank_username() -> str:
-    raw = (os.environ.get('LINKBANK_CHANNEL') or os.environ.get('BANNER_REFERENCE_CHANNEL') or '@linkbank').strip()
+    raw = (
+        os.environ.get('LINKBANK_CHANNEL')
+        or os.environ.get('BANNER_REFERENCE_CHANNEL')
+        or '@linktest'
+    ).strip()
     if raw and not raw.startswith('@') and not raw.lstrip('-').isdigit():
         raw = '@' + raw
     return raw
@@ -55,15 +56,15 @@ def _forward_meta(message: dict) -> Tuple[bool, str, str]:
         title = (fwd_chat.get('title') or '').lower()
         cid = str(fwd_chat.get('id') or '')
         mid = str(message.get('forward_from_message_id') or message.get('forward_message_id') or '')
-        if uname == lb or uname == 'linkbank':
+        if uname == lb or uname in ('linkbank', 'linktest'):
             return True, cid or linkbank_username(), mid
-        if 'لینک بانک' in title or 'linkbank' in title.replace(' ', ''):
+        if 'لینک بانک' in title or 'linkbank' in title.replace(' ', '') or 'linktest' in title.replace(' ', ''):
             return True, cid or linkbank_username(), mid
     origin = message.get('forward_origin') or {}
     if isinstance(origin, dict):
         chat = origin.get('chat') or {}
         uname = (chat.get('username') or '').lower()
-        if uname == lb or uname == 'linkbank':
+        if uname == lb or uname in ('linkbank', 'linktest'):
             return True, str(chat.get('id') or linkbank_username()), str(origin.get('message_id') or '')
     return False, '', ''
 
@@ -82,27 +83,30 @@ def show_banner_hub(chat_id: str, bale_user_id: str) -> None:
     )
     lb = linkbank_username()
     lines = [
-        'مرکز بنر',
+        'مرکز بنر / مشتری',
         '',
         f'فقط بنرهای منتشرشده در {lb} برای سفارش معتبرند.',
-        f'اگر بنر در {lb} دارید، همان را بازارسال کنید به لینک‌ساز.',
-        'بنر جدید (خارج از لینک‌بانک) نیاز به تأیید مدیر سامانه دارد.',
-        'بنر اول رایگان؛ بعدی‌ها با تعرفه لینک‌بانک و دائمی هستند.',
+        f'اگر بنر در {lb} دارید، همان را بازارسال کنید.',
+        'بنر جدید نیاز به تأیید مدیر سامانه دارد.',
+        'بنر اول رایگان؛ بعدی‌ها با تعرفه (فعلاً فقط اعلام مبلغ).',
     ]
     rows: List[List[Dict[str, str]]] = [
-        [{'text': 'بازارسال از لینک‌بانک / بنر جدید', 'callback_data': 'cbnew'}],
+        [{'text': 'بازارسال / بنر جدید', 'callback_data': 'cbnew'}],
     ]
     if banners:
         lines.append('')
-        lines.append('بنرهای لینک‌بانک شما:')
+        lines.append('بنرهای شما:')
         for b in banners:
             lines.append(f'- {b.display_title()}')
             rows.append([{'text': f'استفاده: {b.display_title()}'[:60], 'callback_data': f'cbuse:{b.id}'}])
             rows.append([{'text': f'ویرایش متن #{b.id}', 'callback_data': f'cbedit:{b.id}'}])
     else:
         lines.append('')
-        lines.append('هنوز بنر لینک‌بانک ذخیره‌شده ندارید.')
-    rows.append([{'text': 'سبد فعلی', 'callback_data': 'ccart'}])
+        lines.append('هنوز بنر ذخیره‌شده ندارید.')
+    rows.append([
+        {'text': 'سبد', 'callback_data': 'ccart'},
+        {'text': 'کیف پول', 'callback_data': 'cwallet'},
+    ])
     bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=bc.inline_keyboard(rows))
 
 
@@ -139,7 +143,7 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         or message.get('forward_origin') or message.get('forward_from')
     )
     if not has_media and not caption and not is_fwd:
-        bc.send_message(str(chat_id), 'بنر باید عکس/ویدیو باشد یا از لینک‌بانک بازارسال شود.')
+        bc.send_message(str(chat_id), 'بنر باید عکس/ویدیو باشد یا از کانال مرجع بازارسال شود.')
         return True
 
     ok, hits = is_allowed(caption)
@@ -159,11 +163,10 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
             linkbank_message_id=str(lb_mid or ''), media_kind=_media_kind(message),
         )
         save_session(sess, STATE_CUST_BROWSE, role='customer')
-        bc.send_message(str(chat_id), f'بنر از لینک‌بانک ذخیره شد.\n{banner.display_title()}\nفهرست تعرفه‌ها:')
+        bc.send_message(str(chat_id), f'بنر از مرجع ذخیره شد.\n{banner.display_title()}\nفهرست:')
         show_catalog(chat_id, bale_user_id)
         return True
 
-    # غیر لینک‌بانک
     d = dict(sess.data or {})
     d['pending_banner'] = {
         'chat_id': str(chat_id), 'message_id': str(msg_id),
@@ -175,17 +178,15 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
 
     from orders.banner_publish import fee_for_user
     fee = fee_for_user(user)
-    fee_line = 'بنر اول در لینک‌بانک رایگان است.' if fee == 0 else f'تعرفه ثبت بنر بعدی: {fee:,} تومان (دائمی).'
+    fee_line = 'بنر اول رایگان است.' if fee == 0 else f'تعرفه بنر بعدی (اعلامی): {fee:,} تومان — فعلاً بدون کسر کیف پول.'
     kb = bc.inline_keyboard([
-        [{'text': 'ثبت درخواست بنر جدید در لینک‌بانک', 'callback_data': 'cbreq'}],
-        [{'text': 'بازگشت به مرکز بنر', 'callback_data': 'cbhub'}],
+        [{'text': 'ثبت درخواست بنر جدید', 'callback_data': 'cbreq'}],
+        [{'text': 'بازگشت', 'callback_data': 'cbhub'}],
     ])
     bc.send_message(
         str(chat_id),
-        'این بنر از کانال لینک‌بانک نیست.\n'
-        'برای سفارش فقط بنرهای لینک‌بانک پذیرفته می‌شود.\n\n'
-        + fee_line + '\n'
-        'با دکمه زیر برای مدیر سامانه (لینک‌پخش) درخواست بررسی بفرستید.',
+        'این بنر از کانال مرجع نیست.\n\n' + fee_line + '\n'
+        'با دکمه زیر برای اپراتور درخواست بررسی بفرستید.',
         reply_markup=kb,
     )
     return True
@@ -197,7 +198,7 @@ def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
         id=banner_id, customer=user, is_active=True, from_linkbank=True
     ).first()
     if not banner:
-        bc.send_message(str(chat_id), 'بنر لینک‌بانک پیدا نشد.')
+        bc.send_message(str(chat_id), 'بنر پیدا نشد.')
         show_banner_hub(chat_id, bale_user_id)
         return
     Order.objects.filter(customer=user, status='draft').delete()
@@ -207,7 +208,7 @@ def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
     order.save(update_fields=['customer_banner'])
     sess = get_session(bale_user_id)
     save_session(sess, STATE_CUST_BROWSE, role='customer')
-    bc.send_message(str(chat_id), f'بنر «{banner.display_title()}» انتخاب شد.\nفهرست:')
+    bc.send_message(str(chat_id), f'بنر «{banner.display_title()}» انتخاب شد.')
     show_catalog(chat_id, bale_user_id)
 
 
@@ -242,11 +243,12 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     rows.append([
         {'text': 'سبد', 'callback_data': 'ccart'},
         {'text': 'بنرها', 'callback_data': 'cbhub'},
+        {'text': 'کیف پول', 'callback_data': 'cwallet'},
         {'text': 'نهایی‌سازی', 'callback_data': 'ccheck'},
     ])
     bc.send_message(
         str(chat_id),
-        f'فهرست تعرفه‌ها (صفحه {page + 1})\nمرجع: ble.ir/linkban',
+        f'فهرست تعرفه‌ها (صفحه {page + 1})',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -294,13 +296,18 @@ def show_days_for_tariff(chat_id: str, bale_user_id: str, tariff_id: int) -> Non
 def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: Optional[str] = None) -> bool:
     if not data.startswith((
         'ctar:', 'cday:', 'cpage:', 'ccart', 'ccheck', 'custok:', 'custno:',
-        'cbnew', 'cbuse:', 'cbhub', 'cbreq', 'cbedit:',
+        'cbnew', 'cbuse:', 'cbhub', 'cbreq', 'cbedit:', 'cwallet',
     )):
         return False
     if cq_id:
         bc.answer_callback_query(str(cq_id), text='OK')
 
     user = ensure_user(bale_user_id)
+
+    if data == 'cwallet':
+        from bot_flow.manager_panel import show_wallet
+        show_wallet(chat_id, user)
+        return True
 
     if data == 'cbhub':
         sess = get_session(bale_user_id)
@@ -314,9 +321,7 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
         lb = linkbank_username()
         bc.send_message(
             str(chat_id),
-            f'برای سفارش: از {lb} بازارسال کنید.\n'
-            'برای بنر جدید (خارج از لینک‌بانک): عکس/ویدیو+متن بفرستید تا درخواست بررسی ثبت شود.\n'
-            'بنر اول رایگان؛ بعدی‌ها با تعرفه و دائمی.',
+            f'از {lb} بازارسال کنید یا بنر جدید بفرستید (درخواست بررسی).',
         )
         return True
 
@@ -324,7 +329,7 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
         sess = get_session(bale_user_id)
         pending = (sess.data or {}).get('pending_banner')
         if not pending:
-            bc.send_message(str(chat_id), 'بنری در انتظار نیست. اول بنر را بفرستید.')
+            bc.send_message(str(chat_id), 'بنری در انتظار نیست.')
             return True
         from orders.banner_publish import create_publish_request
         r = create_publish_request(
@@ -339,11 +344,8 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
         d.pop('pending_banner', None)
         sess.data = d
         sess.save(update_fields=['data'])
-        fee_txt = 'رایگان' if fee == 0 else f'{fee:,} تومان'
-        bc.send_message(
-            str(chat_id),
-            f'درخواست ثبت شد (هزینه اعلامی: {fee_txt}).\nپس از تأیید در لینک‌بانک منتشر می‌شود.',
-        )
+        fee_txt = 'رایگان' if fee == 0 else f'{fee:,} تومان (فقط اعلام)'
+        bc.send_message(str(chat_id), f'درخواست ثبت شد. هزینه اعلامی: {fee_txt}')
         return True
 
     if data.startswith('cbedit:'):
@@ -354,7 +356,7 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
         save_session(sess, STATE_CUST_EDIT_CAPTION, role='customer')
         sess.data = d
         sess.save(update_fields=['data'])
-        bc.send_message(str(chat_id), 'متن جدید را بفرستید (فقط کپشن؛ تصویر/فیلم عوض نمی‌شود). رایگان.')
+        bc.send_message(str(chat_id), 'متن جدید را بفرستید (فقط کپشن). رایگان.')
         return True
 
     if data.startswith('cbuse:'):
@@ -375,8 +377,8 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
     if data == 'ccart':
         order = get_or_create_draft(user)
         kb = bc.inline_keyboard([
-            [{'text': 'ادامه خرید', 'callback_data': 'cpage:0'}, {'text': 'نهایی‌سازی', 'callback_data': 'ccheck'}],
-            [{'text': 'تعویض بنر', 'callback_data': 'cbhub'}],
+            [{'text': 'ادامه', 'callback_data': 'cpage:0'}, {'text': 'نهایی', 'callback_data': 'ccheck'}],
+            [{'text': 'بنر', 'callback_data': 'cbhub'}, {'text': 'کیف پول', 'callback_data': 'cwallet'}],
         ])
         bc.send_message(str(chat_id), cart_summary(order), reply_markup=kb)
         return True
@@ -389,12 +391,12 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
         result = checkout(order)
         if not result.get('ok'):
             err = result.get('error')
-            msg = {'empty_cart': 'سبد خالی.', 'no_banner': 'اول بنر لینک‌بانک.', 'slot_conflict': 'نوبت پر شد.'}.get(err, str(err))
+            msg = {'empty_cart': 'سبد خالی.', 'no_banner': 'اول بنر.', 'slot_conflict': 'نوبت پر.'}.get(err, str(err))
             bc.send_message(str(chat_id), msg)
             return True
         bc.send_message(
             str(chat_id),
-            f'سفارش #{order.id} با {result["count"]} آیتم ثبت شد.\nدر انتظار مدیران (حداکثر ۱۲ ساعت).',
+            f'سفارش #{order.id} با {result["count"]} آیتم ثبت شد.\nدر انتظار مدیران.',
         )
         sess = get_session(bale_user_id)
         save_session(sess, 'idle', role='customer')
@@ -415,7 +417,7 @@ def handle_customer_callback(chat_id: str, bale_user_id: str, data: str, cq_id: 
             return True
         order = get_or_create_draft(user)
         if not order.banner_message_id:
-            bc.send_message(str(chat_id), 'اول بنر لینک‌بانک را انتخاب کنید.')
+            bc.send_message(str(chat_id), 'اول بنر را انتخاب کنید.')
             show_banner_hub(chat_id, bale_user_id)
             return True
         result = add_to_cart(user, t, day)
@@ -440,6 +442,10 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
         save_session(sess, STATE_CUST_BANNER_HUB, role='customer')
         show_banner_hub(chat_id, bale_user_id)
         return True
+    if norm in ('/wallet', '/کیف', 'کیف پول'):
+        from bot_flow.manager_panel import show_wallet
+        show_wallet(chat_id, ensure_user(bale_user_id))
+        return True
     if sess.state == STATE_CUST_EDIT_CAPTION:
         bid = (sess.data or {}).get('edit_banner_id')
         if not bid:
@@ -451,14 +457,14 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
             bc.send_message(str(chat_id), f'خطا: {r.get("error")}')
             return True
         save_session(sess, STATE_CUST_BANNER_HUB, role='customer')
-        bc.send_message(str(chat_id), 'متن بنر به‌روز شد (رایگان).')
+        bc.send_message(str(chat_id), 'متن به‌روز شد.')
         show_banner_hub(chat_id, bale_user_id)
         return True
     if sess.state == STATE_CUST_BANNER:
-        bc.send_message(str(chat_id), 'عکس/ویدیو بفرستید یا از لینک‌بانک بازارسال کنید.')
+        bc.send_message(str(chat_id), 'عکس/ویدیو یا بازارسال از مرجع.')
         return True
     if sess.state == STATE_CUST_BANNER_HUB:
-        bc.send_message(str(chat_id), 'از دکمه‌ها استفاده کنید یا /banners')
+        bc.send_message(str(chat_id), 'از دکمه‌ها استفاده کنید یا /wallet')
         return True
     if sess.state in (STATE_CUST_BROWSE, STATE_CUST_PICK_DAY):
         if norm in ('/cart', 'سبد'):
