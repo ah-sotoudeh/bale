@@ -37,7 +37,6 @@ class Channel(models.Model):
     # لینک‌ساز (bot) is admin — for auto publish via Bot API
     bot_is_admin = models.BooleanField(default=False)
     bot_checked_at = models.DateTimeField(null=True, blank=True)
-    # چند ساعت قبل از موعد، برای حالت ارسال دستی یادآوری شود
     manual_remind_hours = models.PositiveSmallIntegerField(
         default=2,
         validators=[MinValueValidator(1), MaxValueValidator(48)],
@@ -91,54 +90,66 @@ class Tariff(models.Model):
         blank=True,
     )
     name = models.CharField(max_length=100)
-    # ساعت شروع ارسال در روز (۰–۲۳)؛ هر تعرفه = یک نوبت
     start_hour = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(23)],
-        help_text='ساعت شروع ارسال (۰ تا ۲۳). هر تعرفه یک نوبت در روز.',
+        help_text='ساعت شروع نوبت (0-23)',
     )
-    duration_hours = models.PositiveIntegerField()
-    price = models.PositiveIntegerField()
-    is_active = models.BooleanField(default=True)
+    duration_hours = models.IntegerField()
+    price = models.IntegerField(help_text='قیمت به تومان (برای کل مجموعه اگر group باشد)')
+    is_active = models.BooleanField(
+        default=True,
+        help_text='اگر ادمین لازم نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(channel__isnull=False, group__isnull=True)
+                    | models.Q(channel__isnull=True, group__isnull=False)
+                ),
+                name='tariff_channel_xor_group',
+            ),
+        ]
 
     def clean(self):
-        has_ch = self.channel_id is not None
-        has_g = self.group_id is not None
-        if has_ch == has_g:
+        if bool(self.channel_id) == bool(self.group_id):
             raise ValidationError('تعرفه باید دقیقاً به یک کانال یا یک مجموعه وصل باشد.')
 
     def __str__(self):
         owner = self.group.name if self.group_id else (self.channel.name if self.channel_id else '?')
-        return f'{owner} / {self.name}'
+        return f'{owner} - {self.name}'
+
+    @property
+    def is_package(self) -> bool:
+        return self.group_id is not None
 
 
 class AvailabilitySlot(models.Model):
     channel = models.ForeignKey(
-        Channel,
-        on_delete=models.CASCADE,
-        related_name='slots',
-        null=True,
-        blank=True,
+        Channel, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
     )
     group = models.ForeignKey(
-        ChannelGroup,
-        on_delete=models.CASCADE,
-        related_name='slots',
-        null=True,
-        blank=True,
+        ChannelGroup, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
     )
     tariff = models.ForeignKey(
         Tariff,
         on_delete=models.CASCADE,
-        related_name='slots',
         null=True,
         blank=True,
+        related_name='availability',
     )
     start = models.DateTimeField()
     end = models.DateTimeField()
     is_available = models.BooleanField(default=True)
-    note = models.CharField(max_length=255, blank=True)
+    note = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ['start']
 
     def __str__(self):
-        return f'{self.start} → {self.end} avail={self.is_available}'
+        flag = 'free' if self.is_available else 'busy'
+        label = self.group or self.channel
+        return f'{label}: {self.start} - {self.end} ({flag})'
