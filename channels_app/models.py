@@ -9,9 +9,9 @@ class Channel(models.Model):
     PUBLISH_BOT = 'bot'
     PUBLISH_LINKYAR = 'linkyar'
     PUBLISH_MODE_CHOICES = [
-        (PUBLISH_BOT, 'لینک‌ساز ادمین (پایدار)'),
-        (PUBLISH_LINKYAR, 'لینک‌یار ادمین'),
-        (PUBLISH_MANUAL, 'ارسال دستی مدیر'),
+        (PUBLISH_BOT, 'ارسال خودکار با لینک‌ساز'),
+        (PUBLISH_LINKYAR, 'ارسال خودکار با لینک‌یار'),
+        (PUBLISH_MANUAL, 'ارسال دستی توسط خودم'),
     ]
 
     name = models.CharField(max_length=200)
@@ -37,6 +37,12 @@ class Channel(models.Model):
     # لینک‌ساز (bot) is admin — for auto publish via Bot API
     bot_is_admin = models.BooleanField(default=False)
     bot_checked_at = models.DateTimeField(null=True, blank=True)
+    # چند ساعت قبل از موعد، برای حالت ارسال دستی یادآوری شود
+    manual_remind_hours = models.PositiveSmallIntegerField(
+        default=2,
+        validators=[MinValueValidator(1), MaxValueValidator(48)],
+        help_text='ساعت یادآوری قبل از تبلیغ (فقط حالت دستی)',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -85,66 +91,54 @@ class Tariff(models.Model):
         blank=True,
     )
     name = models.CharField(max_length=100)
+    # ساعت شروع ارسال در روز (۰–۲۳)؛ هر تعرفه = یک نوبت
     start_hour = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(23)],
-        help_text='ساعت شروع نوبت (0-23)',
+        help_text='ساعت شروع ارسال (۰ تا ۲۳). هر تعرفه یک نوبت در روز.',
     )
-    duration_hours = models.IntegerField()
-    price = models.IntegerField(help_text='قیمت به تومان (برای کل مجموعه اگر group باشد)')
-    is_active = models.BooleanField(
-        default=True,
-        help_text='اگر ادمین لازم نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
-    )
-
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(channel__isnull=False, group__isnull=True)
-                    | models.Q(channel__isnull=True, group__isnull=False)
-                ),
-                name='tariff_channel_xor_group',
-            ),
-        ]
+    duration_hours = models.PositiveIntegerField()
+    price = models.PositiveIntegerField()
+    is_active = models.BooleanField(default=True)
 
     def clean(self):
-        if bool(self.channel_id) == bool(self.group_id):
+        has_ch = self.channel_id is not None
+        has_g = self.group_id is not None
+        if has_ch == has_g:
             raise ValidationError('تعرفه باید دقیقاً به یک کانال یا یک مجموعه وصل باشد.')
 
     def __str__(self):
         owner = self.group.name if self.group_id else (self.channel.name if self.channel_id else '?')
-        return f'{owner} - {self.name}'
-
-    @property
-    def is_package(self) -> bool:
-        return self.group_id is not None
+        return f'{owner} / {self.name}'
 
 
 class AvailabilitySlot(models.Model):
     channel = models.ForeignKey(
-        Channel, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
+        Channel,
+        on_delete=models.CASCADE,
+        related_name='slots',
+        null=True,
+        blank=True,
     )
     group = models.ForeignKey(
-        ChannelGroup, on_delete=models.CASCADE, related_name='availability', null=True, blank=True
+        ChannelGroup,
+        on_delete=models.CASCADE,
+        related_name='slots',
+        null=True,
+        blank=True,
     )
     tariff = models.ForeignKey(
         Tariff,
         on_delete=models.CASCADE,
+        related_name='slots',
         null=True,
         blank=True,
-        related_name='availability',
     )
     start = models.DateTimeField()
     end = models.DateTimeField()
     is_available = models.BooleanField(default=True)
-    note = models.CharField(max_length=255, blank=True, default='')
-
-    class Meta:
-        ordering = ['start']
+    note = models.CharField(max_length=255, blank=True)
 
     def __str__(self):
-        flag = 'free' if self.is_available else 'busy'
-        label = self.group or self.channel
-        return f'{label}: {self.start} - {self.end} ({flag})'
+        return f'{self.start} → {self.end} avail={self.is_available}'
