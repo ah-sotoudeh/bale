@@ -68,17 +68,33 @@ def has_slot_conflict(
         elif ranges_overlap(start, end, other_start, other_end):
             return True
 
-    busy_q = Q(is_available=False, start__lt=end, end__gt=start)
     if tariff.group_id:
-        blocked = AvailabilitySlot.objects.filter(busy_q).filter(
+        blocked_qs = AvailabilitySlot.objects.filter(is_available=False).filter(
             Q(group=tariff.group) | Q(tariff=tariff)
         )
     else:
         ch = channel or tariff.channel
-        blocked = AvailabilitySlot.objects.filter(busy_q).filter(
+        blocked_qs = AvailabilitySlot.objects.filter(is_available=False).filter(
             Q(channel=ch) | Q(tariff=tariff)
         )
-    return blocked.exists()
+
+    # برای تعرفه با ساعت ثابت: فقط همان روز محلی نوبت مسدود شود
+    # (بازهٔ کامل ۰ تا ۲۴ باعث پر شدن اشتباه روز قبل می‌شد)
+    if tariff.start_hour is not None:
+        day = timezone.localtime(start).date() if timezone.is_aware(start) else start.date()
+        for slot in blocked_qs.filter(
+            start__lt=end + timedelta(days=1), end__gt=start - timedelta(days=1)
+        ):
+            slot_day = (
+                timezone.localtime(slot.start).date()
+                if timezone.is_aware(slot.start)
+                else slot.start.date()
+            )
+            if slot_day == day:
+                return True
+        return False
+
+    return blocked_qs.filter(start__lt=end, end__gt=start).exists()
 
 
 def mark_external_busy(
@@ -168,9 +184,11 @@ def clear_manual_busy_slot(slot_id: int, tariff: Tariff) -> bool:
 
 
 def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
-    """Block the whole local day for this tariff's channel/group."""
-    start = timezone.make_aware(datetime.combine(day, dtime(0, 0)))
-    end = start + timedelta(days=1)
+    """Block only this tariff's slot on the given local day (not neighboring days)."""
+    hour = tariff.start_hour if tariff.start_hour is not None else 0
+    duration = max(1, int(tariff.duration_hours or 1))
+    start = timezone.make_aware(datetime.combine(day, dtime(hour=hour, minute=0, second=0)))
+    end = start + timedelta(hours=duration)
     return mark_external_busy(
         start,
         end,
