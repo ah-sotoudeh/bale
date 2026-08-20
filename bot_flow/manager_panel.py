@@ -66,14 +66,13 @@ def main_keyboard(is_operator: bool = False) -> Dict[str, Any]:
         ],
         [
             {'text': '📋 سفارش‌ها', 'callback_data': 'mgr:orders'},
-            {'text': '📅 تقویم', 'callback_data': 'mgr:calendar'},
+            {'text': '📅 تقویم و نوبت', 'callback_data': 'mgr:calendar'},
         ],
         [
-            {'text': '🔒 روز پر', 'callback_data': 'mgr:busy'},
             {'text': '💰 مالی', 'callback_data': 'mgr:wallet'},
+            {'text': '⚙️ حالت انتشار', 'callback_data': 'pmode_edit:start'},
         ],
         [
-            {'text': '⚙️ حالت انتشار', 'callback_data': 'pmode_edit:start'},
             {'text': '➕ ثبت کانال', 'callback_data': 'mgr:add_channel'},
         ],
         [
@@ -328,109 +327,18 @@ def show_calendar_entry(chat_id: str, user: User) -> None:
     send_manager_channel_picker(chat_id, user)
 
 
-def start_busy_flow(chat_id: str, user: User) -> None:
-    channels = list(Channel.objects.filter(manager=user).order_by('name')[:20])
-    groups = list(ChannelGroup.objects.filter(manager=user).order_by('name')[:10])
-    rows = []
-    for ch in channels:
-        rows.append([{'text': f'📢 {ch.name}', 'callback_data': f'mgr:busy_ch:{ch.id}'}])
-    for g in groups:
-        rows.append([{'text': f'📦 {g.name}', 'callback_data': f'mgr:busy_g:{g.id}'}])
-    if not rows:
-        bc.send_message(str(chat_id), 'کانالی نیست.')
-        return
-    rows.append([{'text': '🏠 خانه', 'callback_data': 'mgr:home'}])
-    bc.send_message(
-        str(chat_id),
-        'برای کدام کانال/مجموعه روز پر اعلام می‌کنید؟',
-        reply_markup=bc.inline_keyboard(rows),
-    )
-
-
-def ask_busy_date(chat_id: str, user: User, *, channel_id=None, group_id=None) -> None:
-    sess = _sess(user.bale_user_id or '')
-    _save(sess, STATE_MGR_BUSY_DATE, busy_channel_id=channel_id, busy_group_id=group_id)
-    today = timezone.localdate()
-    rows = []
-    row = []
-    for i in range(14):
-        d = today + timedelta(days=i)
-        try:
-            jy, jm, jd = to_jalali(d)
-            label = fa_num(f'{jm}/{jd}')
-        except Exception:
-            label = fa_num(f'{d.month}/{d.day}')
-        row.append({'text': label, 'callback_data': f'mgr:busy_day:{d.isoformat()}'})
-        if len(row) == 3:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    rows.append([{'text': '🏠 خانه', 'callback_data': 'mgr:home'}])
-    bc.send_message(
-        str(chat_id),
-        'روز پر را از دکمه‌ها انتخاب کنید (۱۴ روز آینده):',
-        reply_markup=bc.inline_keyboard(rows),
-    )
-
-
-def mark_busy_day(chat_id: str, user: User, day_iso: str) -> None:
-    from datetime import date as date_cls
-
-    sess = _sess(user.bale_user_id or '')
-    data = sess.data or {}
-    try:
-        gday = date_cls.fromisoformat(day_iso)
-    except ValueError:
-        bc.send_message(str(chat_id), 'تاریخ نامعتبر.')
-        return
-    ch = None
-    group = None
-    if data.get('busy_channel_id'):
-        ch = Channel.objects.filter(id=data['busy_channel_id'], manager=user).first()
-    if data.get('busy_group_id'):
-        group = ChannelGroup.objects.filter(id=data['busy_group_id'], manager=user).first()
-    if not ch and not group:
-        bc.send_message(str(chat_id), 'هدف نامعتبر. دوباره از «روز پر» شروع کنید.')
-        return
-    start = timezone.make_aware(datetime.combine(gday, dtime(0, 0)))
-    end = start + timedelta(days=1)
-    slot = mark_external_busy(
-        start, end, channel=ch, group=group, note='رزرو خارج از سیستم (پنل مدیر)'
-    )
-    _save(sess, 'idle')
-    label = ch.name if ch else group.name
-    bc.send_message(
-        str(chat_id),
-        f'🔒 روز {format_jalali(gday)} برای «{label}» پر ثبت شد (#{fa_num(slot.id)}).',
-        reply_markup=main_keyboard(),
-    )
-
-
-def _jalali_to_gregorian(jy: int, jm: int, jd: int):
-    try:
-        import jdatetime
-
-        return jdatetime.date(jy, jm, jd).togregorian()
-    except Exception:
-        return None
-
-
 def handle_busy_date_text(chat_id: str, user: User, text: str) -> bool:
-    """سازگاری: اگر هنوز متن تاریخ فرستاد."""
+    """مسیر قدیمی متن تاریخ — به تقویم هدایت می‌شود."""
     sess = _sess(user.bale_user_id or '')
     if sess.state != STATE_MGR_BUSY_DATE:
         return False
-    m = JALALI_DATE.match(text or '')
-    if not m:
-        bc.send_message(str(chat_id), 'از دکمه‌های تاریخ استفاده کنید یا فرمت ۱۴۰۵/۰۵/۲۰')
-        return True
-    jy, jm, jd = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    gday = _jalali_to_gregorian(jy, jm, jd)
-    if not gday:
-        bc.send_message(str(chat_id), 'تاریخ نامعتبر.')
-        return True
-    mark_busy_day(chat_id, user, gday.isoformat())
+    _save(sess, 'idle')
+    bc.send_message(
+        str(chat_id),
+        'ثبت روز پر از مسیر «تقویم و نوبت» انجام می‌شود:\n'
+        'کانال → تعرفه → ثبت نوبت دستی',
+    )
+    show_calendar_entry(chat_id, user)
     return True
 
 
@@ -604,17 +512,9 @@ def try_handle_callback(
     if data == 'mgr:calendar':
         show_calendar_entry(chat_id, user)
         return True
-    if data == 'mgr:busy':
-        start_busy_flow(chat_id, user)
-        return True
-    if data.startswith('mgr:busy_ch:'):
-        ask_busy_date(chat_id, user, channel_id=int(data.split(':')[2]))
-        return True
-    if data.startswith('mgr:busy_g:'):
-        ask_busy_date(chat_id, user, group_id=int(data.split(':')[2]))
-        return True
-    if data.startswith('mgr:busy_day:'):
-        mark_busy_day(chat_id, user, data.split(':', 2)[2])
+    # روز پر فقط از مسیر تقویم (کانال → تعرفه → ثبت/حذف نوبت دستی)
+    if data == 'mgr:busy' or data.startswith('mgr:busy_'):
+        show_calendar_entry(chat_id, user)
         return True
     if data == 'mgr:wallet':
         show_wallet(chat_id, user)
