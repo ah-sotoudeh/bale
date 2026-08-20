@@ -13,4 +13,4 @@ def expand(prefix: str, out_name: str, n: int):
 
 if __name__ == "__main__":
     expand("msg", "messages.py", 2)
-    expand("han", "handlers.py", 3)
+    expand("han", "handlers.py", 5)
