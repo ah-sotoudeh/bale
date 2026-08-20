@@ -1,4 +1,4 @@
-"""متن‌های UI — از قطعات فشرده بارگذاری می‌شود. برای ویرایش: scripts/expand_messages.py را ببینید."""
+"""متن‌های UI — ویرایش: python scripts/expand_messages.py سپس bot_flow/messages.py را باز کنید."""
 from __future__ import annotations
 import base64, zlib
 from pathlib import Path
