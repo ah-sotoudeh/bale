@@ -146,13 +146,21 @@ def list_manual_busy_slots(tariff: Tariff, from_date: Optional[date] = None) -> 
         from_date = timezone.localdate()
     start_bound = timezone.make_aware(datetime.combine(from_date, dtime(0, 0)))
     return list(
-        AvailabilitySlot.objects.filter(_manual_busy_q(tariff), end__gt=start_bound)
+        AvailabilitySlot.objects.filter(
+            _manual_busy_q(tariff),
+            end__gt=start_bound,
+            note__icontains='خارج از سیستم',
+        )
         .order_by('start')[:40]
     )
 
 
 def clear_manual_busy_slot(slot_id: int, tariff: Tariff) -> bool:
-    slot = AvailabilitySlot.objects.filter(id=slot_id).filter(_manual_busy_q(tariff)).first()
+    slot = (
+        AvailabilitySlot.objects.filter(id=slot_id)
+        .filter(_manual_busy_q(tariff), note__icontains='خارج از سیستم')
+        .first()
+    )
     if not slot:
         return False
     slot.delete()
