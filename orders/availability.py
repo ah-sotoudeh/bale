@@ -1,8 +1,8 @@
 """Slot conflict checks for single-channel and package (ChannelGroup) tariffs."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from datetime import date, datetime, time as dtime, timedelta
+from typing import List, Optional, Tuple
 
 from django.db.models import Q
 from django.utils import timezone
@@ -19,6 +19,8 @@ ACTIVE_ORDER_STATUSES = (
     'completed',
 )
 ACTIVE_ITEM_STATUSES = ('cart', 'pending', 'approved', 'edited')
+
+MANUAL_BUSY_NOTE = 'رزرو خارج از سیستم (پنل مدیر)'
 
 
 def effective_window(item: OrderItem) -> Tuple[datetime, datetime]:
@@ -86,7 +88,7 @@ def mark_external_busy(
     channel: Optional[Channel] = None,
     group=None,
     tariff: Optional[Tariff] = None,
-    note: str = 'رزرو خارج از سیستم',
+    note: str = MANUAL_BUSY_NOTE,
 ) -> AvailabilitySlot:
     return AvailabilitySlot.objects.create(
         channel=channel,
@@ -95,13 +97,11 @@ def mark_external_busy(
         start=start,
         end=end,
         is_available=False,
-        note=note,
+        note=note or MANUAL_BUSY_NOTE,
     )
 
 
 def free_days_for_tariff(tariff: Tariff, from_date, to_date, channel: Optional[Channel] = None):
-    from datetime import datetime, time as dtime
-
     if isinstance(from_date, datetime):
         from_date = timezone.localtime(from_date).date() if timezone.is_aware(from_date) else from_date.date()
     if isinstance(to_date, datetime):
@@ -116,3 +116,58 @@ def free_days_for_tariff(tariff: Tariff, from_date, to_date, channel: Optional[C
         if not has_slot_conflict(tariff, start, end, channel=channel or tariff.channel):
             yield day
         day = day + timedelta(days=1)
+
+
+def day_status_map(tariff: Tariff, days: int = 14) -> List[Tuple[date, bool]]:
+    """List of (day, is_free) for the next `days` calendar days."""
+    today = timezone.localdate()
+    until = today + timedelta(days=max(1, days) - 1)
+    free_set = set(free_days_for_tariff(tariff, today, until))
+    out: List[Tuple[date, bool]] = []
+    d = today
+    while d <= until:
+        out.append((d, d in free_set))
+        d += timedelta(days=1)
+    return out
+
+
+def _manual_busy_q(tariff: Tariff) -> Q:
+    q = Q(is_available=False)
+    if tariff.group_id:
+        q &= Q(group=tariff.group) | Q(tariff=tariff)
+    else:
+        q &= Q(channel=tariff.channel) | Q(tariff=tariff)
+    return q
+
+
+def list_manual_busy_slots(tariff: Tariff, from_date: Optional[date] = None) -> List[AvailabilitySlot]:
+    """Slots marked manually by manager (external busy), from today onward."""
+    if from_date is None:
+        from_date = timezone.localdate()
+    start_bound = timezone.make_aware(datetime.combine(from_date, dtime(0, 0)))
+    return list(
+        AvailabilitySlot.objects.filter(_manual_busy_q(tariff), end__gt=start_bound)
+        .order_by('start')[:40]
+    )
+
+
+def clear_manual_busy_slot(slot_id: int, tariff: Tariff) -> bool:
+    slot = AvailabilitySlot.objects.filter(id=slot_id).filter(_manual_busy_q(tariff)).first()
+    if not slot:
+        return False
+    slot.delete()
+    return True
+
+
+def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
+    """Block the whole local day for this tariff's channel/group."""
+    start = timezone.make_aware(datetime.combine(day, dtime(0, 0)))
+    end = start + timedelta(days=1)
+    return mark_external_busy(
+        start,
+        end,
+        channel=tariff.channel if not tariff.group_id else None,
+        group=tariff.group if tariff.group_id else None,
+        tariff=tariff,
+        note=MANUAL_BUSY_NOTE,
+    )
