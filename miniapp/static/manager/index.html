@@ -4,520 +4,550 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>لینک‌بانک</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
   <script src="https://tapi.bale.ai/miniapp.js?3"></script>
   <style>
     :root {
-      --bg: #0f1419; --text: #e7ecf3; --hint: #8b9bb4; --link: #2aabee;
-      --btn: #2aabee; --btn-text: #fff; --sec: #1a2332; --header: #17212b;
-      --sep: #2a3548; --ok: #3dd68c; --danger: #f31260; --accent: #6cb6ff;
+      --bg:#0f1419; --text:#e7ecf3; --hint:#8b9bb4; --link:#2aabee;
+      --btn:#2aabee; --btn-text:#fff; --sec:#1a2332; --header:#17212b;
+      --sep:#2a3548; --ok:#3dd68c; --danger:#f31260; --accent:#6cb6ff;
     }
     [data-scheme="light"] {
-      --bg: #f4f6f9; --text: #1a2332; --hint: #66788f; --link: #2481cc;
-      --btn: #2aabee; --btn-text: #fff; --sec: #fff; --header: #fff;
-      --sep: #e2e8f0; --ok: #12a150; --danger: #e53935; --accent: #1a73b8;
+      --bg:#f4f6f9; --text:#1a2332; --hint:#66788f; --link:#2481cc;
+      --btn:#2aabee; --btn-text:#fff; --sec:#fff; --header:#fff;
+      --sep:#e2e8f0; --ok:#12a150; --danger:#e53935; --accent:#1a73b8;
     }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; }
-    body {
-      font-family: Vazirmatn, Tahoma, system-ui, sans-serif;
-      background: var(--bg); color: var(--text); line-height: 1.55;
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%}
+    body{
+      font-family:Vazirmatn,Tahoma,system-ui,sans-serif;
+      background:var(--bg);color:var(--text);line-height:1.55;
+      -webkit-font-smoothing:antialiased;
     }
-    button { font: inherit; cursor: pointer; }
-    button:disabled { opacity: .45; }
-    #app { display: flex; flex-direction: column; min-height: 100dvh; }
-    header {
-      display: flex; align-items: center; gap: 4px;
-      background: var(--header); border-bottom: 1px solid var(--sep);
-      padding: env(safe-area-inset-top) 6px 0;
-      position: sticky; top: 0; z-index: 5;
+    button{font:inherit;cursor:pointer}
+    button:disabled{opacity:.45}
+    #app{display:flex;flex-direction:column;min-height:100dvh}
+    header{
+      display:flex;align-items:center;gap:4px;
+      background:var(--header);border-bottom:1px solid var(--sep);
+      padding:env(safe-area-inset-top) 6px 0;position:sticky;top:0;z-index:5;
     }
-    header .t { flex: 1; text-align: center; padding: 12px 0; }
-    header h1 { margin: 0; font-size: 15px; }
-    header .sub { font-size: 11px; color: var(--hint); }
-    .icon { width: 44px; height: 44px; border: 0; background: none; color: var(--text); border-radius: 12px; }
-    main { flex: 1; padding: 14px 14px 88px; }
-    .card {
-      background: var(--sec); border: 1px solid var(--sep);
-      border-radius: 16px; padding: 14px; margin-bottom: 10px; text-align: right;
+    header .t{flex:1;text-align:center;padding:12px 0}
+    header h1{margin:0;font-size:15px;font-weight:700}
+    header .sub{font-size:11px;color:var(--hint)}
+    .icon{width:44px;height:44px;border:0;background:none;color:var(--text);border-radius:12px}
+    main{flex:1;padding:14px 14px 92px}
+    .card{
+      background:var(--sec);border:1px solid var(--sep);
+      border-radius:16px;padding:14px;margin-bottom:10px;text-align:right;width:100%;color:inherit;
     }
-    .card.tap { width: 100%; color: inherit; }
-    .row { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-    .muted { color: var(--hint); font-size: 12px; }
-    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-    .stat { background: var(--sec); border: 1px solid var(--sep); border-radius: 16px; padding: 12px; }
-    .stat b { display: block; margin-top: 4px; }
-    .btn {
-      min-height: 44px; border: 0; border-radius: 12px; padding: 0 14px;
-      background: var(--btn); color: var(--btn-text); font-weight: 600; width: 100%;
+    .card.tap{display:block}
+    .row{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+    .muted{color:var(--hint);font-size:12px}
+    .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+    .stat{background:var(--sec);border:1px solid var(--sep);border-radius:16px;padding:12px}
+    .stat b{display:block;margin-top:4px;font-size:16px}
+    .btn{
+      min-height:44px;border:0;border-radius:12px;padding:0 14px;
+      background:var(--btn);color:var(--btn-text);font-weight:600;width:100%;
     }
-    .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--sep); }
-    .btn.ok { background: rgba(61,214,140,.18); color: var(--ok); }
-    .btn.danger { background: rgba(243,18,96,.15); color: var(--danger); }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--sep) 70%, transparent); color: var(--hint); }
-    .badge.ok { background: rgba(61,214,140,.15); color: var(--ok); }
-    .badge.warn { background: rgba(42,171,238,.15); color: var(--accent); }
-    .badge.danger { background: rgba(243,18,96,.15); color: var(--danger); }
-    input, select {
-      width: 100%; min-height: 44px; border-radius: 12px; border: 1px solid var(--sep);
-      background: var(--bg); color: var(--text); padding: 0 12px; font: inherit;
+    .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--sep)}
+    .btn.ok{background:rgba(61,214,140,.18);color:var(--ok)}
+    .btn.danger{background:rgba(243,18,96,.15);color:var(--danger)}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--sep) 70%,transparent);color:var(--hint);margin-left:4px}
+    .badge.ok{background:rgba(61,214,140,.15);color:var(--ok)}
+    .badge.warn{background:rgba(42,171,238,.15);color:var(--accent)}
+    .badge.danger{background:rgba(243,18,96,.15);color:var(--danger)}
+    input,select,textarea{
+      width:100%;min-height:44px;border-radius:12px;border:1px solid var(--sep);
+      background:var(--bg);color:var(--text);padding:8px 12px;font:inherit;
     }
-    label { display: grid; gap: 6px; font-size: 12px; color: var(--hint); margin-bottom: 10px; }
-    nav.tabs {
-      position: fixed; left: 0; right: 0; bottom: 0;
-      display: grid; background: var(--header); border-top: 1px solid var(--sep);
-      padding-bottom: env(safe-area-inset-bottom);
+    textarea{min-height:88px;resize:vertical}
+    label{display:grid;gap:6px;font-size:12px;color:var(--hint);margin-bottom:10px}
+    nav.tabs{
+      position:fixed;left:0;right:0;bottom:0;display:grid;
+      background:var(--header);border-top:1px solid var(--sep);
+      padding-bottom:env(safe-area-inset-bottom);
     }
-    nav.tabs button {
-      min-height: 56px; border: 0; background: none; color: var(--hint); font-size: 11px;
+    nav.tabs button{min-height:58px;border:0;background:none;color:var(--hint);font-size:11px}
+    nav.tabs button.on{color:var(--link);font-weight:700}
+    .empty{text-align:center;padding:40px 12px;color:var(--hint)}
+    .toast{
+      position:fixed;left:16px;right:16px;bottom:80px;z-index:20;
+      background:var(--text);color:var(--bg);padding:12px;border-radius:16px;
+      text-align:center;display:none;
     }
-    nav.tabs button.on { color: var(--link); }
-    .empty { text-align: center; padding: 40px 12px; color: var(--hint); }
-    .toast {
-      position: fixed; left: 16px; right: 16px; bottom: 80px; z-index: 20;
-      background: var(--text); color: var(--bg); padding: 12px; border-radius: 16px;
-      text-align: center; display: none;
+    .toast.show{display:block}
+    .day{
+      min-height:68px;border-radius:16px;border:1px solid var(--sep);
+      background:var(--sec);color:var(--text);text-align:right;padding:8px 10px;
     }
-    .toast.show { display: block; }
-    .chip { min-height: 36px; border-radius: 999px; border: 0; padding: 0 12px; background: var(--sec); color: var(--hint); }
-    .chip.on { background: var(--btn); color: var(--btn-text); }
-    .day {
-      min-height: 64px; border-radius: 16px; border: 1px solid var(--sep);
-      background: var(--sec); color: var(--text); text-align: right; padding: 8px 10px;
-    }
-    .day.busy { background: rgba(243,18,96,.08); }
-    a { color: var(--link); }
+    .day.free{border-color:color-mix(in srgb,var(--ok) 45%,var(--sep))}
+    .day.busy{background:rgba(243,18,96,.08);border-color:color-mix(in srgb,var(--danger) 40%,var(--sep))}
+    a{color:var(--link)}
+    h3{margin:0 0 6px;font-size:14px}
   </style>
 </head>
 <body>
   <div id="app"></div>
   <div class="toast" id="toast"></div>
   <script>
-  (function () {
-    const API = '/miniapp/api';
-    const FA = '۰۱۲۳۴۵۶۷۸۹';
-    const WD = ['یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنجشنبه','جمعه','شنبه'];
-    const MODE = { bot: 'ارسال خودکار با لینک‌ساز', linkyar: 'ارسال خودکار با لینک‌یار', manual: 'ارسال توسط خودتان' };
-    const ST_M = { pending: 'در انتظار تأیید', approved: 'تأیید شده', rejected: 'رد شده' };
-    const ST_E = { none: 'هنوز شروع نشده', paid: 'آماده انتشار', executed: 'اجرا شده', failed_publish: 'انتشار ناموفق', cancelled: 'لغو شده' };
-    const ST_O = { waiting_managers: 'در انتظار تأیید مدیران', waiting_payment: 'در انتظار پرداخت', paid: 'پرداخت‌شده', completed: 'تکمیل‌شده', rejected: 'رد شده', cancelled: 'لغو شده' };
+  (function(){
+    const API='/miniapp/api';
+    const FA='۰۱۲۳۴۵۶۷۸۹';
+    const MODE={bot:'ارسال خودکار با لینک‌ساز',linkyar:'ارسال خودکار با لینک‌یار',manual:'ارسال توسط خودتان'};
+    const ST_M={pending:'در انتظار تأیید',approved:'تأیید شده',rejected:'رد شده',cart:'سبد',edited:'زمان پیشنهادی',expired:'مهلت تمام',customer_declined:'رد زمان'};
+    const ST_E={none:'هنوز شروع نشده',paid:'آماده انتشار',executed:'اجرا شده',failed_publish:'انتشار ناموفق',cancelled:'لغو شده',remind_sent:'یادآوری شد',awaiting_manager_publish:'منتظر اعلام انتشار',awaiting_customer_confirm:'منتظر تأیید مشتری',awaiting_operator:'منتظر پشتیبانی'};
+    const ST_O={waiting_managers:'در انتظار تأیید مدیران',waiting_customer_confirm:'تأیید زمان جدید',waiting_payment:'در انتظار پرداخت',paid:'پرداخت‌شده',completed:'تکمیل‌شده',rejected:'رد شده',cancelled:'لغو شده'};
+    const ERR={unauthorized:'ورود ناموفق',empty_init_data:'از داخل بازوی بله باز کنید',already_pending:'درخواست تسویه باز دارید',weekly_limit:'هفته‌ای یک بار می‌توانید تسویه بزنید',below_minimum:'حداقل تسویه صدهزار تومان است',no_bank:'ابتدا شبا ثبت کنید',invalid_iban:'شماره شبا معتبر نیست',need_holder_name:'نام صاحب حساب لازم است',empty_cart:'سبد خالی است',no_banner:'ابتدا بنر کانال مرجع را انتخاب کنید',slot_conflict:'این نوبت پر است',bad_date:'تاریخ نامعتبر است',not_found:'پیدا نشد',forbidden:'اجازه ندارید',not_pending:'دیگر در انتظار نیست',inactive:'تعرفه غیرفعال است'};
 
-    let initData = '';
-    let me = null;
-    let role = 'manager';
-    let stack = [{ name: 'home' }];
-    let cache = {};
-    let scheme = 'dark';
+    let initData='', me=null, role='manager', stack=[{name:'home'}], cache={}, scheme='dark';
 
-    function wa() { return (window.Bale && window.Bale.WebApp) || (window.Telegram && window.Telegram.WebApp) || null; }
-    function faNum(v) { return String(v ?? '').replace(/[0-9]/g, d => FA[+d]); }
-    function money(n) {
-      const s = Math.round(n || 0).toLocaleString('en-US').replace(/,/g, '٬');
-      return faNum(s) + ' تومان';
-    }
-    function toast(m) {
-      const el = document.getElementById('toast');
-      el.textContent = m; el.classList.add('show');
-      setTimeout(() => el.classList.remove('show'), 2400);
-    }
-    function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function g2j(gy, gm, gd) {
-      const g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334];
-      let jy = gy <= 1600 ? 0 : 979;
-      let gy2 = gy <= 1600 ? gy - 621 : gy - 1600;
-      let days = 365*gy2 + Math.floor((gy2+3)/4) - Math.floor((gy2+99)/100) + Math.floor((gy2+399)/400) - 80 + gd + g_d_m[gm-1] - (gm>2 && ((gy%4===0&&gy%100!==0)||gy%400===0)?0:0);
-      jy += 33 * Math.floor(days / 12053); let r = days % 12053;
-      jy += 4 * Math.floor(r / 1461); r %= 1461;
-      if (r > 365) { jy += Math.floor((r-1)/365); r = (r-1)%365; }
-      const jm = r < 186 ? 1 + Math.floor(r/31) : 7 + Math.floor((r-186)/30);
-      const jd = 1 + (r < 186 ? r%31 : (r-186)%30);
-      return { jy, jm, jd };
-    }
-    function jalali(iso) {
-      const d = iso ? new Date(iso + 'T12:00:00') : new Date();
-      const { jy, jm, jd } = g2j(d.getFullYear(), d.getMonth()+1, d.getDate());
-      const pad = n => String(n).padStart(2,'0');
-      return WD[d.getDay()] + ' ' + faNum(jy + '/' + pad(jm) + '/' + pad(jd));
-    }
-    function applyTheme() {
-      const w = wa();
-      if (w && w.colorScheme) scheme = w.colorScheme;
-      document.documentElement.setAttribute('data-scheme', scheme);
-      const tp = w && w.themeParams;
-      if (tp && tp.bg_color) {
-        const r = document.documentElement.style;
-        r.setProperty('--bg', tp.bg_color);
-        r.setProperty('--text', tp.text_color || '');
-        r.setProperty('--hint', tp.hint_color || '');
-        r.setProperty('--link', tp.link_color || '');
-        r.setProperty('--btn', tp.button_color || '');
-        r.setProperty('--btn-text', tp.button_text_color || '');
-        r.setProperty('--sec', tp.section_bg_color || tp.secondary_bg_color || '');
-        r.setProperty('--header', tp.header_bg_color || '');
-        r.setProperty('--sep', tp.section_separator_color || '');
+    function wa(){return (window.Bale&&window.Bale.WebApp)||(window.Telegram&&window.Telegram.WebApp)||null;}
+    function faNum(v){return String(v??'').replace(/[0-9]/g,d=>FA[+d]);}
+    function money(n){const s=Math.round(n||0).toLocaleString('en-US').replace(/,/g,'٬');return faNum(s)+' تومان';}
+    function toast(m){const el=document.getElementById('toast');el.textContent=m;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400);}
+    function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));}
+    function faErr(e){return ERR[e]||e||'خطا';}
+
+    function applyTheme(){
+      const w=wa();
+      if(w&&w.colorScheme) scheme=w.colorScheme==='light'?'light':'dark';
+      document.documentElement.setAttribute('data-scheme',scheme);
+      const tp=w&&w.themeParams;
+      if(tp&&tp.bg_color){
+        const r=document.documentElement.style;
+        r.setProperty('--bg',tp.bg_color);
+        if(tp.text_color) r.setProperty('--text',tp.text_color);
+        if(tp.hint_color) r.setProperty('--hint',tp.hint_color);
+        if(tp.link_color) r.setProperty('--link',tp.link_color);
+        if(tp.button_color) r.setProperty('--btn',tp.button_color);
+        if(tp.button_text_color) r.setProperty('--btn-text',tp.button_text_color);
+        r.setProperty('--sec',tp.section_bg_color||tp.secondary_bg_color||'');
+        if(tp.header_bg_color) r.setProperty('--header',tp.header_bg_color);
+        if(tp.section_separator_color) r.setProperty('--sep',tp.section_separator_color);
       }
     }
 
-    async function api(path, opts) {
-      opts = opts || {};
-      const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-      if (initData) headers['X-Bale-Init-Data'] = initData;
-      let url = API + path;
-      const method = (opts.method || 'GET').toUpperCase();
-      let body = opts.body;
-      const q = new URLSearchParams(location.search);
-      const debug = q.get('debug_bale_id');
-      if (debug) {
-        if (method === 'GET') url += (url.includes('?') ? '&' : '?') + 'debug_bale_id=' + encodeURIComponent(debug);
-        else {
-          const o = typeof body === 'string' ? JSON.parse(body || '{}') : (body || {});
-          o.debug_bale_id = debug; o.initData = initData || '';
-          body = JSON.stringify(o);
-        }
-      } else if (method === 'POST' && initData) {
-        const o = typeof body === 'string' ? JSON.parse(body || '{}') : (body || {});
-        o.initData = initData; body = JSON.stringify(o);
+    async function api(path,opts){
+      opts=opts||{};
+      const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+      if(initData) headers['X-Bale-Init-Data']=initData;
+      let url=API+path;
+      const method=(opts.method||'GET').toUpperCase();
+      let body=opts.body;
+      const q=new URLSearchParams(location.search);
+      const debug=q.get('debug_bale_id');
+      if(debug){
+        if(method==='GET') url+=(url.includes('?')?'&':'?')+'debug_bale_id='+encodeURIComponent(debug);
+        else{const o=typeof body==='string'?JSON.parse(body||'{}'):(body||{});o.debug_bale_id=debug;o.initData=initData||'';body=JSON.stringify(o);}
+      }else if(method==='POST'&&initData){
+        const o=typeof body==='string'?JSON.parse(body||'{}'):(body||{});o.initData=initData;body=JSON.stringify(o);
       }
-      const res = await fetch(url, { method, headers, body: method === 'GET' ? undefined : body });
-      const data = await res.json().catch(() => ({ ok: false, error: 'bad_json' }));
-      if (!res.ok || data.ok === false) throw new Error(data.error || ('http_' + res.status));
+      const res=await fetch(url,{method,headers,body:method==='GET'?undefined:body});
+      const data=await res.json().catch(()=>({ok:false,error:'bad_json'}));
+      if(!res.ok||data.ok===false) throw new Error(data.message||faErr(data.error)||('http_'+res.status));
       return data;
     }
 
-    function screen() { return stack[stack.length - 1]; }
-    function push(s) { stack.push(s); render(); }
-    function back() { if (stack.length > 1) stack.pop(); render(); }
-    function go(s) { stack = [s]; render(); }
-    function title() {
-      const n = screen().name;
-      if (n === 'home') return role === 'operator' ? 'پنل پشتیبانی' : role === 'customer' ? 'پنل مشتری' : 'پنل مدیر کانال';
-      return ({
-        channels:'کانال‌ها', channel:'کانال', tariffs:'تعرفه‌ها', tariff:'تعرفه',
-        orders:'سفارش‌ها', order:'جزئیات سفارش', calendar:'تقویم', days:'نوبت‌ها',
-        finance:'مالی', banners:'بنرها', catalog:'فهرست تعرفه‌ها', cart:'سبد',
-        wallet:'کیف پول', opb:'درخواست بنر', opp:'تسویه'
-      })[n] || 'پنل';
+    function screen(){return stack[stack.length-1];}
+    function push(s){stack.push(s);render();}
+    function back(){if(stack.length>1) stack.pop();render();}
+    function go(s){stack=[s];render();}
+    function title(){
+      const n=screen().name;
+      if(n==='home') return role==='operator'?'پنل پشتیبانی':role==='customer'?'پنل مشتری':'پنل مدیر کانال';
+      return ({channels:'کانال‌ها',channel:'کانال',tariffs:'تعرفه‌ها',orders:'سفارش‌ها',calendar:'تقویم',days:'نوبت‌ها',finance:'مالی',banners:'بنرها',catalog:'فهرست تعرفه‌ها',cart:'سبد خرید',wallet:'کیف پول',opb:'درخواست بنر',opp:'تسویه',mine:'سفارش‌های من'})[n]||'پنل';
     }
-
-    function tabs() {
-      if (role === 'operator') return [
-        { id:'home', l:'خانه', s:{name:'home'} },
-        { id:'opb', l:'بنرها', s:{name:'opb'} },
-        { id:'opp', l:'تسویه', s:{name:'opp'} },
-        { id:'orders', l:'سفارش‌ها', s:{name:'orders'} },
+    function tabs(){
+      if(role==='operator') return [
+        {id:'home',l:'خانه',s:{name:'home'}},
+        {id:'opb',l:'بنرها',s:{name:'opb'}},
+        {id:'opp',l:'تسویه',s:{name:'opp'}},
+        {id:'orders',l:'سفارش‌ها',s:{name:'orders'}},
       ];
-      if (role === 'customer') return [
-        { id:'home', l:'خانه', s:{name:'home'} },
-        { id:'banners', l:'بنرها', s:{name:'banners'} },
-        { id:'catalog', l:'فهرست', s:{name:'catalog'} },
-        { id:'finance', l:'مالی', s:{name:'wallet'} },
+      if(role==='customer') return [
+        {id:'home',l:'خانه',s:{name:'home'}},
+        {id:'banners',l:'بنرها',s:{name:'banners'}},
+        {id:'catalog',l:'فهرست',s:{name:'catalog'}},
+        {id:'cart',l:'سبد',s:{name:'cart'}},
+        {id:'finance',l:'مالی',s:{name:'wallet'}},
       ];
       return [
-        { id:'home', l:'خانه', s:{name:'home'} },
-        { id:'channels', l:'کانال‌ها', s:{name:'channels'} },
-        { id:'orders', l:'سفارش‌ها', s:{name:'orders'} },
-        { id:'calendar', l:'تقویم', s:{name:'calendar'} },
-        { id:'finance', l:'مالی', s:{name:'finance'} },
+        {id:'home',l:'خانه',s:{name:'home'}},
+        {id:'channels',l:'کانال‌ها',s:{name:'channels'}},
+        {id:'orders',l:'سفارش‌ها',s:{name:'orders'}},
+        {id:'calendar',l:'تقویم',s:{name:'calendar'}},
+        {id:'finance',l:'مالی',s:{name:'finance'}},
       ];
     }
-
-    function tabOn() {
-      const n = screen().name;
-      if (n === 'channel' || n === 'tariffs' || n === 'tariff') return 'channels';
-      if (n === 'order' || n === 'days') return n === 'days' ? 'calendar' : 'orders';
-      if (n === 'wallet') return 'finance';
+    function tabOn(){
+      const n=screen().name;
+      if(n==='channel'||n==='tariffs') return 'channels';
+      if(n==='days') return role==='customer'?'catalog':'calendar';
+      if(n==='wallet'||n==='finance') return 'finance';
+      if(n==='mine') return 'home';
       return n;
     }
 
-    async function view() {
-      const s = screen();
-      try {
-        if (role === 'customer') return await customerView(s);
-        if (role === 'operator') return await operatorView(s);
-        return await managerView(s);
-      } catch (e) {
-        return `<div class="empty">خطا: ${esc(e.message)}</div>`;
-      }
+    async function view(){
+      try{
+        if(role==='customer') return await customerView(screen());
+        if(role==='operator') return await operatorView(screen());
+        return await managerView(screen());
+      }catch(e){return `<div class="empty">${esc(e.message)}</div>`;}
     }
 
-    async function managerView(s) {
-      if (s.name === 'home') {
-        const m = me;
-        return `
-          <div class="stats">
-            <div class="stat"><span class="muted">موجودی قابل برداشت</span><b>${money(m.wallet.available)}</b></div>
-            <div class="stat"><span class="muted">سفارش در انتظار</span><b>${faNum(m.pending_orders)}</b></div>
-          </div>
-          <div class="card">
-            <div class="muted">شناسه</div>
-            <div>${esc(m.user.handle || m.user.bale_user_id)}</div>
-            <p class="muted">${faNum(m.channel_count)} کانال ثبت‌شده</p>
-          </div>
-          <div class="grid2">
-            <button class="btn ghost" data-go='{"name":"tariffs"}'>تعرفه‌ها</button>
-            <button class="btn ghost" data-go='{"name":"channels"}'>کانال‌ها</button>
-          </div>
-          <div class="card"><h3 style="margin:0 0 6px;font-size:14px">راهنمای کوتاه</h3>
-            <p class="muted">سفارش‌ها را تأیید یا رد کنید. روزهای پر بیرون از سامانه را در تقویم ثبت کنید. نحوهٔ ارسال هر کانال را جدا تنظیم کنید.</p>
-          </div>`;
+    async function managerView(s){
+      if(s.name==='home'){
+        return `<div class="stats">
+          <div class="stat"><span class="muted">موجودی قابل برداشت</span><b>${money(me.wallet.available)}</b></div>
+          <div class="stat"><span class="muted">سفارش در انتظار</span><b>${faNum(me.pending_orders)}</b></div>
+        </div>
+        <div class="card"><div class="muted">شناسه</div><div>${esc(me.user.handle||me.user.bale_user_id)}</div>
+          <p class="muted">${faNum(me.channel_count)} کانال ثبت‌شده</p></div>
+        <div class="grid2">
+          <button class="btn ghost" data-go='{"name":"tariffs"}'>تعرفه‌ها</button>
+          <button class="btn ghost" data-go='{"name":"channels"}'>کانال‌ها</button>
+        </div>
+        ${me.pending_orders?`<button class="btn" data-go='{"name":"orders"}'>بررسی سفارش‌های در انتظار</button>`:''}
+        <div class="card"><h3>راهنمای کوتاه</h3>
+          <p class="muted">سفارش‌ها را تأیید یا رد کنید. روزهای پر بیرون از سامانه را در تقویم ثبت کنید. نحوهٔ ارسال هر کانال را جدا تنظیم کنید.</p></div>`;
       }
-      if (s.name === 'channels') {
-        const data = await api('/channels'); cache.channels = data.channels; cache.groups = data.groups;
-        if (!data.channels.length && !data.groups.length) return '<div class="empty">کانالی ثبت نشده. از بازو لینک کانال را بفرستید.</div>';
-        return (data.groups||[]).map(g => `<div class="card"><h3 style="margin:0">مجموعه ${esc(g.name)}</h3><p class="muted">${faNum(g.channel_count)} کانال با تعرفه مشترک</p></div>`).join('')
-          + data.channels.map(ch => `
-            <button class="card tap" data-push='{"name":"channel","id":${ch.id}}'>
-              <div class="row"><div><b>${esc(ch.name)}</b><div class="muted">${esc(ch.link||'')}</div></div></div>
-              <div style="margin-top:8px"><span class="badge">${esc(MODE[ch.publish_mode]||ch.publish_mode_label||'')}</span>
-              <span class="badge ${ch.bot_is_admin?'ok':'danger'}">لینک‌ساز ${ch.bot_is_admin?'ادمین است':'ادمین نیست'}</span></div>
-            </button>`).join('');
+      if(s.name==='channels'){
+        const data=await api('/channels'); cache.channels=data.channels; cache.groups=data.groups;
+        if(!data.channels.length && !(data.groups||[]).length) return '<div class="empty">کانالی ثبت نشده. از گفتگوی بازو لینک کانال را بفرستید.</div>';
+        return (data.groups||[]).map(g=>`<div class="card"><h3>مجموعه ${esc(g.name)}</h3><p class="muted">${faNum(g.channel_count)} کانال با تعرفه مشترک</p></div>`).join('')
+          + data.channels.map(ch=>`<button class="card tap" data-push='{"name":"channel","id":${ch.id}}'>
+            <div class="row"><div><b>${esc(ch.name)}</b><div class="muted">${esc(ch.link||'')}</div></div></div>
+            <div style="margin-top:8px"><span class="badge">${esc(MODE[ch.publish_mode]||'')}</span>
+            <span class="badge ${ch.bot_is_admin?'ok':'danger'}">لینک‌ساز ${ch.bot_is_admin?'ادمین است':'ادمین نیست'}</span></div>
+          </button>`).join('');
       }
-      if (s.name === 'channel') {
-        const data = cache.channels ? { channels: cache.channels } : await api('/channels');
-        const ch = (data.channels||[]).find(c => c.id === s.id);
-        if (!ch) return '<div class="empty">کانال پیدا نشد</div>';
+      if(s.name==='channel'){
+        const data=cache.channels?{channels:cache.channels}:await api('/channels');
+        const ch=(data.channels||[]).find(c=>c.id===s.id);
+        if(!ch) return '<div class="empty">کانال پیدا نشد</div>';
         return `<div class="card"><b>${esc(ch.name)}</b><div class="muted">${esc(ch.link||'')}</div></div>
           <p class="muted">نحوهٔ ارسال تبلیغ</p>
-          ${['bot','linkyar','manual'].map(m => `
-            <button class="card tap" data-mode="${m}" data-ch="${ch.id}">
-              <b>${ch.publish_mode===m?'✓ ':''}${esc(MODE[m])}</b>
-              <p class="muted">${m==='bot'?'ربات لینک‌ساز را در کانال ادمین کنید. پایدارترین روش است.':m==='linkyar'?'اگر ظرفیت افزودن ربات پر است، حساب لینک‌یار را ادمین کنید.':'قبل از موعد یادآوری می‌شود.'}</p>
-            </button>`).join('')}
-          ${ch.publish_mode==='manual' ? `<div class="card"><label>چند ساعت قبل از موعد یادآوری شود؟
-            <select id="remind">${[1,2,4,6,12,24].map(h=>`<option value="${h}">${faNum(h)} ساعت قبل</option>`).join('')}</select>
-          </label><button class="btn" data-mode="manual" data-ch="${ch.id}" data-remind="1">ذخیره یادآوری</button></div>` : ''}`;
+          ${['bot','linkyar','manual'].map(m=>`<button class="card tap" data-mode="${m}" data-ch="${ch.id}">
+            <b>${ch.publish_mode===m?'✓ ':''}${esc(MODE[m])}</b>
+            <p class="muted">${m==='bot'?'ربات لینک‌ساز را در کانال ادمین کنید. پایدارترین روش است.':m==='linkyar'?'اگر ظرفیت افزودن ربات پر است، حساب لینک‌یار را ادمین کنید.':'قبل از موعد یادآوری می‌شود؛ پس از ارسال وضعیت را اعلام کنید.'}</p>
+          </button>`).join('')}
+          ${ch.publish_mode==='manual'?`<div class="card"><label>چند ساعت قبل از موعد یادآوری شود؟
+            <select id="remind">${[1,2,4,6,12,24].map(h=>`<option value="${h}" ${h===2?'selected':''}>${faNum(h)} ساعت قبل</option>`).join('')}</select>
+          </label><button class="btn" data-mode="manual" data-ch="${ch.id}">ذخیره یادآوری</button></div>`:''}`;
       }
-      if (s.name === 'tariffs') {
-        if (!cache.channels) cache.channels = (await api('/channels')).channels;
-        const data = await api('/tariffs');
-        const opts = (cache.channels||[]).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      if(s.name==='tariffs'){
+        if(!cache.channels) cache.channels=(await api('/channels')).channels;
+        const data=await api('/tariffs');
+        const opts=(cache.channels||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
         return `<div class="card">
           <label>کانال<select id="tf-ch">${opts}</select></label>
           <label>نام طرح<input id="tf-name" placeholder="مثلاً طرح عادی" /></label>
           <div class="grid2">
-            <label>ساعت<select id="tf-hour">${Array.from({length:24},(_,i)=>`<option value="${i}">${faNum(i)}</option>`).join('')}</select></label>
+            <label>ساعت ارسال<select id="tf-hour">${Array.from({length:24},(_,i)=>`<option value="${i}">${faNum(i)}</option>`).join('')}</select></label>
             <label>مدت (ساعت)<input id="tf-dur" value="24" inputmode="numeric" /></label>
           </div>
           <label>قیمت (تومان)<input id="tf-price" inputmode="numeric" /></label>
           <button class="btn" id="tf-save">ثبت تعرفه</button>
-        </div>` + (data.tariffs||[]).map(t => `
-          <div class="card">
-            <div class="row"><div><b>${esc(t.name)}</b><div class="muted">${esc(t.owner)}</div></div>
-              <span class="badge ${t.is_active?'ok':'warn'}">${t.is_active?'فعال':'غیرفعال'}</span></div>
-            <p class="muted">ساعت ${faNum(t.start_hour??'—')} · ${faNum(t.duration_hours)} ساعت · ${money(t.price)}</p>
-          </div>`).join('');
+        </div>`+(data.tariffs||[]).map(t=>`<div class="card">
+          <div class="row"><div><b>${esc(t.name)}</b><div class="muted">${esc(t.owner)}</div></div>
+            <span class="badge ${t.is_active?'ok':'warn'}">${t.is_active?'فعال':'غیرفعال'}</span></div>
+          <p class="muted">ساعت ${faNum(t.start_hour??'—')} · ${faNum(t.duration_hours)} ساعت · ${money(t.price)}</p>
+          <div class="grid2" style="margin-top:8px">
+            <button class="btn ghost" data-toff="${t.id}">${t.is_active?'غیرفعال کردن':'فعال کردن'}</button>
+          </div></div>`).join('');
       }
-      if (s.name === 'orders') {
-        const data = await api('/orders');
-        if (!data.orders.length) return '<div class="empty">سفارشی نیست</div>';
-        return data.orders.map(o => `
-          <div class="card">
-            <div class="row"><b>سفارش ${faNum(o.order_id)} · جزء ${faNum(o.id)}</b>
-              <span class="badge ${o.manager_status==='approved'?'ok':o.manager_status==='rejected'?'danger':'warn'}">${esc(ST_M[o.manager_status]||o.manager_status)}</span></div>
-            <p class="muted">${esc(o.owner)} · ${esc(o.start_jalali)} · ${money(o.price)}</p>
-            <p class="muted">اجرا: ${esc(ST_E[o.execution_status]||o.execution_status)}</p>
-            ${o.published_link?`<p><a href="${esc(o.published_link)}" target="_blank">پیوند مطلب</a></p>`:''}
-            ${o.manager_status==='pending'?`<div class="grid2" style="margin-top:8px">
-              <button class="btn ok" data-act="approve" data-id="${o.id}">تأیید</button>
-              <button class="btn danger" data-act="reject" data-id="${o.id}">رد</button>
-            </div>`:''}
-          </div>`).join('');
+      if(s.name==='orders'){
+        const data=await api('/orders');
+        if(!data.orders.length) return '<div class="empty">سفارشی نیست</div>';
+        return data.orders.map(o=>`<div class="card">
+          <div class="row"><b>سفارش ${faNum(o.order_id)} · جزء ${faNum(o.id)}</b>
+            <span class="badge ${o.manager_status==='approved'?'ok':o.manager_status==='rejected'?'danger':'warn'}">${esc(ST_M[o.manager_status]||'')}</span></div>
+          <p class="muted">${esc(o.owner)} · ${esc(o.start_jalali)} · ${money(o.price)}</p>
+          <p class="muted">اجرا: ${esc(ST_E[o.execution_status]||'')}</p>
+          ${o.published_link?`<p><a href="${esc(o.published_link)}" target="_blank" rel="noopener">پیوند مطلب</a></p>`:''}
+          ${o.manager_status==='pending'?`<div class="grid2" style="margin-top:8px">
+            <button class="btn ok" data-act="approve" data-id="${o.id}">تأیید</button>
+            <button class="btn danger" data-act="reject" data-id="${o.id}">رد</button>
+          </div>`:''}
+        </div>`).join('');
       }
-      if (s.name === 'calendar') {
-        const data = await api('/tariffs');
-        if (!data.tariffs.length) return '<div class="empty">ابتدا تعرفه ثبت کنید</div>';
-        return `<p class="muted">تعرفه را انتخاب کنید تا ۱۴ روز آینده را ببینید.</p>` +
-          data.tariffs.map(t => `<button class="card tap" data-push='{"name":"days","id":${t.id}}'><b>${esc(t.name)}</b><div class="muted">${esc(t.owner)}</div></button>`).join('');
+      if(s.name==='calendar'){
+        const data=await api('/tariffs');
+        if(!data.tariffs.length) return '<div class="empty">ابتدا تعرفه ثبت کنید</div>';
+        return `<p class="muted">تعرفه را انتخاب کنید تا ۱۴ روز آینده را ببینید. کنار روز خالی تیک سبز و کنار روز پر ضربدر است.</p>`
+          +data.tariffs.map(t=>`<button class="card tap" data-push='{"name":"days","id":${t.id}}'><b>${esc(t.name)}</b><div class="muted">${esc(t.owner)}</div></button>`).join('');
       }
-      if (s.name === 'days') {
-        const data = await api('/free-days?tariff_id=' + s.id);
-        const days = data.free_days || [];
-        return `<div class="card"><p class="muted">روزهای خالی. برای اعلام روز پر از فرم زیر استفاده کنید.</p></div>
-          <div class="grid2">${days.map(d => `<div class="day"><span class="muted" style="color:var(--ok)">خالی</span><div>${esc(d.jalali)}</div></div>`).join('')}</div>
-          <div class="card" style="margin-top:12px">
-            <label>تاریخ میلادی برای روز پر<input id="busy-date" type="date" /></label>
-            <button class="btn" id="busy-save" data-tid="${s.id}">ثبت روز پر</button>
-          </div>`;
+      if(s.name==='days'){
+        const data=await api('/calendar?tariff_id='+s.id);
+        return `<div class="card"><b>${esc(data.name)}</b><p class="muted">${esc(data.owner)} — برای ثبت نوبت دستی روی روز خالی بزنید. برای خالی کردن، روی روز پر دستی بزنید.</p></div>
+          <div class="grid2">${(data.days||[]).map(d=>`
+            <button class="day ${d.free?'free':'busy'}" data-busy="${d.free?1:0}" data-date="${d.date}" data-tid="${s.id}">
+              <span class="muted">${d.free?'✓ خالی':'✕ پر'}</span><div>${esc(d.jalali)}</div>
+            </button>`).join('')}</div>
+          ${(data.manual_busy||[]).length?`<div class="card" style="margin-top:12px"><h3>نوبت‌های دستی</h3>
+            ${(data.manual_busy||[]).map(b=>`<div class="row" style="margin-top:8px"><span>${esc(b.jalali)}</span>
+              <button class="btn danger" style="width:auto" data-clear="${b.id}" data-tid="${s.id}">حذف</button></div>`).join('')}</div>`:''}`;
       }
-      if (s.name === 'finance') {
-        const data = await api('/wallet');
-        const banks = (data.banks||[]).map(b => `
-          <div class="card"><b>${esc(b.holder_name)}</b><div class="muted" dir="ltr">…${esc(b.iban_tail)}</div>
-            <button class="btn" style="margin-top:8px" data-payout="${b.id}" ${data.can_payout?'':'disabled'}>درخواست تسویه به این شبا</button>
-          </div>`).join('') || '<div class="empty">شبا ثبت نشده</div>';
+      if(s.name==='finance'){
+        const data=await api('/wallet');
+        const banks=(data.banks||[]).map(b=>`<div class="card"><b>${esc(b.holder_name)}</b><div class="muted" dir="ltr">…${esc(b.iban_tail)}</div>
+          <button class="btn" style="margin-top:8px" data-payout="${b.id}" ${data.can_payout?'':'disabled'}>درخواست تسویه به این شبا</button></div>`).join('')||'<div class="empty">شبا ثبت نشده</div>';
         return `<div class="stats">
-            <div class="stat"><span class="muted">قابل برداشت</span><b>${money(data.balance.available)}</b></div>
-            <div class="stat"><span class="muted">کارمزد سامانه</span><b>${faNum(data.fee_percent)}٪</b></div>
-          </div>
-          ${data.can_payout?'':`<p class="muted">${esc(data.payout_block_reason)}</p>`}
-          <div class="card">
-            <label>شماره شبا<input id="iban" dir="ltr" placeholder="IR…" /></label>
-            <label>نام صاحب حساب<input id="holder" /></label>
-            <button class="btn ghost" id="bank-save">افزودن شبا</button>
-          </div>${banks}`;
+          <div class="stat"><span class="muted">قابل برداشت</span><b>${money(data.balance.available)}</b></div>
+          <div class="stat"><span class="muted">کارمزد سامانه</span><b>${faNum(data.fee_percent)}٪</b></div>
+        </div>
+        ${data.can_payout?'':`<p class="muted">${esc(faErr(data.payout_block_reason))}</p>`}
+        <div class="card">
+          <label>شماره شبا<input id="iban" dir="ltr" placeholder="IR" /></label>
+          <label>نام صاحب حساب<input id="holder" /></label>
+          <button class="btn ghost" id="bank-save">افزودن شبا</button>
+        </div>${banks}
+        ${(data.payouts||[]).map(p=>`<div class="card"><span class="badge warn">${esc(p.status==='pending'?'در انتظار واریز':'واریز شده')}</span>
+          <b>${money(p.amount_toman)}</b></div>`).join('')}`;
       }
       return '';
     }
 
-    async function customerView(s) {
-      if (s.name === 'home') {
+    async function customerView(s){
+      if(s.name==='home'){
+        const cart=await api('/cart').catch(()=>({items:[]}));
+        const n=(cart.items||[]).length;
         return `<div class="stats">
           <div class="stat"><span class="muted">کیف پول</span><b>${money(me.wallet.available)}</b></div>
-          <div class="stat"><span class="muted">سفارش در جریان</span><b>${faNum(me.pending_orders||0)}</b></div>
+          <div class="stat"><span class="muted">اقلام سبد</span><b>${faNum(n)}</b></div>
         </div>
         <div class="card"><div class="muted">شناسه</div><div>${esc(me.user.handle||me.user.bale_user_id)}</div></div>
         <div class="grid2">
           <button class="btn" data-go='{"name":"catalog"}'>فهرست تعرفه‌ها</button>
           <button class="btn ghost" data-go='{"name":"banners"}'>بنرهای من</button>
         </div>
+        <button class="btn ghost" data-go='{"name":"mine"}'>سفارش‌های من</button>
         <div class="card"><p class="muted">بنر را از کانال مرجع انتخاب کنید، تعرفه و روز خالی را بزنید و سبد را نهایی کنید. بنر اول رایگان است.</p></div>`;
       }
-      if (s.name === 'catalog') {
-        const data = await api('/catalog').catch(() => api('/tariffs'));
-        const list = data.tariffs || data.items || [];
-        if (!list.length) return '<div class="empty">هنوز تعرفه‌ای ثبت نشده</div>';
-        return list.map(t => `<div class="card"><div class="row"><div><b>${esc(t.owner||t.name)}</b>
-          <div class="muted">${esc(t.name)} · ساعت ${faNum(t.start_hour??'—')}</div></div>
-          <b>${money(t.price)}</b></div></div>`).join('');
+      if(s.name==='catalog'){
+        const data=await api('/catalog').catch(()=>api('/tariffs'));
+        const list=data.tariffs||[];
+        if(!list.length) return '<div class="empty">هنوز تعرفه‌ای ثبت نشده</div>';
+        return list.map(t=>`<button class="card tap" data-push='{"name":"days","id":${t.id},"shop":1}'>
+          <div class="row"><div><b>${esc(t.owner||t.name)}</b>
+            <div class="muted">${esc(t.name)} · ساعت ${faNum(t.start_hour??'—')} · ${faNum(t.duration_hours)} ساعت</div></div>
+            <b>${money(t.price)}</b></div></button>`).join('');
       }
-      if (s.name === 'banners') return '<div class="empty">بنرها را از گفتگوی بازو مدیریت کنید. اگر بنر در کانال مرجع دارید، همان را بازارسال کنید.</div>';
-      if (s.name === 'wallet') {
-        const data = await api('/wallet');
+      if(s.name==='days'){
+        const data=await api('/calendar?tariff_id='+s.id+'&for=customer');
+        return `<div class="card"><b>${esc(data.name)}</b><p class="muted">${esc(data.owner)} — روز خالی را برای افزودن به سبد بزنید.</p></div>
+          <div class="grid2">${(data.days||[]).map(d=>d.free?`
+            <button class="day free" data-add="${s.id}" data-date="${d.date}"><span class="muted">✓ خالی</span><div>${esc(d.jalali)}</div></button>`:
+            `<div class="day busy"><span class="muted">✕ پر</span><div>${esc(d.jalali)}</div></div>`).join('')}</div>`;
+      }
+      if(s.name==='banners'){
+        const data=await api('/banners');
+        if(!(data.banners||[]).length) return '<div class="empty">هنوز بنری ندارید. اگر بنر در کانال مرجع دارید همان را به بازو بازارسال کنید. بنر جدید را هم از گفتگو بفرستید.</div>';
+        return data.banners.map(b=>`<div class="card">
+          <div class="row"><b>${esc(b.title)}</b><span class="badge ${b.from_linkbank?'ok':'warn'}">${b.from_linkbank?'از کانال مرجع':'نیاز به بررسی'}</span></div>
+          <p class="muted">${esc((b.caption||'').slice(0,80))}</p>
+          ${b.from_linkbank?`<button class="btn" data-useb="${b.id}">استفاده در سبد</button>`:''}
+          <label style="margin-top:8px">نام بنر<input data-rename="${b.id}" value="${esc(b.title)}" /></label>
+          <button class="btn ghost" data-renamesave="${b.id}">ذخیره نام</button>
+        </div>`).join('');
+      }
+      if(s.name==='cart'){
+        const data=await api('/cart');
+        const items=data.items||[];
+        if(!items.length) return '<div class="empty">سبد خالی است. از فهرست تعرفه و روز خالی اضافه کنید.</div>';
+        return items.map(it=>`<div class="card"><div class="row"><div><b>${esc(it.owner)}</b>
+          <div class="muted">${esc(it.name)} · ${esc(it.jalali)}</div></div><b>${money(it.price)}</b></div>
+          <button class="btn danger" style="margin-top:8px" data-rm="${it.id}">حذف از سبد</button></div>`).join('')
+          +`<div class="card"><div class="row"><span>جمع</span><b>${money(data.total)}</b></div>
+            <p class="muted">${data.banner?'بنر: '+esc(data.banner.title):'هنوز بنر انتخاب نشده — از بخش بنرها انتخاب کنید.'}</p>
+            <button class="btn" id="checkout" ${data.has_banner?'':'disabled'}>نهایی کردن سفارش</button></div>`;
+      }
+      if(s.name==='mine'){
+        const data=await api('/my-orders');
+        if(!(data.orders||[]).length) return '<div class="empty">سفارشی ندارید</div>';
+        return data.orders.map(o=>`<div class="card"><div class="row"><b>سفارش ${faNum(o.id)}</b>
+          <span class="badge warn">${esc(ST_O[o.status]||'')}</span></div>
+          <p class="muted">${esc(o.created)} · ${money(o.total)}</p></div>`).join('');
+      }
+      if(s.name==='wallet'){
+        const data=await api('/wallet');
         return `<div class="stat" style="margin-bottom:10px"><span class="muted">موجودی قابل برداشت</span><b>${money(data.balance.available)}</b></div>
+          ${data.can_payout?'':`<p class="muted">${esc(faErr(data.payout_block_reason))}</p>`}
           <div class="card"><label>شماره شبا<input id="iban" dir="ltr" /></label>
           <label>نام صاحب حساب<input id="holder" /></label>
           <button class="btn ghost" id="bank-save">افزودن شبا</button></div>
           ${(data.banks||[]).map(b=>`<div class="card"><b>${esc(b.holder_name)}</b><div class="muted">…${esc(b.iban_tail)}</div>
             <button class="btn" data-payout="${b.id}" ${data.can_payout?'':'disabled'}>درخواست تسویه</button></div>`).join('')}`;
       }
-      return '<div class="empty">این بخش به‌زودی کامل می‌شود. از بازو هم می‌توانید سفارش بدهید.</div>';
+      return '<div class="empty">این بخش از گفتگوی بازو هم در دسترس است.</div>';
     }
 
-    async function operatorView(s) {
-      if (s.name === 'home') {
+    async function operatorView(s){
+      if(s.name==='home'){
         return `<div class="stats">
           <div class="stat"><span class="muted">نقش</span><b>پشتیبانی</b></div>
           <div class="stat"><span class="muted">سفارش در انتظار</span><b>${faNum(me.pending_orders||0)}</b></div>
         </div>
-        <div class="card"><p class="muted">بنرهای خارج از کانال مرجع را بررسی کنید، فایل تسویه را بگیرید و پس از واریز بانک، پرداخت را ثبت کنید.</p></div>`;
+        <div class="card"><p class="muted">بنرهای خارج از کانال مرجع را بررسی کنید. فایل تسویه بانک را کپی کنید و پس از واریز، پرداخت را ثبت کنید.</p></div>
+        <button class="btn" data-go='{"name":"opb"}'>درخواست‌های بنر</button>
+        <button class="btn ghost" data-go='{"name":"opp"}'>تسویه ناشران</button>`;
       }
-      if (s.name === 'opp') {
-        const data = await api('/operator/payouts').catch(() => ({ payouts: [] }));
-        const lines = (data.payouts||[]).map(p => `${(p.amount_toman||0)*10},${p.iban||''},,${p.holder_name||''}`);
-        return (data.payouts||[]).map(p => `<div class="card"><b>${esc(p.holder_name||'')}</b><p>${money(p.amount_toman)}</p>
-          <p class="muted" dir="ltr">${esc(lines.find(l=>l.includes(p.iban||''))||'')}</p></div>`).join('')
-          + (lines.length ? `<button class="btn ghost" id="copy-file">کپی فایل تسویه (ریال)</button>
-             <button class="btn" id="mark-paid" style="margin-top:8px">پرداخت این دسته انجام شد</button>` : '<div class="empty">درخواست تسویه‌ای در انتظار نیست</div>');
+      if(s.name==='opb'){
+        const data=await api('/operator/banners').catch(()=>({requests:[]}));
+        if(!(data.requests||[]).length) return '<div class="empty">درخواست بازی نیست</div>';
+        return data.requests.map(r=>`<div class="card"><b>درخواست ${faNum(r.id)}</b>
+          <p class="muted">مشتری ${faNum(r.customer)} · ${r.fee_toman?money(r.fee_toman):'رایگان (بنر اول)'}</p>
+          <p class="muted">${esc(r.caption||'')}</p>
+          <div class="grid2"><button class="btn ok" data-bappr="${r.id}">تأیید و ارسال</button>
+          <button class="btn danger" data-brej="${r.id}">رد</button></div></div>`).join('');
       }
-      if (s.name === 'orders') {
-        const data = await api('/orders');
-        return (data.orders||[]).map(o => `<div class="card"><b>سفارش ${faNum(o.order_id)}</b>
+      if(s.name==='opp'){
+        const data=await api('/operator/payouts').catch(()=>({payouts:[]}));
+        const lines=(data.payouts||[]).map(p=>`${(p.amount_toman||0)*10},${p.iban||''},,${p.holder_name||''}`);
+        return (data.payouts||[]).map(p=>`<div class="card"><b>${esc(p.holder_name||'')}</b><p>${money(p.amount_toman)}</p>
+          <p class="muted" dir="ltr">${esc(p.iban||'')}</p></div>`).join('')
+          +(lines.length?`<button class="btn ghost" id="copy-file">کپی فایل تسویه (ریال)</button>
+             <button class="btn" id="mark-paid" style="margin-top:8px">پرداخت این دسته انجام شد</button>`:'<div class="empty">درخواست تسویه‌ای در انتظار نیست</div>');
+      }
+      if(s.name==='orders'){
+        const data=await api('/orders');
+        return (data.orders||[]).map(o=>`<div class="card"><b>سفارش ${faNum(o.order_id)}</b>
           <p class="muted">${esc(ST_M[o.manager_status]||'')} · ${esc(ST_E[o.execution_status]||'')}</p></div>`).join('')
-          || '<div class="empty">سفارش بازی نیست</div>';
+          ||'<div class="empty">سفارش بازی نیست</div>';
       }
-      return '<div class="empty">درخواست بازی نیست</div>';
+      return '<div class="empty">موردی نیست</div>';
     }
 
-    async function render() {
-      const app = document.getElementById('app');
-      const t = tabs();
-      app.innerHTML = `
-        <header>
-          ${stack.length>1?'<button class="icon" id="back">➜</button>':''}
-          <div class="t"><h1>${esc(title())}</h1><div class="sub">${esc((me&&me.user&& (me.user.handle||me.user.bale_user_id))||'…')}</div></div>
-        </header>
-        <main id="view"><div class="empty">…</div></main>
-        <nav class="tabs" style="grid-template-columns:repeat(${t.length},1fr)">
-          ${t.map(x => `<button data-go='${JSON.stringify(x.s)}' class="${tabOn()===x.id?'on':''}">${x.l}</button>`).join('')}
-        </nav>`;
-      document.getElementById('view').innerHTML = await view();
+    async function render(){
+      const app=document.getElementById('app');
+      const t=tabs();
+      app.innerHTML=`<header>
+        ${stack.length>1?'<button class="icon" id="back" aria-label="بازگشت">➜</button>':''}
+        <div class="t"><h1>${esc(title())}</h1><div class="sub">${esc((me&&me.user&&(me.user.handle||me.user.bale_user_id))||'…')}</div></div>
+      </header>
+      <main id="view"><div class="empty">…</div></main>
+      <nav class="tabs" style="grid-template-columns:repeat(${t.length},1fr)">
+        ${t.map(x=>`<button data-go='${JSON.stringify(x.s)}' class="${tabOn()===x.id?'on':''}">${x.l}</button>`).join('')}
+      </nav>`;
+      document.getElementById('view').innerHTML=await view();
       bind();
     }
 
-    function bind() {
-      const backBtn = document.getElementById('back');
-      if (backBtn) backBtn.onclick = back;
-      document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(JSON.parse(b.getAttribute('data-go'))));
-      document.querySelectorAll('[data-push]').forEach(b => b.onclick = () => push(JSON.parse(b.getAttribute('data-push'))));
-      document.querySelectorAll('[data-mode]').forEach(b => b.onclick = async () => {
-        const body = { channel_id: Number(b.getAttribute('data-ch')), publish_mode: b.getAttribute('data-mode') };
-        const r = document.getElementById('remind');
-        if (r) body.remind_hours = Number(r.value);
-        try { await api('/publish-mode', { method:'POST', body: JSON.stringify(body) }); toast('نحوهٔ ارسال ذخیره شد'); cache.channels=null; render(); }
-        catch(e){ toast(e.message); }
+    function bind(){
+      const backBtn=document.getElementById('back');
+      if(backBtn) backBtn.onclick=back;
+      document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(JSON.parse(b.getAttribute('data-go'))));
+      document.querySelectorAll('[data-push]').forEach(b=>b.onclick=()=>push(JSON.parse(b.getAttribute('data-push'))));
+      document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=async()=>{
+        const body={channel_id:Number(b.getAttribute('data-ch')),publish_mode:b.getAttribute('data-mode')};
+        const r=document.getElementById('remind'); if(r) body.remind_hours=Number(r.value);
+        try{await api('/publish-mode',{method:'POST',body:JSON.stringify(body)});toast('نحوهٔ ارسال ذخیره شد');cache.channels=null;render();}catch(e){toast(e.message);}
       });
-      const tf = document.getElementById('tf-save');
-      if (tf) tf.onclick = async () => {
-        try {
-          await api('/tariffs/add', { method:'POST', body: JSON.stringify({
-            channel_id: Number(document.getElementById('tf-ch').value),
-            name: document.getElementById('tf-name').value,
-            start_hour: document.getElementById('tf-hour').value,
-            duration_hours: Number(document.getElementById('tf-dur').value),
-            price: Number(document.getElementById('tf-price').value),
+      const tf=document.getElementById('tf-save');
+      if(tf) tf.onclick=async()=>{
+        try{
+          await api('/tariffs/add',{method:'POST',body:JSON.stringify({
+            channel_id:Number(document.getElementById('tf-ch').value),
+            name:document.getElementById('tf-name').value,
+            start_hour:document.getElementById('tf-hour').value,
+            duration_hours:Number(document.getElementById('tf-dur').value),
+            price:Number(document.getElementById('tf-price').value),
           })});
-          toast('تعرفه ثبت شد'); render();
-        } catch(e){ toast(e.message); }
+          toast('تعرفه ثبت شد');render();
+        }catch(e){toast(e.message);}
       };
-      document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
-        try {
-          await api('/orders/' + b.getAttribute('data-act'), { method:'POST', body: JSON.stringify({ item_id: Number(b.getAttribute('data-id')) }) });
-          toast(b.getAttribute('data-act')==='approve'?'تأیید شد':'رد شد'); render();
-        } catch(e){ toast(e.message); }
+      document.querySelectorAll('[data-toff]').forEach(b=>b.onclick=async()=>{
+        try{
+          const id=Number(b.getAttribute('data-toff'));
+          const list=await api('/tariffs');
+          const t=(list.tariffs||[]).find(x=>x.id===id);
+          await api('/tariffs/update',{method:'POST',body:JSON.stringify({tariff_id:id,is_active:!(t&&t.is_active)})});
+          toast('وضعیت تعرفه به‌روز شد');render();
+        }catch(e){toast(e.message);}
       });
-      const busy = document.getElementById('busy-save');
-      if (busy) busy.onclick = async () => {
-        try {
-          const t = await api('/tariffs');
-          const tar = (t.tariffs||[]).find(x => x.id === Number(busy.getAttribute('data-tid')));
-          await api('/busy', { method:'POST', body: JSON.stringify({
-            date: document.getElementById('busy-date').value,
-            channel_id: tar && tar.channel_id,
-            group_id: tar && tar.group_id,
-          })});
-          toast('روز پر ثبت شد'); render();
-        } catch(e){ toast(e.message); }
-      };
-      const bank = document.getElementById('bank-save');
-      if (bank) bank.onclick = async () => {
-        try {
-          await api('/bank', { method:'POST', body: JSON.stringify({
-            iban: document.getElementById('iban').value,
-            holder_name: document.getElementById('holder').value,
-          })});
-          toast('شبا ذخیره شد'); render();
-        } catch(e){ toast(e.message); }
-      };
-      document.querySelectorAll('[data-payout]').forEach(b => b.onclick = async () => {
-        try {
-          await api('/payout', { method:'POST', body: JSON.stringify({ bank_id: Number(b.getAttribute('data-payout')) }) });
-          toast('درخواست تسویه ثبت شد'); render();
-        } catch(e){ toast(e.message); }
+      document.querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{
+        try{
+          await api('/orders/'+b.getAttribute('data-act'),{method:'POST',body:JSON.stringify({item_id:Number(b.getAttribute('data-id'))})});
+          toast(b.getAttribute('data-act')==='approve'?'تأیید شد':'رد شد');render();
+        }catch(e){toast(e.message);}
       });
-      const copy = document.getElementById('copy-file');
-      if (copy) copy.onclick = async () => {
-        const data = await api('/operator/payouts').catch(()=>({payouts:[]}));
-        const text = (data.payouts||[]).map(p => `${(p.amount_toman||0)*10},${p.iban||''},,${p.holder_name||''}`).join('\n');
-        try { await navigator.clipboard.writeText(text); toast('کپی شد'); } catch { toast(text); }
+      document.querySelectorAll('[data-busy]').forEach(b=>b.onclick=async()=>{
+        const free=b.getAttribute('data-busy')==='1';
+        const tid=Number(b.getAttribute('data-tid'));
+        const date=b.getAttribute('data-date');
+        try{
+          if(free){await api('/busy-day',{method:'POST',body:JSON.stringify({tariff_id:tid,date})});toast('روز پر ثبت شد');}
+          else{
+            const cal=await api('/calendar?tariff_id='+tid);
+            const slot=(cal.manual_busy||[]).find(x=>x.date===date);
+            if(!slot){toast('این روز با سفارش پر شده و از اینجا خالی نمی‌شود');return;}
+            await api('/clear-busy',{method:'POST',body:JSON.stringify({tariff_id:tid,slot_id:slot.id})});
+            toast('نوبت دستی حذف شد');
+          }
+          render();
+        }catch(e){toast(e.message);}
+      });
+      document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=async()=>{
+        try{await api('/clear-busy',{method:'POST',body:JSON.stringify({tariff_id:Number(b.getAttribute('data-tid')),slot_id:Number(b.getAttribute('data-clear'))})});toast('حذف شد');render();}catch(e){toast(e.message);}
+      });
+      document.querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{
+        try{await api('/cart/add',{method:'POST',body:JSON.stringify({tariff_id:Number(b.getAttribute('data-add')),date:b.getAttribute('data-date')})});toast('به سبد اضافه شد');}catch(e){toast(e.message);}
+      });
+      document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{
+        try{await api('/cart/remove',{method:'POST',body:JSON.stringify({item_id:Number(b.getAttribute('data-rm'))})});toast('حذف شد');render();}catch(e){toast(e.message);}
+      });
+      document.querySelectorAll('[data-useb]').forEach(b=>b.onclick=async()=>{
+        try{await api('/cart/banner',{method:'POST',body:JSON.stringify({banner_id:Number(b.getAttribute('data-useb'))})});toast('بنر برای سبد انتخاب شد');go({name:'cart'});}catch(e){toast(e.message);}
+      });
+      document.querySelectorAll('[data-renamesave]').forEach(b=>b.onclick=async()=>{
+        const id=b.getAttribute('data-renamesave');
+        const inp=document.querySelector('[data-rename="'+id+'"]');
+        try{await api('/banners/rename',{method:'POST',body:JSON.stringify({banner_id:Number(id),title:inp&&inp.value})});toast('نام ذخیره شد');render();}catch(e){toast(e.message);}
+      });
+      const checkout=document.getElementById('checkout');
+      if(checkout) checkout.onclick=async()=>{
+        try{await api('/checkout',{method:'POST',body:'{}'});toast('سفارش برای مدیران ارسال شد');go({name:'mine'});}catch(e){toast(e.message);}
       };
-      const mark = document.getElementById('mark-paid');
-      if (mark) mark.onclick = async () => {
-        try { await api('/operator/mark-paid', { method:'POST', body: '{}' }); toast('پرداخت ثبت شد'); render(); }
-        catch(e){ toast(e.message); }
+      const bank=document.getElementById('bank-save');
+      if(bank) bank.onclick=async()=>{
+        try{await api('/bank',{method:'POST',body:JSON.stringify({iban:document.getElementById('iban').value,holder_name:document.getElementById('holder').value})});toast('شبا ذخیره شد');render();}catch(e){toast(e.message);}
       };
+      document.querySelectorAll('[data-payout]').forEach(b=>b.onclick=async()=>{
+        try{await api('/payout',{method:'POST',body:JSON.stringify({bank_id:Number(b.getAttribute('data-payout'))})});toast('درخواست تسویه ثبت شد');render();}catch(e){toast(e.message);}
+      });
+      const copy=document.getElementById('copy-file');
+      if(copy) copy.onclick=async()=>{
+        const data=await api('/operator/payouts').catch(()=>({payouts:[]}));
+        const text=(data.payouts||[]).map(p=>`${(p.amount_toman||0)*10},${p.iban||''},,${p.holder_name||''}`).join('\n');
+        try{await navigator.clipboard.writeText(text);toast('کپی شد');}catch{toast(text);}
+      };
+      const mark=document.getElementById('mark-paid');
+      if(mark) mark.onclick=async()=>{
+        try{await api('/operator/mark-paid',{method:'POST',body:'{}'});toast('پرداخت ثبت شد و پیام واریز ارسال شد');render();}catch(e){toast(e.message);}
+      };
+      document.querySelectorAll('[data-bappr],[data-brej]').forEach(b=>b.onclick=async()=>{
+        const approve=b.hasAttribute('data-bappr');
+        const id=Number(b.getAttribute(approve?'data-bappr':'data-brej'));
+        try{const r=await api('/operator/banner-decide',{method:'POST',body:JSON.stringify({request_id:id,approve})});toast(r.message|| (approve?'تأیید شد':'رد شد'));render();}catch(e){toast(e.message);}
+      });
     }
 
-    async function boot() {
+    async function boot(){
       applyTheme();
-      const w = wa();
-      if (w) { try { w.ready(); w.expand(); } catch(e) {} initData = w.initData || ''; }
-      try {
-        me = await api('/me');
-        role = me.is_operator ? 'operator' : (me.channel_count > 0 ? 'manager' : 'customer');
-        const q = new URLSearchParams(location.search).get('role');
-        if (q === 'customer' || q === 'manager' || q === 'operator') role = q;
-      } catch (e) {
-        document.getElementById('app').innerHTML = `<main class="empty">خطای احراز هویت<br>${esc(e.message)}<br><br>برای تست مرورگر:<br>?debug_bale_id=80619262</main>`;
+      const w=wa();
+      if(w){try{w.ready();w.expand();}catch(e){} initData=w.initData||''; if(w.onEvent){try{w.onEvent('themeChanged',applyTheme);}catch(e){}}}
+      try{
+        me=await api('/me');
+        role=me.is_operator?'operator':(me.channel_count>0?'manager':'customer');
+        const q=new URLSearchParams(location.search).get('role');
+        if(q==='customer'||q==='manager'||q==='operator') role=q;
+      }catch(e){
+        document.getElementById('app').innerHTML=`<main class="empty">خطای احراز هویت<br>${esc(faErr(e.message))}<br><br>برای تست مرورگر از داخل بازو باز کنید.</main>`;
         return;
       }
       render();
