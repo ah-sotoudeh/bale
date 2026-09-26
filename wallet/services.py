@@ -54,6 +54,22 @@ def balance_breakdown(user: User) -> Dict[str, int]:
     }
 
 
+def recent_ledger(user: User, limit: int = 12) -> List[Dict[str, Any]]:
+    rows = []
+    for entry in WalletLedger.objects.filter(user=user).order_by('-id')[:limit]:
+        rows.append(
+            {
+                'id': entry.id,
+                'amount': entry.amount,
+                'entry_type': entry.entry_type,
+                'note': entry.note,
+                'ref': entry.ref,
+                'created_at': entry.created_at.isoformat() if entry.created_at else '',
+            }
+        )
+    return rows
+
+
 def available_balance(user: User) -> int:
     return max(0, balance_breakdown(user)['available'])
 

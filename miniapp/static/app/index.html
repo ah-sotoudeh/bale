@@ -101,7 +101,8 @@
     const ST_M={pending:'در انتظار تأیید',approved:'تأیید شده',rejected:'رد شده',cart:'سبد',edited:'زمان پیشنهادی',expired:'مهلت تمام',customer_declined:'رد زمان'};
     const ST_E={none:'هنوز شروع نشده',paid:'آماده انتشار',executed:'اجرا شده',failed_publish:'انتشار ناموفق',cancelled:'لغو شده',remind_sent:'یادآوری شد',awaiting_manager_publish:'منتظر اعلام انتشار',awaiting_customer_confirm:'منتظر تأیید مشتری',awaiting_operator:'منتظر پشتیبانی'};
     const ST_O={waiting_managers:'در انتظار تأیید مدیران',waiting_customer_confirm:'تأیید زمان جدید',waiting_payment:'در انتظار پرداخت',paid:'پرداخت‌شده',completed:'تکمیل‌شده',rejected:'رد شده',cancelled:'لغو شده'};
-    const ERR={unauthorized:'ورود ناموفق',empty_init_data:'از داخل بازوی بله باز کنید',already_pending:'درخواست تسویه باز دارید',weekly_limit:'هفته‌ای یک بار می‌توانید تسویه بزنید',below_minimum:'حداقل تسویه صدهزار تومان است',no_bank:'ابتدا شبا ثبت کنید',invalid_iban:'شماره شبا معتبر نیست',need_holder_name:'نام صاحب حساب لازم است',empty_cart:'سبد خالی است',no_banner:'ابتدا بنر کانال مرجع را انتخاب کنید',slot_conflict:'این نوبت پر است',bad_date:'تاریخ نامعتبر است',not_found:'پیدا نشد',forbidden:'اجازه ندارید',not_pending:'دیگر در انتظار نیست',inactive:'تعرفه غیرفعال است'};
+    const ERR={unauthorized:'ورود ناموفق',empty_init_data:'از داخل بازوی بله باز کنید',already_pending:'درخواست تسویه باز دارید',weekly_limit:'هفته‌ای یک بار می‌توانید تسویه بزنید',below_minimum:'حداقل تسویه صدهزار تومان است',no_bank:'ابتدا شبا ثبت کنید',invalid_iban:'شماره شبا معتبر نیست',need_holder_name:'نام صاحب حساب لازم است',empty_cart:'سبد خالی است',no_banner:'ابتدا بنر کانال مرجع را انتخاب کنید',slot_conflict:'این نوبت پر است',bad_date:'تاریخ نامعتبر است',not_found:'پیدا نشد',forbidden:'اجازه ندارید',not_pending:'دیگر در انتظار نیست',inactive:'تعرفه غیرفعال است',wallet_unavailable:'بخش مالی موقتاً در دسترس نیست. یک‌بار migrate را اجرا کنید.'};
+    const LEDGER={earn:'درآمد',refund:'بازگشت وجه',penalty:'جریمه',payout_lock:'قفل تسویه',payout_paid:'واریز',payout_unlock:'آزادسازی تسویه',spend:'پرداخت',adjust:'اصلاح',escrow:'امانت'};
 
     let initData='', me=null, role='manager', stack=[{name:'home'}], cache={}, scheme='dark';
 
@@ -293,22 +294,28 @@
             ${(data.manual_busy||[]).map(b=>`<div class="row" style="margin-top:8px"><span>${esc(b.jalali)}</span>
               <button class="btn danger" style="width:auto" data-clear="${b.id}" data-tid="${s.id}">حذف</button></div>`).join('')}</div>`:''}`;
       }
-      if(s.name==='finance'){
-        const data=await api('/wallet');
-        const banks=(data.banks||[]).map(b=>`<div class="card"><b>${esc(b.holder_name)}</b><div class="muted" dir="ltr">…${esc(b.iban_tail)}</div>
+      if(s.name==='finance'||s.name==='wallet'){
+        let data;
+        try{ data=await api('/wallet'); }
+        catch(e){ return `<div class="empty">${esc(e.message||'بخش مالی باز نشد')}</div>`; }
+        const bal=(data.balance&&data.balance.available)||0;
+        const banks=(data.banks||[]).map(b=>`<div class="card"><b>${esc(b.holder_name)}</b><div class="muted" dir="ltr">…${esc(b.iban_tail||'')}</div>
           <button class="btn" style="margin-top:8px" data-payout="${b.id}" ${data.can_payout?'':'disabled'}>درخواست تسویه به این شبا</button></div>`).join('')||'<div class="empty">شبا ثبت نشده</div>';
+        const ledger=(data.ledger||[]).map(l=>`<div class="card"><div class="row"><span class="muted">${esc(LEDGER[l.entry_type]||l.entry_type)}</span><b>${money(l.amount)}</b></div><p class="muted">${esc(l.note||'')}</p></div>`).join('');
         return `<div class="stats">
-          <div class="stat"><span class="muted">قابل برداشت</span><b>${money(data.balance.available)}</b></div>
-          <div class="stat"><span class="muted">کارمزد سامانه</span><b>${faNum(data.fee_percent)}٪</b></div>
+          <div class="stat"><span class="muted">قابل برداشت</span><b>${money(bal)}</b></div>
+          <div class="stat"><span class="muted">در انتظار تسویه</span><b>${money(data.balance&&data.balance.locked_pending)}</b></div>
         </div>
+        <p class="muted">کارمزد سامانه ${faNum(data.fee_percent||0)}٪. پول سفارش تا تأیید انتشار در امانت می‌ماند.</p>
         ${data.can_payout?'':`<p class="muted">${esc(faErr(data.payout_block_reason))}</p>`}
         <div class="card">
           <label>شماره شبا<input id="iban" dir="ltr" placeholder="IR" /></label>
           <label>نام صاحب حساب<input id="holder" /></label>
           <button class="btn ghost" id="bank-save">افزودن شبا</button>
         </div>${banks}
-        ${(data.payouts||[]).map(p=>`<div class="card"><span class="badge warn">${esc(p.status==='pending'?'در انتظار واریز':'واریز شده')}</span>
-          <b>${money(p.amount_toman)}</b></div>`).join('')}`;
+        ${(data.payouts||[]).map(p=>`<div class="card"><span class="badge warn">${esc(p.status==='pending'?'در انتظار واریز':p.status==='paid'?'واریز شده':p.status)}</span>
+          <b>${money(p.amount_toman)}</b></div>`).join('')}
+        <h3>گردش حساب</h3>${ledger||'<div class="empty">گردشی ثبت نشده</div>'}`;
       }
       return '';
     }
@@ -374,16 +381,7 @@
           <span class="badge warn">${esc(ST_O[o.status]||'')}</span></div>
           <p class="muted">${esc(o.created)} · ${money(o.total)}</p></div>`).join('');
       }
-      if(s.name==='wallet'){
-        const data=await api('/wallet');
-        return `<div class="stat" style="margin-bottom:10px"><span class="muted">موجودی قابل برداشت</span><b>${money(data.balance.available)}</b></div>
-          ${data.can_payout?'':`<p class="muted">${esc(faErr(data.payout_block_reason))}</p>`}
-          <div class="card"><label>شماره شبا<input id="iban" dir="ltr" /></label>
-          <label>نام صاحب حساب<input id="holder" /></label>
-          <button class="btn ghost" id="bank-save">افزودن شبا</button></div>
-          ${(data.banks||[]).map(b=>`<div class="card"><b>${esc(b.holder_name)}</b><div class="muted">…${esc(b.iban_tail)}</div>
-            <button class="btn" data-payout="${b.id}" ${data.can_payout?'':'disabled'}>درخواست تسویه</button></div>`).join('')}`;
-      }
+      if(s.name==='wallet') return managerView({name:'wallet'});
       return '<div class="empty">این بخش از گفتگوی بازو هم در دسترس است.</div>';
     }
 

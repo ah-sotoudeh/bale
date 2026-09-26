@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, Optional
 
@@ -18,6 +19,8 @@ from orders.models import OrderItem
 from users.models import User
 from wallet import services as ws
 from wallet.models import BankAccount, PayoutRequest
+
+logger = logging.getLogger(__name__)
 
 
 def _json_body(request: HttpRequest) -> Dict[str, Any]:
@@ -304,31 +307,51 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    banks = [
-        {
-            'id': b.id,
-            'iban': b.iban,
-            'holder_name': b.holder_name,
-            'is_default': b.is_default,
-            'iban_tail': b.iban[-6:],
-        }
-        for b in BankAccount.objects.filter(user=user).order_by('-is_default', '-id')
-    ]
-    pending = [
-        {
-            'id': p.id,
-            'amount_toman': p.amount_toman,
-            'iban_tail': p.iban[-6:],
-            'status': p.status,
-        }
-        for p in PayoutRequest.objects.filter(user=user).order_by('-id')[:10]
-    ]
-    can, reason = ws.can_request_payout(user)
+    try:
+        banks = [
+            {
+                'id': b.id,
+                'iban': b.iban,
+                'holder_name': b.holder_name,
+                'is_default': b.is_default,
+                'iban_tail': (b.iban or '')[-6:],
+            }
+            for b in BankAccount.objects.filter(user=user).order_by('-is_default', '-id')
+        ]
+        pending = [
+            {
+                'id': p.id,
+                'amount_toman': p.amount_toman,
+                'iban_tail': (p.iban or '')[-6:],
+                'status': p.status,
+            }
+            for p in PayoutRequest.objects.filter(user=user).order_by('-id')[:10]
+        ]
+        can, reason = ws.can_request_payout(user)
+        balance = ws.balance_breakdown(user)
+        ledger = ws.recent_ledger(user)
+    except Exception:
+        logger.exception('wallet api failed')
+        return JsonResponse(
+            {
+                'ok': True,
+                'balance': {'available': 0, 'locked_pending': 0, 'paid_out': 0, 'ledger_sum': 0},
+                'banks': [],
+                'payouts': [],
+                'ledger': [],
+                'can_payout': False,
+                'payout_block_reason': 'wallet_unavailable',
+                'min_payout': ws.MIN_PAYOUT_TOMAN,
+                'fee_percent': ws.PLATFORM_FEE_PERCENT,
+                'degraded': True,
+            }
+        )
     return JsonResponse({
         'ok': True,
-        'balance': ws.balance_breakdown(user),
+        'balance': balance,
         'banks': banks,
         'payouts': pending,
+        'ledger': ledger,
         'can_payout': can,
         'payout_block_reason': reason if not can else '',
         'min_payout': ws.MIN_PAYOUT_TOMAN,
