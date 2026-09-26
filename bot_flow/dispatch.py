@@ -276,6 +276,15 @@ def _parse_manager_date(text: str):
 def handle_update(update: dict) -> None:
     log.info('── update_id=%s ──', update.get('update_id'))
 
+    if update.get('pre_checkout_query'):
+        try:
+            from orders.bale_pay import handle_pre_checkout
+
+            handle_pre_checkout(update['pre_checkout_query'])
+        except Exception:
+            log.exception('pre_checkout failed')
+        return
+
     if update.get('callback_query'):
         try:
             handle_callback_query(update['callback_query'])
@@ -285,6 +294,15 @@ def handle_update(update: dict) -> None:
 
     msg = update.get('message') or update.get('edited_message')
     if not msg:
+        return
+
+    if msg.get('successful_payment'):
+        try:
+            from orders.bale_pay import handle_successful_payment
+
+            handle_successful_payment(msg)
+        except Exception:
+            log.exception('successful_payment failed')
         return
 
     chat_id = str((msg.get('chat') or {}).get('id') or '')

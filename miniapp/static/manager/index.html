@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="fa" dir="rtl" data-scheme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -9,14 +9,14 @@
   <script src="https://tapi.bale.ai/miniapp.js?3"></script>
   <style>
     :root {
-      --bg:#0f1419; --text:#e7ecf3; --hint:#8b9bb4; --link:#2aabee;
-      --btn:#2aabee; --btn-text:#fff; --sec:#1a2332; --header:#17212b;
-      --sep:#2a3548; --ok:#3dd68c; --danger:#f31260; --accent:#6cb6ff;
+      --bg:#121417; --text:#f2f4f5; --hint:#8b98a5; --link:#3dcec0;
+      --btn:#00a693; --btn-text:#fff; --sec:#1c2128; --header:#1a1f24;
+      --bar:#1a1f24; --sep:#2a3138; --ok:#3dd68c; --danger:#ff6b6b; --accent:#3dcec0;
     }
     [data-scheme="light"] {
-      --bg:#f4f6f9; --text:#1a2332; --hint:#66788f; --link:#2481cc;
-      --btn:#2aabee; --btn-text:#fff; --sec:#fff; --header:#fff;
-      --sep:#e2e8f0; --ok:#12a150; --danger:#e53935; --accent:#1a73b8;
+      --bg:#ffffff; --text:#1c1c1c; --hint:#8e8e93; --link:#008f7a;
+      --btn:#00a693; --btn-text:#fff; --sec:#f4f4f5; --header:#ffffff;
+      --bar:#ffffff; --sep:#e6e6e8; --ok:#0f9f6e; --danger:#e53935; --accent:#008f7a;
     }
     *{box-sizing:border-box}
     html,body{margin:0;min-height:100%}
@@ -68,7 +68,7 @@
     label{display:grid;gap:6px;font-size:12px;color:var(--hint);margin-bottom:10px}
     nav.tabs{
       position:fixed;left:0;right:0;bottom:0;display:grid;
-      background:var(--header);border-top:1px solid var(--sep);
+      background:var(--bar, var(--header));border-top:1px solid var(--sep);
       padding-bottom:env(safe-area-inset-bottom);
     }
     nav.tabs button{min-height:58px;border:0;background:none;color:var(--hint);font-size:11px}
@@ -115,21 +115,24 @@
 
     function applyTheme(){
       const w=wa();
-      if(w&&w.colorScheme) scheme=w.colorScheme==='light'?'light':'dark';
-      document.documentElement.setAttribute('data-scheme',scheme);
+      if(w && (w.colorScheme==='light' || w.colorScheme==='dark')) scheme=w.colorScheme;
+      document.documentElement.setAttribute('data-scheme', scheme);
       const tp=w&&w.themeParams;
-      if(tp&&tp.bg_color){
-        const r=document.documentElement.style;
-        r.setProperty('--bg',tp.bg_color);
-        if(tp.text_color) r.setProperty('--text',tp.text_color);
-        if(tp.hint_color) r.setProperty('--hint',tp.hint_color);
-        if(tp.link_color) r.setProperty('--link',tp.link_color);
-        if(tp.button_color) r.setProperty('--btn',tp.button_color);
-        if(tp.button_text_color) r.setProperty('--btn-text',tp.button_text_color);
-        r.setProperty('--sec',tp.section_bg_color||tp.secondary_bg_color||'');
-        if(tp.header_bg_color) r.setProperty('--header',tp.header_bg_color);
-        if(tp.section_separator_color) r.setProperty('--sep',tp.section_separator_color);
-      }
+      if(!tp) return;
+      const map={
+        bg_color:'--bg', text_color:'--text', hint_color:'--hint', link_color:'--link',
+        button_color:'--btn', button_text_color:'--btn-text', secondary_bg_color:'--sec',
+        header_bg_color:'--header', bottom_bar_bg_color:'--bar', accent_text_color:'--accent',
+        section_bg_color:'--sec', section_header_text_color:'--hint',
+        section_separator_color:'--sep', subtitle_text_color:'--hint',
+        destructive_text_color:'--danger'
+      };
+      const r=document.documentElement.style;
+      Object.keys(map).forEach(k=>{ if(tp[k]) r.setProperty(map[k], tp[k]); });
+    }
+    function toggleScheme(){
+      scheme=scheme==='light'?'dark':'light';
+      document.documentElement.setAttribute('data-scheme', scheme);
     }
 
     async function api(path,opts){
@@ -379,7 +382,9 @@
         if(!(data.orders||[]).length) return '<div class="empty">سفارشی ندارید</div>';
         return data.orders.map(o=>`<div class="card"><div class="row"><b>سفارش ${faNum(o.id)}</b>
           <span class="badge warn">${esc(ST_O[o.status]||'')}</span></div>
-          <p class="muted">${esc(o.created)} · ${money(o.total)}</p></div>`).join('');
+          <p class="muted">${esc(o.created)} · ${money(o.total)}</p>
+          ${o.status==='waiting_payment'?`<button class="btn" data-pay="${o.id}">پرداخت با کیف‌پول بله</button>`:''}
+          </div>`).join('');
       }
       if(s.name==='wallet') return managerView({name:'wallet'});
       return '<div class="empty">این بخش از گفتگوی بازو هم در دسترس است.</div>';
@@ -507,6 +512,18 @@
         const inp=document.querySelector('[data-rename="'+id+'"]');
         try{await api('/banners/rename',{method:'POST',body:JSON.stringify({banner_id:Number(id),title:inp&&inp.value})});toast('نام ذخیره شد');render();}catch(e){toast(e.message);}
       });
+      document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=async()=>{
+        try{
+          const inv=await api('/pay/invoice',{method:'POST',body:JSON.stringify({order_id:Number(b.getAttribute('data-pay'))})});
+          const w=wa();
+          if(!w||!w.openInvoice){toast('درگاه فقط داخل مینی‌اپ بله باز می‌شود');return;}
+          w.openInvoice(inv.invoice_params, (res)=>{
+            const st=(res&&res.status)||'';
+            toast(st==='paid'?'پرداخت شد':st==='cancelled'?'پرداخت لغو شد':st==='failed'?'پرداخت ناموفق بود':'پرداخت در حال پردازش است');
+            if(st==='paid') render();
+          });
+        }catch(e){toast(e.message);}
+      });
       const checkout=document.getElementById('checkout');
       if(checkout) checkout.onclick=async()=>{
         try{await api('/checkout',{method:'POST',body:'{}'});toast('سفارش برای مدیران ارسال شد');go({name:'mine'});}catch(e){toast(e.message);}
@@ -538,7 +555,15 @@
     async function boot(){
       applyTheme();
       const w=wa();
-      if(w){try{w.ready();w.expand();}catch(e){} initData=w.initData||''; if(w.onEvent){try{w.onEvent('themeChanged',applyTheme);}catch(e){}}}
+      if(w){try{w.ready();w.expand();}catch(e){} initData=w.initData||''; if(w.onEvent){try{w.onEvent('themeChanged',applyTheme);w.onEvent('invoiceClosed',()=>render());}catch(e){}}}
+      else{
+        const btn=document.createElement('button');
+        btn.textContent='تغییر تم';
+        btn.className='btn ghost';
+        btn.style.cssText='position:fixed;top:8px;left:8px;width:auto;z-index:30;min-height:36px;padding:0 10px';
+        btn.onclick=toggleScheme;
+        document.body.appendChild(btn);
+      }
       try{
         me=await api('/me');
         role=me.is_operator?'operator':(me.channel_count>0?'manager':'customer');

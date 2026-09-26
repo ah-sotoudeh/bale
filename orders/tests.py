@@ -146,3 +146,34 @@ class SlotAndLedgerTests(TestCase):
         b = credit_manager_for_execution(self.manager, 10000, 77)
         self.assertEqual(a.id, b.id)
         self.assertEqual(self.manager.ledger.count(), 1)
+
+
+class BaleInvoiceTests(TestCase):
+    def setUp(self):
+        self.customer = User.objects.create_user(username='pay', password='pass', bale_user_id='p1')
+        self.order = Order.objects.create(customer=self.customer, status='waiting_payment', total_amount=150_000)
+
+    @patch('orders.bale_pay.bc.answer_pre_checkout_query')
+    def test_precheckout_rejects_wrong_rial(self, mock_answer):
+        from orders.bale_pay import handle_pre_checkout
+
+        handle_pre_checkout({
+            'id': 'q1',
+            'invoice_payload': f'order-{self.order.id}',
+            'total_amount': 150_000,
+            'currency': 'IRR',
+        })
+        mock_answer.assert_called_once()
+        self.assertFalse(mock_answer.call_args.args[1])
+
+    @patch('orders.bale_pay.bc.answer_pre_checkout_query')
+    def test_precheckout_accepts_rial(self, mock_answer):
+        from orders.bale_pay import handle_pre_checkout
+
+        handle_pre_checkout({
+            'id': 'q2',
+            'invoice_payload': f'order-{self.order.id}',
+            'total_amount': 1_500_000,
+            'currency': 'IRR',
+        })
+        mock_answer.assert_called_with('q2', True)

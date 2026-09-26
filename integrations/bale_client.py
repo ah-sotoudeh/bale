@@ -357,6 +357,74 @@ def bot_is_channel_admin(channel_id: str) -> bool:
     return status_name in ('administrator', 'creator')
 
 
+def _provider_token() -> str:
+    return (
+        _django_setting('BALE_PROVIDER_TOKEN')
+        or os.environ.get('BALE_PROVIDER_TOKEN', '')
+        or _card_number()
+    )
+
+
+def toman_to_rial(toman: int) -> int:
+    """کیف‌پول بله مبلغ را به ریال (IRR) می‌گیرد."""
+    return int(toman) * 10
+
+
+def answer_pre_checkout_query(
+    pre_checkout_query_id: str,
+    ok: bool,
+    error_message: str = '',
+) -> Dict[str, Any]:
+    url = _bot_url('answerPreCheckoutQuery')
+    body: Dict[str, Any] = {
+        'pre_checkout_query_id': str(pre_checkout_query_id),
+        'ok': bool(ok),
+    }
+    if not ok:
+        body['error_message'] = (error_message or 'پرداخت ممکن نیست')[:200]
+    try:
+        r = requests.post(url, json=body, timeout=8)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        logger.exception('answer_pre_checkout_query failed')
+        return {'ok': False, 'error': _redact(str(e))}
+
+
+def create_invoice_link(
+    title: str,
+    description: str,
+    payload: str,
+    amount_toman: int,
+    provider_token: str = '',
+) -> Dict[str, Any]:
+    """createInvoiceLink — مقدار result را بدون تغییر به openInvoice بدهید."""
+    token = provider_token or _provider_token()
+    if not token:
+        return {'ok': False, 'error': 'no_provider_token'}
+    url = _bot_url('createInvoiceLink')
+    body = {
+        'title': (title or 'پرداخت')[:32],
+        'description': (description or title or 'پرداخت')[:255],
+        'payload': (payload or 'pay')[:128],
+        'provider_token': token,
+        'prices': [{'label': 'مبلغ', 'amount': toman_to_rial(amount_toman)}],
+    }
+    try:
+        r = requests.post(url, json=body, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException as e:
+        logger.exception('create_invoice_link failed')
+        return {'ok': False, 'error': _redact(str(e))}
+    params = data.get('result') if isinstance(data, dict) else data
+    if isinstance(params, dict):
+        params = params.get('invoice_params') or params.get('id') or ''
+    if not params:
+        return {'ok': False, 'error': 'empty_invoice', 'raw': data}
+    return {'ok': True, 'invoice_params': params, 'amount_rial': toman_to_rial(amount_toman)}
+
+
 def send_invoice(
     chat_id: str,
     title: str,
@@ -364,20 +432,20 @@ def send_invoice(
     payload: str,
     provider_token: str,
     prices: List[Dict[str, Any]],
-    currency: str = 'IRR',
-    start_parameter: str = 'pay',
+    photo_url: str = '',
 ) -> Dict[str, Any]:
+    """sendInvoice طبق مستند بله. مبلغ prices به ریال است. currency در بدنه نیست."""
     url = _bot_url('sendInvoice')
-    body = {
+    body: Dict[str, Any] = {
         'chat_id': chat_id,
-        'title': title,
-        'description': description,
-        'payload': payload,
+        'title': (title or 'پرداخت')[:32],
+        'description': (description or title or 'پرداخت')[:255],
+        'payload': (payload or 'pay')[:128],
         'provider_token': provider_token,
-        'start_parameter': start_parameter,
-        'currency': currency,
         'prices': prices,
     }
+    if photo_url:
+        body['photo_url'] = photo_url
     try:
         r = requests.post(url, json=body, timeout=10)
         r.raise_for_status()
@@ -395,7 +463,8 @@ def create_payment_request(
     description: str = 'پرداخت هزینه انتشار تبلیغ در کانال',
     payload: Optional[str] = None,
 ) -> Dict[str, Any]:
-    provider = _card_number()
+    del callback_url  # بله لینک بازگشت کارت‌به‌کارت ندارد؛ تأیید با successful_payment است
+    provider = _provider_token()
     inv_payload = payload or f'order-pay-{chat_id}-{amount}'
     if provider:
         inv = send_invoice(
@@ -404,18 +473,17 @@ def create_payment_request(
             description=description[:255],
             payload=inv_payload[:128],
             provider_token=provider,
-            prices=[{'label': 'مبلغ سفارش', 'amount': int(amount)}],
-            currency='IRR',
+            prices=[{'label': 'مبلغ سفارش', 'amount': toman_to_rial(int(amount))}],
         )
         if not inv.get('error') and inv.get('ok', True):
             return {'ok': True, 'invoice': inv, 'payment_url': None}
         inv_error = inv.get('error') or inv.get('description') or 'invoice_failed'
     else:
-        inv_error = 'BALE_CARD_NUMBER not configured'
+        inv_error = 'BALE_PROVIDER_TOKEN not configured'
     text = (
         f'{title}\n'
-        f'مبلغ قابل پرداخت: {amount} ریال\n'
-        f'لطفاً برای تکمیل پرداخت با پشتیبانی هماهنگ کنید.'
+        f'مبلغ قابل پرداخت: {int(amount):,} تومان\n'
+        f'توکن کیف‌پول بازو تنظیم نشده. پرداخت داخل مینی‌اپ پس از تنظیم BALE_PROVIDER_TOKEN فعال می‌شود.'
     )
     msg = send_message(str(chat_id), text)
     return {

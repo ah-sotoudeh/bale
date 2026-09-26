@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/wallet', api.api_wallet),
     path('api/bank', api.api_add_bank),
     path('api/payout', api.api_request_payout),
+    path('api/pay/invoice', api.api_invoice),
     path('api/banners', api_shop.api_banners),
     path('api/banners/rename', api_shop.api_banner_rename),
     path('api/cart', api_shop.api_cart),

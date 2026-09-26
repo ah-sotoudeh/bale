@@ -381,6 +381,26 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def api_invoice(request: HttpRequest) -> JsonResponse:
+    """شناسه createInvoiceLink برای openInvoice داخل مینی‌اپ."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    from orders.bale_pay import invoice_for_order
+    from orders.models import Order
+
+    order = Order.objects.filter(id=body.get('order_id'), customer=user).first()
+    if not order:
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+    result = invoice_for_order(order)
+    status = 200 if result.get('ok') else 400
+    return JsonResponse(result, status=status)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def api_request_payout(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
