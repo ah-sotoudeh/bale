@@ -737,3 +737,183 @@ def forward_message(
     to_chat_id: str, from_chat_id: str, message_id: int, message_date: int = 0
 ) -> Dict[str, Any]:
     return copy_message(to_chat_id, from_chat_id, message_id, message_date=message_date)
+
+
+def _named_int(value: Any, names: tuple, depth: int = 0) -> Optional[int]:
+    if depth > 5 or value is None:
+        return None
+    if hasattr(value, 'model_dump'):
+        try:
+            value = value.model_dump()
+        except Exception:
+            value = None
+    if isinstance(value, dict):
+        for name in names:
+            raw = value.get(name)
+            if isinstance(raw, bool):
+                continue
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                return int(raw)
+            if isinstance(raw, str) and raw.isdigit():
+                return int(raw)
+        for child in value.values():
+            found = _named_int(child, names, depth + 1)
+            if found is not None:
+                return found
+    elif isinstance(value, (list, tuple)) and depth < 3:
+        for child in value[:8]:
+            found = _named_int(child, names, depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _named_str(value: Any, names: tuple, depth: int = 0) -> str:
+    if depth > 4 or value is None:
+        return ''
+    if hasattr(value, 'model_dump'):
+        try:
+            value = value.model_dump()
+        except Exception:
+            return ''
+    if isinstance(value, dict):
+        for name in names:
+            raw = value.get(name)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        for child in value.values():
+            found = _named_str(child, names, depth + 1)
+            if found:
+                return found
+    return ''
+
+
+def _view_numbers(payload: Any) -> List[int]:
+    if payload is None:
+        return []
+    rows = payload if isinstance(payload, list) else [payload]
+    nums: List[int] = []
+    for row in rows:
+        n = _named_int(row, ('views', 'view', 'views_count', 'view_count', 'count'))
+        if n is not None and n >= 0:
+            nums.append(n)
+    return nums
+
+
+async def _read_views(client, peer_id: int, message_ids: List[int], messages: Optional[list] = None):
+    errors: List[str] = []
+    attempts = []
+    if messages:
+        attempts.append(lambda: client.get_messages_views(messages, peer_id))
+    if message_ids:
+        attempts.append(lambda: client.get_messages_views(peer_id, message_ids))
+        attempts.append(lambda: client.get_messages_views(chat_id=peer_id, message_ids=message_ids))
+    for call in attempts:
+        try:
+            return await call(), None
+        except Exception as e:
+            errors.append(f'{type(e).__name__}: {e}')
+    return None, '; '.join(errors)[:300]
+
+
+async def _read_full_group(client, peer_id: int):
+    errors: List[str] = []
+    for call in (
+        lambda: client.get_full_group(peer_id),
+        lambda: client.get_full_group(group_id=peer_id),
+    ):
+        try:
+            full = await call()
+            return full, None
+        except Exception as e:
+            errors.append(f'{type(e).__name__}: {e}')
+    return None, '; '.join(errors)[:300]
+
+
+def collect_channel_stats(channel_ref: str, limit: int = 30) -> Dict[str, Any]:
+    """اعضا از get_full_group و بازدید از تاریخچه + get_messages_views.
+
+    هر دو متد روی حساب کاربری لینک‌یار (aiobale) هستند، نه فرم مدیر و نه Bot API.
+    """
+
+    async def _fn(client):
+        resolved = await _resolve_peer(client, channel_ref)
+        if not resolved.get('ok'):
+            return {'ok': False, 'error': resolved.get('error') or 'resolve_failed', 'resolved': resolved}
+
+        peer_id = int(resolved['peer_id'])
+        access_hash = resolved.get('access_hash')
+        uname = str(channel_ref).lstrip('@') if not str(channel_ref).lstrip('-').isdigit() else ''
+        try:
+            await client.join_public_chat(peer_id)
+        except Exception as e:
+            logger.info('join before stats: %s', e)
+
+        full, group_error = await _read_full_group(client, peer_id)
+        members = _named_int(
+            full,
+            ('members_count', 'member_count', 'members', 'participants_count', 'users_count'),
+        )
+        about = _named_str(full, ('about', 'description', 'bio'))
+        title = resolved.get('title') or _named_str(full, ('title', 'name'))
+
+        raw = await _load_history_raw(client, peer_id, access_hash, limit=int(limit))
+        posts: List[Dict[str, Any]] = []
+        if raw.get('ok'):
+            for item in raw.get('items') or []:
+                parsed = _parse_raw_message_item(item, uname)
+                if not parsed:
+                    continue
+                posts.append(
+                    {
+                        'message_id': parsed['message_id'],
+                        'date': parsed.get('date'),
+                        'views': _named_int(item, ('views', 'view', 'views_count', 'view_count')),
+                        'forwards': _named_int(item, ('forwards', 'forward_count', 'forwards_count')) or 0,
+                    }
+                )
+
+        messages = None
+        try:
+            from aiobale.enums import ChatType
+
+            messages = await client.load_history(peer_id, ChatType.CHANNEL, limit=int(limit))
+        except Exception as e:
+            logger.info('load_history: %s', e)
+
+        ids = [int(p['message_id']) for p in posts if p.get('message_id')]
+        views_payload, views_error = await _read_views(client, peer_id, ids, messages if isinstance(messages, list) else None)
+        numbers = _view_numbers(views_payload)
+        if numbers:
+            if len(numbers) == 1 and posts:
+                for post in posts:
+                    if post.get('views') is None:
+                        post['views'] = numbers[0]
+            else:
+                for post, count in zip(posts, numbers):
+                    post['views'] = count
+                if len(numbers) > len(posts):
+                    for count in numbers[len(posts) :]:
+                        posts.append({'message_id': None, 'date': None, 'views': count, 'forwards': 0})
+
+        if members is None and not any(isinstance(p.get('views'), int) for p in posts):
+            return {
+                'ok': False,
+                'error': group_error or views_error or raw.get('error') or 'no_stats',
+                'peer_id': peer_id,
+                'group_error': group_error,
+                'views_error': views_error,
+            }
+
+        return {
+            'ok': True,
+            'peer_id': peer_id,
+            'title': title,
+            'about': about,
+            'members': members,
+            'posts': posts,
+            'group_error': group_error,
+            'views_error': views_error,
+        }
+
+    return _run(_with_client(_fn))

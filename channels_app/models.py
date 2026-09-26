@@ -42,6 +42,18 @@ class Channel(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(48)],
         help_text='ساعت یادآوری قبل از تبلیغ (فقط حالت دستی)',
     )
+    # آمار را لینک‌یار می‌نویسد؛ مدیر وارد نمی‌کند.
+    bale_peer_id = models.BigIntegerField(null=True, blank=True)
+    about = models.TextField(blank=True, default='')
+    language = models.CharField(max_length=16, blank=True, default='')
+    members_count = models.PositiveIntegerField(default=0)
+    avg_views = models.PositiveIntegerField(default=0)
+    daily_reach = models.PositiveIntegerField(default=0)
+    posts_per_day = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    citation_index = models.DecimalField(max_digits=8, decimal_places=3, default=0)
+    err_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    stats_updated_at = models.DateTimeField(null=True, blank=True)
+    stats_error = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -157,3 +169,25 @@ class AvailabilitySlot(models.Model):
         flag = 'free' if self.is_available else 'busy'
         label = self.group or self.channel
         return f'{label}: {self.start} - {self.end} ({flag})'
+
+
+class ChannelStatSnapshot(models.Model):
+    """یک برداشت لینک‌یار. تاریخچه برای نمودار روند اعضا و بازدید."""
+
+    channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name='stat_snapshots')
+    taken_at = models.DateTimeField()
+    members = models.PositiveIntegerField(default=0)
+    avg_views = models.PositiveIntegerField(default=0)
+    daily_reach = models.PositiveIntegerField(default=0)
+    posts = models.PositiveSmallIntegerField(default=0)
+    forwards = models.PositiveIntegerField(default=0)
+    source = models.CharField(max_length=16, default='linkyar')
+
+    class Meta:
+        ordering = ['taken_at']
+        indexes = [
+            models.Index(fields=['channel', 'taken_at'], name='stat_channel_taken_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.channel_id} @ {self.taken_at:%Y-%m-%d %H:%M}'

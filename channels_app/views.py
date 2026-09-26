@@ -5,6 +5,9 @@ from .models import Channel
 from .serializers import ChannelSerializer, AvailabilitySlotSerializer
 from integrations import bale_client
 from django.shortcuts import get_object_or_404
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelListView(generics.ListAPIView):
@@ -62,4 +65,44 @@ class RegisterChannelView(APIView):
             ch.name = info.get('title') or ch.name
         ch.manager = user
         ch.save()
+        try:
+            from integrations.channel_stats import refresh_channel
+
+            refresh_channel(ch)
+        except Exception:
+            logger.exception('stats after register failed')
         return Response({'ok': True, 'channel_id': ch.id, 'created': created})
+
+
+class ChannelStatsView(APIView):
+    """تاریخچهٔ برداشت لینک‌یار برای نمودار روند کانال."""
+
+    def get(self, request, pk):
+        channel = get_object_or_404(Channel, pk=pk)
+        snaps = list(channel.stat_snapshots.order_by('-taken_at')[:90])
+        snaps.reverse()
+        return Response(
+            {
+                'channel_id': channel.id,
+                'members': channel.members_count,
+                'avg_views': channel.avg_views,
+                'daily_reach': channel.daily_reach,
+                'posts_per_day': channel.posts_per_day,
+                'citation_index': channel.citation_index,
+                'err_percent': channel.err_percent,
+                'language': channel.language,
+                'about': channel.about,
+                'updated_at': channel.stats_updated_at,
+                'history': [
+                    {
+                        'at': snap.taken_at,
+                        'members': snap.members,
+                        'views': snap.avg_views,
+                        'daily_reach': snap.daily_reach,
+                        'posts': snap.posts,
+                        'forwards': snap.forwards,
+                    }
+                    for snap in snaps
+                ],
+            }
+        )

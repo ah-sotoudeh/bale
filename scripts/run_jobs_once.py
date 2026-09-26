@@ -26,6 +26,7 @@ from orders.publish import (  # noqa: E402
     publish_due_items,
 )
 from integrations import linkyar_client as ly  # noqa: E402
+from integrations.channel_stats import refresh_due_channels  # noqa: E402
 
 
 def main() -> None:
@@ -34,6 +35,7 @@ def main() -> None:
     print('publish', publish_due_items())
     if ly.user_token():
         print('delete', delete_expired_posts())
+        print('stats', refresh_due_channels())
     print('escalate', escalate_unconfirmed())
     # audit once per calendar day is handled inside if you call often — keep simple:
     print('audit', daily_admin_audit())
