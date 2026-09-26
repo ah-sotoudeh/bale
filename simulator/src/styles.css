@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f1419;
+  --color-header: #17212b;
+  --color-surface: #1a2332;
+  --color-fg: #e7ecf3;
+  --color-muted: #8b9bb4;
+  --color-link: #2aabee;
+  --color-on: #ffffff;
+  --color-ok: #3dd68c;
+  --color-danger: #f31260;
+  --color-line: #2a3548;
+  --font-sans: "Vazirmatn", Tahoma, system-ui, sans-serif;
+}
+
+[data-bale="dark"] {
+  --color-bg: #121417;
+  --color-header: #1a1f24;
+  --color-surface: #1c2128;
+  --color-fg: #f2f4f5;
+  --color-muted: #8b98a5;
+  --color-link: #3dcec0;
+  --color-on: #ffffff;
+  --color-ok: #3dd68c;
+  --color-danger: #ff6b6b;
+  --color-line: #2a3138;
+}
+
+[data-bale="light"] {
+  --color-bg: #ffffff;
+  --color-header: #ffffff;
+  --color-surface: #f4f4f5;
+  --color-fg: #1c1c1c;
+  --color-muted: #8e8e93;
+  --color-link: #008f7a;
+  --color-on: #ffffff;
+  --color-ok: #0f9f6e;
+  --color-danger: #e53935;
+  --color-line: #e6e6e8;
+}
+
+@layer base {
+  html,
+  body {
+    background: #0b0e11;
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.45;
+  }
+}
