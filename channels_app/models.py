@@ -148,6 +148,10 @@ class AvailabilitySlot(models.Model):
 
     class Meta:
         ordering = ['start']
+        indexes = [
+            models.Index(fields=['tariff', 'start'], name='slot_tariff_start_idx'),
+            models.Index(fields=['channel', 'start'], name='slot_channel_start_idx'),
+        ]
 
     def __str__(self):
         flag = 'free' if self.is_available else 'busy'

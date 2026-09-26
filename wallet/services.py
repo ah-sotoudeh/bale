@@ -7,7 +7,7 @@ import re
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -65,16 +65,28 @@ def credit(
     entry_type: str,
     ref: str = '',
     note: str = '',
+    idempotency_key: Optional[str] = None,
 ) -> WalletLedger:
     if amount == 0:
         raise ValueError('amount must be non-zero')
-    return WalletLedger.objects.create(
-        user=user,
-        amount=amount,
-        entry_type=entry_type,
-        ref=ref[:64],
-        note=note[:255],
-    )
+    key = (idempotency_key or '').strip() or None
+    if key:
+        existing = WalletLedger.objects.filter(idempotency_key=key).first()
+        if existing:
+            return existing
+    try:
+        return WalletLedger.objects.create(
+            user=user,
+            amount=amount,
+            entry_type=entry_type,
+            ref=ref[:64],
+            note=note[:255],
+            idempotency_key=key,
+        )
+    except IntegrityError:
+        if key:
+            return WalletLedger.objects.get(idempotency_key=key)
+        raise
 
 
 def credit_manager_for_execution(manager: User, price_toman: int, order_item_id: int) -> WalletLedger:
@@ -85,6 +97,7 @@ def credit_manager_for_execution(manager: User, price_toman: int, order_item_id:
         'earn',
         ref=f'item:{order_item_id}',
         note=f'اجرا آیتم #{order_item_id} خالص پس از {PLATFORM_FEE_PERCENT}%',
+        idempotency_key=f'earn:item:{order_item_id}',
     )
 
 
@@ -97,6 +110,7 @@ def credit_customer_refund(
         'refund',
         ref=f'item:{order_item_id}',
         note=reason[:255],
+        idempotency_key=f'refund:item:{order_item_id}',
     )
 
 
@@ -110,6 +124,7 @@ def apply_manager_penalty(manager: User, price_toman: int, order_item_id: int) -
         'penalty',
         ref=f'item:{order_item_id}',
         note=f'جریمه عدم انتشار آیتم #{order_item_id}',
+        idempotency_key=f'penalty:item:{order_item_id}',
     )
 
 
@@ -159,6 +174,7 @@ def can_request_payout(user: User) -> Tuple[bool, str]:
 def request_payout(
     user: User, bank: BankAccount, amount: Optional[int] = None
 ) -> Dict[str, Any]:
+    User.objects.select_for_update().get(pk=user.pk)
     ok, reason = can_request_payout(user)
     if not ok:
         return {'ok': False, 'error': reason}
@@ -171,7 +187,6 @@ def request_payout(
     if amount > avail:
         return {'ok': False, 'error': 'insufficient'}
 
-    credit(user, -amount, 'payout_lock', ref='payout:new', note='قفل درخواست تسویه')
     pr = PayoutRequest.objects.create(
         user=user,
         amount_toman=amount,
@@ -180,8 +195,13 @@ def request_payout(
         holder_name=bank.holder_name,
         status='pending',
     )
-    WalletLedger.objects.filter(user=user, ref='payout:new').order_by('-id').update(
-        ref=f'payout:{pr.id}'
+    credit(
+        user,
+        -amount,
+        'payout_lock',
+        ref=f'payout:{pr.id}',
+        note='قفل درخواست تسویه',
+        idempotency_key=f'payout:{pr.id}',
     )
     return {'ok': True, 'payout': pr}
 

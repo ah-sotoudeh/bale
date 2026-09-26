@@ -21,7 +21,7 @@ from channels_app.models import Channel, ChannelGroup, Tariff
 from integrations import bale_client as bc
 from orders.availability import mark_external_busy
 from orders.models import OrderItem
-from users.models import BotSession, User
+from users.models import BotSession, User, get_bot_session
 from wallet import services as ws
 from wallet.models import BankAccount, PayoutRequest
 
@@ -36,10 +36,7 @@ JALALI_DATE = re.compile(r'^\s*(\d{3,4})[\-/](\d{1,2})[\-/](\d{1,2})\s*$')
 
 
 def _sess(bale_user_id: str) -> BotSession:
-    s, _ = BotSession.objects.get_or_create(
-        bale_user_id=str(bale_user_id), defaults={'state': 'idle', 'data': {}}
-    )
-    return s
+    return get_bot_session(bale_user_id)
 
 
 def _save(sess: BotSession, state: Optional[str] = None, **updates) -> None:

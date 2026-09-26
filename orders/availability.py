@@ -12,10 +12,10 @@ from orders.models import OrderItem
 
 ACTIVE_ORDER_STATUSES = (
     'draft',
-    'pending',
     'waiting_managers',
     'waiting_customer_confirm',
     'waiting_payment',
+    'paid',
     'completed',
 )
 ACTIVE_ITEM_STATUSES = ('cart', 'pending', 'approved', 'edited')
@@ -26,7 +26,7 @@ MANUAL_BUSY_NOTE = 'رزرو خارج از سیستم (پنل مدیر)'
 def effective_window(item: OrderItem) -> Tuple[datetime, datetime]:
     start = item.manager_edited_start or item.requested_start
     if item.manager_edited_start is not None:
-        hours = item.tariff.duration_hours if item.tariff_id else 0
+        hours = item.booked_duration()
         end = start + timedelta(hours=hours)
     else:
         end = item.requested_end
@@ -185,11 +185,13 @@ def clear_manual_busy_slot(slot_id: int, tariff: Tariff) -> bool:
 
 def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
     """Block only this tariff's slot on the given local day (not neighboring days)."""
+    from orders.slots import SlotConflict, hold_manual_day
+
     hour = tariff.start_hour if tariff.start_hour is not None else 0
     duration = max(1, int(tariff.duration_hours or 1))
     start = timezone.make_aware(datetime.combine(day, dtime(hour=hour, minute=0, second=0)))
     end = start + timedelta(hours=duration)
-    return mark_external_busy(
+    slot = mark_external_busy(
         start,
         end,
         channel=tariff.channel if not tariff.group_id else None,
@@ -197,3 +199,7 @@ def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
         tariff=tariff,
         note=MANUAL_BUSY_NOTE,
     )
+    if not hold_manual_day(tariff, day, slot):
+        slot.delete()
+        raise SlotConflict()
+    return slot

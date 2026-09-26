@@ -114,7 +114,7 @@ def process_manager_response(
         parsed = parse_datetime(new_start)
         if not parsed:
             return {'ok': False, 'error': 'invalid_new_start'}
-        new_end = parsed + timedelta(hours=item.tariff.duration_hours)
+        new_end = parsed + timedelta(hours=item.booked_duration())
         if has_slot_conflict(
             item.tariff, parsed, new_end, exclude_item_id=item.id, channel=item.channel
         ):
@@ -127,7 +127,7 @@ def process_manager_response(
             parsed = parse_datetime(new_start)
             if parsed:
                 start = parsed
-                end = parsed + timedelta(hours=item.tariff.duration_hours)
+                end = parsed + timedelta(hours=item.booked_duration())
         if has_slot_conflict(
             item.tariff, start, end, exclude_item_id=item.id, channel=item.channel
         ):
@@ -136,7 +136,14 @@ def process_manager_response(
     item.manager_status = (
         'approved' if action == 'approve' else ('rejected' if action == 'reject' else 'edited')
     )
-    item.save()
+    try:
+        item.save()
+    except Exception as exc:
+        from orders.slots import SlotConflict
+
+        if isinstance(exc, SlotConflict):
+            return {'ok': False, 'error': 'slot_conflict'}
+        raise
 
     payload = {'order_item_id': order_item_id, 'manager_bale_id': manager_bale_id, 'action': action}
     if new_start:

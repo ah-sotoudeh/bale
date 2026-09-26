@@ -23,10 +23,31 @@ class User(AbstractUser):
 class BotSession(models.Model):
     """وضعیت گفتگوی چندمرحله‌ای کاربر با ربات"""
 
-    bale_user_id = models.CharField(max_length=64, unique=True, db_index=True)
+    bale_user_id = models.CharField(max_length=255, unique=True, db_index=True)
+    user = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bot_sessions',
+    )
     state = models.CharField(max_length=64, default='idle')
     data = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f'{self.bale_user_id}:{self.state}'
+
+
+def get_bot_session(bale_user_id: str) -> BotSession:
+    """یک نشست برای هر شناسه بله، و در صورت وجود کاربر، وصل به همان ردیف User."""
+    uid = str(bale_user_id)[:255]
+    user = User.objects.filter(bale_user_id=uid).first()
+    sess, _ = BotSession.objects.get_or_create(
+        bale_user_id=uid,
+        defaults={'state': 'idle', 'data': {}, 'user': user},
+    )
+    if user and sess.user_id != user.id:
+        sess.user = user
+        sess.save(update_fields=['user'])
+    return sess

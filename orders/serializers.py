@@ -65,16 +65,26 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             tariff = it['tariff']
             price = tariff.price
             channel = it['channel']
-            OrderItem.objects.create(
-                order=order,
-                channel=channel,
-                tariff=tariff,
-                requested_start=it['requested_start'],
-                requested_end=it['requested_end'],
-                price=price,
-                manager=channel.manager,
-                banner_message_id=it.get('banner_message_id'),
-            )
+            channel_ids = [channel.id] if channel else []
+            try:
+                OrderItem.objects.create(
+                    order=order,
+                    channel=channel,
+                    tariff=tariff,
+                    requested_start=it['requested_start'],
+                    requested_end=it['requested_end'],
+                    price=price,
+                    manager=channel.manager,
+                    banner_message_id=it.get('banner_message_id'),
+                    duration_hours=tariff.duration_hours,
+                    booked_channel_ids=channel_ids,
+                )
+            except Exception as exc:
+                from orders.slots import SlotConflict
+
+                if isinstance(exc, SlotConflict):
+                    raise serializers.ValidationError('slot_conflict') from exc
+                raise
             total += price
         order.total_amount = total
         order.save()

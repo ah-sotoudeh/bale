@@ -158,7 +158,14 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
     day = _parse_day(body)
     if not day:
         return _err('bad_date')
-    slot = mark_tariff_day_busy(t, day)
+    try:
+        slot = mark_tariff_day_busy(t, day)
+    except Exception as exc:
+        from orders.slots import SlotConflict
+
+        if isinstance(exc, SlotConflict):
+            return _err('slot_conflict', 409)
+        raise
     return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
 
 

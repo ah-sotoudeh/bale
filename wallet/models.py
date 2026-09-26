@@ -41,10 +41,14 @@ class WalletLedger(models.Model):
     entry_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     ref = models.CharField(max_length=64, blank=True, default='')
     note = models.CharField(max_length=255, blank=True, default='')
+    idempotency_key = models.CharField(max_length=80, null=True, blank=True, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-id']
+        indexes = [
+            models.Index(fields=['user', 'id'], name='ledger_user_id_idx'),
+        ]
 
     def __str__(self):
         return f'{self.user_id} {self.entry_type} {self.amount}'
@@ -74,6 +78,12 @@ class PayoutRequest(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status'], name='payout_status_idx'),
+            models.Index(fields=['user', 'status'], name='payout_user_status_idx'),
+        ]
 
     def __str__(self):
         return f'Payout #{self.id} {self.amount_toman}t {self.status}'

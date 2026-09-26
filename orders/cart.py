@@ -12,7 +12,8 @@ from django.utils import timezone
 from channels_app.models import Tariff
 from integrations import bale_client as bc
 from orders.availability import has_slot_conflict
-from orders.models import ManagerResponse, Order, OrderItem
+from orders.models import CustomerDraft, ManagerResponse, Order, OrderItem
+from orders.slots import SlotConflict
 from users.models import User
 
 logger = logging.getLogger(__name__)
@@ -20,15 +21,19 @@ logger = logging.getLogger(__name__)
 MANAGER_HOURS = int(os.environ.get('MANAGER_RESPONSE_HOURS', '12'))
 
 
+@transaction.atomic
 def get_or_create_draft(customer: User) -> Order:
-    order = (
-        Order.objects.filter(customer=customer, status='draft')
-        .order_by('-id')
-        .first()
-    )
-    if order:
-        return order
-    return Order.objects.create(customer=customer, status='draft')
+    User.objects.select_for_update().get(pk=customer.pk)
+    lock = CustomerDraft.objects.select_related('order').filter(customer=customer).first()
+    if lock:
+        if lock.order.status == 'draft':
+            return lock.order
+        lock.delete()
+    order = Order.objects.filter(customer=customer, status='draft').order_by('-id').first()
+    if order is None:
+        order = Order.objects.create(customer=customer, status='draft')
+    CustomerDraft.objects.create(customer=customer, order=order)
+    return order
 
 
 def clear_draft(customer: User) -> None:
@@ -50,7 +55,11 @@ def add_to_cart(
     start, end = slot_for_day(tariff, day)
     channel = tariff.channel
     if tariff.group_id:
+        channel_ids = list(tariff.group.channels.values_list('id', flat=True))
         channel = tariff.group.channels.order_by('id').first()
+    else:
+        channel_ids = [tariff.channel_id] if tariff.channel_id else []
+        channel = tariff.channel
     if not channel:
         return {'ok': False, 'error': 'no_channel'}
 
@@ -59,16 +68,21 @@ def add_to_cart(
 
     order = get_or_create_draft(customer)
 
-    item = OrderItem.objects.create(
-        order=order,
-        channel=channel,
-        tariff=tariff,
-        requested_start=start,
-        requested_end=end,
-        price=tariff.price,
-        manager=channel.manager or (tariff.group.manager if tariff.group_id else None),
-        manager_status='cart',
-    )
+    try:
+        item = OrderItem.objects.create(
+            order=order,
+            channel=channel,
+            tariff=tariff,
+            requested_start=start,
+            requested_end=end,
+            price=tariff.price,
+            manager=channel.manager or (tariff.group.manager if tariff.group_id else None),
+            manager_status='cart',
+            duration_hours=tariff.duration_hours,
+            booked_channel_ids=channel_ids,
+        )
+    except SlotConflict:
+        return {'ok': False, 'error': 'slot_conflict'}
     order.recompute_total()
     return {'ok': True, 'order': order, 'item': item}
 
@@ -124,6 +138,7 @@ def checkout(order: Order) -> Dict[str, Any]:
     order.managers_deadline = deadline
     order.recompute_total()
     order.save()
+    CustomerDraft.objects.filter(order=order).delete()
 
     for it in items:
         it.manager_status = 'pending'
@@ -212,14 +227,17 @@ def process_manager_item(
     elif action == 'edit':
         if not new_start:
             return {'ok': False, 'error': 'need_new_start'}
-        new_end = new_start + timedelta(hours=item.tariff.duration_hours)
+        new_end = new_start + timedelta(hours=item.booked_duration())
         if has_slot_conflict(
             item.tariff, new_start, new_end, channel=item.channel, exclude_item_id=item.id
         ):
             return {'ok': False, 'error': 'slot_conflict'}
         item.manager_edited_start = new_start
         item.manager_status = 'edited'
-        item.save()
+        try:
+            item.save()
+        except SlotConflict:
+            return {'ok': False, 'error': 'slot_conflict'}
         ManagerResponse.objects.create(
             order_item=item,
             manager=manager,
@@ -274,10 +292,11 @@ def customer_confirm_edit(item_id: int, customer_bale_id: str, accept: bool) -> 
         item.manager_status = 'approved'
         if item.manager_edited_start:
             item.requested_start = item.manager_edited_start
-            item.requested_end = item.manager_edited_start + timedelta(
-                hours=item.tariff.duration_hours
-            )
-        item.save()
+            item.requested_end = item.manager_edited_start + timedelta(hours=item.booked_duration())
+        try:
+            item.save()
+        except SlotConflict:
+            return {'ok': False, 'error': 'slot_conflict'}
     else:
         item.manager_status = 'customer_declined'
         item.save()

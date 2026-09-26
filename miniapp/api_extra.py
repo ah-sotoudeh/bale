@@ -47,7 +47,14 @@ def _set_item_status(request: HttpRequest, status: str) -> JsonResponse:
     if it.manager_status != 'pending':
         return JsonResponse({'ok': False, 'error': 'not_pending'}, status=400)
     it.manager_status = status
-    it.save(update_fields=['manager_status'])
+    try:
+        it.save(update_fields=['manager_status'])
+    except Exception as exc:
+        from orders.slots import SlotConflict
+
+        if isinstance(exc, SlotConflict):
+            return JsonResponse({'ok': False, 'error': 'slot_conflict'}, status=409)
+        raise
     return JsonResponse({'ok': True, 'item_id': it.id, 'manager_status': it.manager_status})
 
 

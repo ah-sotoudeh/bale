@@ -23,7 +23,7 @@ from orders.publish import (
     verify_manager_published,
 )
 from orders.services import process_payment_paid
-from users.models import BotSession, User
+from users.models import BotSession, User, get_bot_session
 from wallet.services import (
     build_payout_batch,
     is_operator,
@@ -192,9 +192,7 @@ def handle_callback_query(cq: dict) -> None:
     if data.startswith('editask:'):
         item_id = int(data.split(':')[1])
         _answer(cq_id, 'date')
-        sess, _ = BotSession.objects.get_or_create(
-            bale_user_id=bale_uid, defaults={'state': 'idle', 'data': {}}
-        )
+        sess = get_bot_session(bale_uid)
         d = dict(sess.data or {})
         d['edit_item_id'] = item_id
         sess.state = 'mgr_edit_date'

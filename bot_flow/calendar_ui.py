@@ -296,7 +296,16 @@ def handle_free_callback(
         except ValueError:
             bc.send_message(str(chat_id), 'تاریخ نامعتبر.')
             return True
-        slot = mark_tariff_day_busy(t, day)
+        try:
+            slot = mark_tariff_day_busy(t, day)
+        except Exception as exc:
+            from orders.slots import SlotConflict
+
+            if isinstance(exc, SlotConflict):
+                bc.send_message(str(chat_id), 'این نوبت پر است.')
+                show_tariff_calendar(chat_id, t)
+                return True
+            raise
         bc.send_message(
             str(chat_id),
             f'🔒 روز {format_jalali(day)} برای «{t.name}» به‌عنوان نوبت دستی پر شد '

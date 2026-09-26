@@ -98,6 +98,12 @@ class Order(models.Model):
     managers_deadline = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['customer', 'status'], name='order_customer_status_idx'),
+            models.Index(fields=['status'], name='order_status_idx'),
+        ]
+
     def __str__(self):
         return f'Order #{self.id} by {self.customer}'
 
@@ -155,6 +161,16 @@ class OrderItem(models.Model):
     customer_confirm_deadline = models.DateTimeField(null=True, blank=True)
     executed_at = models.DateTimeField(null=True, blank=True)
     channel_message_id = models.TextField(null=True, blank=True)
+    duration_hours = models.PositiveIntegerField(default=0)
+    booked_channel_ids = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['manager_status'], name='item_mgr_status_idx'),
+            models.Index(fields=['execution_status'], name='item_exec_status_idx'),
+            models.Index(fields=['tariff', 'requested_start'], name='item_tariff_start_idx'),
+            models.Index(fields=['manager', 'manager_status'], name='item_manager_status_idx'),
+        ]
 
     def __str__(self):
         return f'Item #{self.id} of Order #{self.order_id}'
@@ -162,6 +178,67 @@ class OrderItem(models.Model):
     @property
     def effective_start(self):
         return self.manager_edited_start or self.requested_start
+
+    def booked_duration(self) -> int:
+        if self.duration_hours:
+            return int(self.duration_hours)
+        if self.tariff_id:
+            return int(self.tariff.duration_hours or 0)
+        return 0
+
+    def save(self, *args, **kwargs):
+        from django.db import transaction
+
+        from orders.slots import SlotConflict, sync_item_lock
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if not sync_item_lock(self):
+                raise SlotConflict()
+
+
+class CustomerDraft(models.Model):
+    """یک سبد باز برای هر مشتری. قید یکتا روی MySQL هم اعمال می‌شود."""
+
+    customer = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='open_draft'
+    )
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='draft_lock')
+
+
+class SlotReservation(models.Model):
+    """قفل روزِ تعرفه. وجود ردیف یعنی آن روز فروخته شده یا دستی پر است."""
+
+    tariff = models.ForeignKey(
+        'channels_app.Tariff', on_delete=models.CASCADE, related_name='reservations'
+    )
+    slot_date = models.DateField()
+    order_item = models.OneToOneField(
+        OrderItem,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='slot_lock',
+    )
+    availability = models.OneToOneField(
+        'channels_app.AvailabilitySlot',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='slot_lock',
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['tariff', 'slot_date'], name='uniq_tariff_slot_date'),
+            models.CheckConstraint(
+                check=(
+                    models.Q(order_item__isnull=False, availability__isnull=True)
+                    | models.Q(order_item__isnull=True, availability__isnull=False)
+                ),
+                name='slot_reservation_one_owner',
+            ),
+        ]
 
 
 class ManagerResponse(models.Model):
