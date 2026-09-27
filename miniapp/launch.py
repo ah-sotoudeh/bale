@@ -9,7 +9,7 @@ from django.conf import settings
 from integrations import bale_client as bc
 
 
-def miniapp_url(path: str | None = None) -> str:
+def miniapp_url(path: str | None = None, role: str | None = None) -> str:
     base = (
         getattr(settings, 'MINIAPP_BASE_URL', '')
         or os.environ.get('MINIAPP_BASE_URL', '')
@@ -19,15 +19,25 @@ def miniapp_url(path: str | None = None) -> str:
     path = path or getattr(settings, 'MINIAPP_PATH', '/miniapp/')
     if not path.startswith('/'):
         path = '/' + path
-    return base + path
+    url = base + path
+    if role in ('manager', 'customer', 'operator'):
+        sep = '&' if '?' in url else '?'
+        url = f'{url}{sep}role={role}'
+    return url
 
 
 def manager_miniapp_url() -> str:
-    return miniapp_url(getattr(settings, 'MINIAPP_MANAGER_PATH', '/miniapp/'))
+    return miniapp_url(
+        getattr(settings, 'MINIAPP_MANAGER_PATH', '/miniapp/'),
+        role='manager',
+    )
 
 
-def open_miniapp_keyboard(label: str = 'دفتر کار لینک‌بانک') -> Optional[Dict[str, Any]]:
-    url = manager_miniapp_url()
+def open_miniapp_keyboard(
+    label: str = 'دفتر کار لینک‌بانک',
+    role: str | None = None,
+) -> Optional[Dict[str, Any]]:
+    url = miniapp_url(role=role) if role else manager_miniapp_url()
     if not url:
         return None
     return bc.inline_keyboard([
@@ -36,8 +46,12 @@ def open_miniapp_keyboard(label: str = 'دفتر کار لینک‌بانک') ->
     ])
 
 
-def send_miniapp_entry(chat_id: str, text: str = 'دفتر کار لینک‌بانک:') -> Dict[str, Any]:
-    kb = open_miniapp_keyboard()
+def send_miniapp_entry(
+    chat_id: str,
+    text: str = 'دفتر کار لینک‌بانک:',
+    role: str | None = 'manager',
+) -> Dict[str, Any]:
+    kb = open_miniapp_keyboard(role=role)
     if not kb:
         return bc.send_message(
             str(chat_id),
