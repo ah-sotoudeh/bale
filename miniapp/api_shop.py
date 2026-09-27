@@ -262,6 +262,22 @@ def api_banner_rename(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['POST'])
+def api_banner_hide(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    b = CustomerBanner.objects.filter(id=body.get('banner_id'), customer=user, is_active=True).first()
+    if not b:
+        return _err('not_found', 404)
+    b.is_active = False
+    b.save(update_fields=['is_active'])
+    return JsonResponse({'ok': True})
+
+
+@csrf_exempt
 @require_http_methods(['GET'])
 def api_cart(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
@@ -276,6 +292,7 @@ def api_cart(request: HttpRequest) -> JsonResponse:
             start = timezone.localtime(it.requested_start)
             items.append({
                 'id': it.id,
+                'tariff_id': it.tariff_id,
                 'owner': it.tariff.group.name if it.tariff.group_id else (it.channel.name if it.channel else ''),
                 'name': it.tariff.name,
                 'date': start.date().isoformat(),
@@ -387,7 +404,8 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'id': o.id,
             'status': o.status,
             'total': o.total_amount,
-            'created': format_jalali(timezone.localtime(o.created_at).date()) if o.created_at else '',
+            'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
+            'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
         })
     return JsonResponse({'ok': True, 'orders': rows})
 

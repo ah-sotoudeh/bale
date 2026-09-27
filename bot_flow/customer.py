@@ -170,23 +170,42 @@ def _media_kind(message: dict) -> str:
     return 'unknown'
 
 
+def _folded(value: str) -> str:
+    return (
+        (value or '')
+        .replace('\u200c', '')
+        .replace('\u200d', '')
+        .replace(' ', '')
+        .replace('_', '')
+        .replace('-', '')
+        .lower()
+    )
+
+
+def _is_linkbank_chat(uname: str, title: str) -> bool:
+    lb = _folded(linkbank_username().lstrip('@'))
+    folded_name = _folded(uname)
+    folded_title = _folded(title)
+    if folded_name and (folded_name == lb or folded_name in ('linkbank', 'linktest')):
+        return True
+    if lb and lb in folded_title:
+        return True
+    return 'لینکبانک' in folded_title or 'linkbank' in folded_title or 'linktest' in folded_title
+
+
 def _forward_meta(message: dict) -> Tuple[bool, str, str]:
-    lb = linkbank_username().lstrip('@').lower()
     fwd_chat = message.get('forward_from_chat') or {}
     if isinstance(fwd_chat, dict) and fwd_chat:
-        uname = (fwd_chat.get('username') or '').lower()
-        title = (fwd_chat.get('title') or '').lower()
+        uname = fwd_chat.get('username') or ''
+        title = fwd_chat.get('title') or ''
         cid = str(fwd_chat.get('id') or '')
         mid = str(message.get('forward_from_message_id') or message.get('forward_message_id') or '')
-        if uname == lb or uname in ('linkbank', 'linktest'):
-            return True, cid or linkbank_username(), mid
-        if 'لینک بانک' in title or 'linkbank' in title.replace(' ', '') or 'linktest' in title.replace(' ', ''):
+        if _is_linkbank_chat(uname, title):
             return True, cid or linkbank_username(), mid
     origin = message.get('forward_origin') or {}
-    if isinstance(origin, dict):
+    if isinstance(origin, dict) and origin:
         chat = origin.get('chat') or {}
-        uname = (chat.get('username') or '').lower()
-        if uname == lb or uname in ('linkbank', 'linktest'):
+        if _is_linkbank_chat(chat.get('username') or '', chat.get('title') or origin.get('sender_user_name') or ''):
             return True, str(chat.get('id') or linkbank_username()), str(origin.get('message_id') or '')
     return False, '', ''
 
@@ -204,6 +223,13 @@ def _apply_banner_to_draft(
     banner: Optional[CustomerBanner] = None,
     title: str = '',
 ) -> CustomerBanner:
+    if banner is None and from_linkbank and linkbank_message_id:
+        banner = CustomerBanner.objects.filter(
+            customer=user,
+            is_active=True,
+            from_linkbank=True,
+            linkbank_message_id=str(linkbank_message_id),
+        ).first()
     if banner is None:
         banner = CustomerBanner.objects.create(
             customer=user,
@@ -226,14 +252,6 @@ def _apply_banner_to_draft(
 
 def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> bool:
     sess = get_session(bale_user_id)
-    if sess.state not in (STATE_CUST_BANNER, STATE_CUST_BANNER_HUB, STATE_CUST_HOME):
-        # فقط وقتی منتظر بنریم یا در هاب
-        if sess.state not in (STATE_CUST_BANNER,):
-            return False
-
-    if sess.state not in (STATE_CUST_BANNER, STATE_CUST_BANNER_HUB):
-        return False
-
     caption = message.get('caption') or message.get('text') or ''
     has_media = bool(message.get('photo') or message.get('video') or message.get('document'))
     is_fwd = bool(
@@ -242,6 +260,10 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         or message.get('forward_origin')
         or message.get('forward_from')
     )
+    waiting = sess.state in (STATE_CUST_BANNER, STATE_CUST_BANNER_HUB)
+    if not is_fwd and not waiting:
+        return False
+
     if not has_media and not caption and not is_fwd:
         bc.send_message(str(chat_id), 'بنر باید عکس/ویدیو باشد یا از کانال مرجع بازارسال شود.')
         return True
@@ -269,12 +291,26 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
     sess.save(update_fields=['data'])
 
     if from_lb:
+        banner = _apply_banner_to_draft(
+            user,
+            storage_chat_id=str(chat_id),
+            storage_message_id=str(msg_id),
+            caption=caption,
+            from_linkbank=True,
+            linkbank_chat_id=str(lb_chat or linkbank_username()),
+            linkbank_message_id=str(lb_mid or ''),
+            media_kind=_media_kind(message),
+            title=(caption or '').strip().split('\n')[0][:120],
+        )
+        d = dict(sess.data or {})
+        d['pending_banner'] = {'banner_id': banner.id}
+        sess.data = d
+        sess.save(update_fields=['data'])
         save_session(sess, STATE_CUST_BANNER_NAME, role='customer')
         bc.send_message(
             str(chat_id),
-            '✅ بنر از کانال مرجع دریافت شد.\n'
-            'یک نام کوتاه برای این بنر بفرستید (مثلاً: نوروز ۱۴۰۵ یا محصول X).\n'
-            'برای رد شدن از نام، فقط «.» بفرستید.',
+            f'✅ بنر «{banner.display_title()}» از کانال مرجع ذخیره شد و در بنرهای شماست.\n'
+            'اگر نام دیگری می‌خواهید همین حالا بفرستید. برای ماندن با همین نام، «.» بفرستید.',
         )
         return True
 
@@ -313,17 +349,28 @@ def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
     name = (title or '').strip()
     if name in ('.', '-', 'بدون نام', 'skip'):
         name = ''
-    banner = _apply_banner_to_draft(
-        user,
-        storage_chat_id=pending['chat_id'],
-        storage_message_id=pending['message_id'],
-        caption=pending.get('caption') or '',
-        from_linkbank=bool(pending.get('from_linkbank')),
-        linkbank_chat_id=pending.get('linkbank_chat_id') or '',
-        linkbank_message_id=pending.get('linkbank_message_id') or '',
-        media_kind=pending.get('media_kind') or '',
-        title=name[:120],
-    )
+    banner_id = pending.get('banner_id')
+    if banner_id:
+        banner = CustomerBanner.objects.filter(id=banner_id, customer=user, is_active=True).first()
+        if not banner:
+            bc.send_message(str(chat_id), 'بنر پیدا نشد.')
+            open_customer_home(chat_id, bale_user_id)
+            return
+        if name:
+            banner.title = name[:120]
+            banner.save(update_fields=['title'])
+    else:
+        banner = _apply_banner_to_draft(
+            user,
+            storage_chat_id=pending['chat_id'],
+            storage_message_id=pending['message_id'],
+            caption=pending.get('caption') or '',
+            from_linkbank=bool(pending.get('from_linkbank')),
+            linkbank_chat_id=pending.get('linkbank_chat_id') or '',
+            linkbank_message_id=pending.get('linkbank_message_id') or '',
+            media_kind=pending.get('media_kind') or '',
+            title=name[:120],
+        )
     d = dict(sess.data or {})
     d.pop('pending_banner', None)
     sess.data = d

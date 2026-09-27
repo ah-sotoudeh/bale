@@ -30,6 +30,7 @@ urlpatterns = [
     path('api/pay/invoice', api.api_invoice),
     path('api/banners', api_shop.api_banners),
     path('api/banners/rename', api_shop.api_banner_rename),
+    path('api/banners/hide', api_shop.api_banner_hide),
     path('api/cart', api_shop.api_cart),
     path('api/cart/add', api_shop.api_cart_add),
     path('api/cart/remove', api_shop.api_cart_remove),

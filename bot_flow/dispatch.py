@@ -336,7 +336,13 @@ def handle_update(update: dict) -> None:
     except Exception:
         log.exception('mgr edit date')
 
-    if msg.get('photo') or msg.get('video') or msg.get('document'):
+    is_forward = bool(
+        msg.get('forward_date')
+        or msg.get('forward_from_chat')
+        or msg.get('forward_origin')
+        or msg.get('forward_from')
+    )
+    if msg.get('photo') or msg.get('video') or msg.get('document') or is_forward:
         try:
             if cust.handle_banner_message(chat_id, bale_uid, msg):
                 return
