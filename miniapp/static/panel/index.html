@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-bale="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <title>لینک‌ساز</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
+    <script>
+      window.__MEDIA_BASE = "/miniapp/media";
+      function paintBale() {
+        var w = window.Bale && window.Bale.WebApp;
+        if (!w || w.__linkbankReady) return !!w;
+        w.__linkbankReady = true;
+        try {
+          w.ready();
+        } catch (e) {}
+        function paint() {
+          var scheme = w.colorScheme === "light" ? "light" : "dark";
+          document.documentElement.setAttribute("data-bale", scheme);
+        }
+        paint();
+        try {
+          w.onEvent("themeChanged", paint);
+        } catch (e) {}
+        return true;
+      }
+      document.addEventListener("DOMContentLoaded", paintBale);
+      window.addEventListener("load", paintBale);
+    </script>
+    <script src="https://tapi.bale.ai/miniapp.js?3" defer></script>
+    <script type="module" crossorigin src="/miniapp/assets/index-DjIJl0cr.js"></script>
+    <link rel="stylesheet" crossorigin href="/miniapp/assets/index-gYqu5hvF.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
