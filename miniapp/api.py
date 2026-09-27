@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, Optional
 
@@ -39,6 +40,38 @@ def _init_from_request(request: HttpRequest) -> str:
         or request.GET.get('initData')
         or ''
     )
+
+
+def _can_switch_roles(bale_user_id: str) -> bool:
+    """سوییچ مدیر/مشتری/پشتیبانی فقط برای حساب مالک."""
+    uid = str(bale_user_id or '').strip()
+    if not uid:
+        return False
+    if ws.is_operator(uid):
+        return True
+    extra = os.environ.get('MINIAPP_ROLE_SWITCH_IDS', '')
+    allowed = {part.strip() for part in extra.split(',') if part.strip()}
+    return uid in allowed
+
+
+def _channel_payload(ch: Channel) -> Dict[str, Any]:
+    return {
+        'id': ch.id,
+        'name': ch.name,
+        'link': ch.link,
+        'publish_mode': ch.publish_mode,
+        'publish_mode_label': ch.publish_mode_label,
+        'bot_is_admin': ch.bot_is_admin,
+        'linkyar_is_admin': ch.linkyar_is_admin,
+        'manual_remind_hours': ch.manual_remind_hours,
+        'tariff_count': ch.tariffs.count(),
+        'members_count': getattr(ch, 'members_count', 0) or 0,
+        'avg_views': getattr(ch, 'avg_views', 0) or 0,
+        'err_percent': str(getattr(ch, 'err_percent', '') or ''),
+        'language': getattr(ch, 'language', '') or '',
+        'about': getattr(ch, 'about', '') or '',
+        'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
+    }
 
 
 def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonResponse]]:
@@ -91,6 +124,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
         },
         'wallet': br,
         'is_operator': is_op,
+        'can_switch_roles': _can_switch_roles(user.bale_user_id or ''),
         'channel_count': ch_count,
         'can_be_manager': True,
         'roles': {
@@ -109,24 +143,7 @@ def api_channels(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    channels = []
-    for ch in Channel.objects.filter(manager=user).order_by('id'):
-        channels.append({
-            'id': ch.id,
-            'name': ch.name,
-            'link': ch.link,
-            'publish_mode': ch.publish_mode,
-            'publish_mode_label': ch.publish_mode_label,
-            'bot_is_admin': ch.bot_is_admin,
-            'linkyar_is_admin': ch.linkyar_is_admin,
-            'tariff_count': ch.tariffs.count(),
-            'members_count': getattr(ch, 'members_count', 0) or 0,
-            'avg_views': getattr(ch, 'avg_views', 0) or 0,
-            'err_percent': str(getattr(ch, 'err_percent', '') or ''),
-            'language': getattr(ch, 'language', '') or '',
-            'about': getattr(ch, 'about', '') or '',
-            'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
-        })
+    channels = [_channel_payload(ch) for ch in Channel.objects.filter(manager=user).order_by('id')]
     groups = []
     for g in ChannelGroup.objects.filter(manager=user).order_by('id'):
         groups.append({
@@ -137,6 +154,85 @@ def api_channels(request: HttpRequest) -> JsonResponse:
             'channel_ids': list(g.channels.values_list('id', flat=True)),
         })
     return JsonResponse({'ok': True, 'channels': channels, 'groups': groups})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_add_channel(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    from bot_flow.links import normalize_channel_ref
+
+    link = normalize_channel_ref(str(body.get('link') or ''))
+    name = str(body.get('name') or '').strip()[:200]
+    if not link or link == '@':
+        return JsonResponse({'ok': False, 'error': 'پیوند کانال را بنویسید.'}, status=400)
+
+    info: Dict[str, Any] = {}
+    try:
+        from integrations.bale_client import get_channel_info
+
+        info = get_channel_info(link)
+    except Exception:
+        logger.exception('channel lookup failed')
+        info = {'error': 'lookup_failed'}
+
+    title = str(info.get('title') or '').strip()
+    if title and title != '(no title)':
+        name = name or title
+    if not name:
+        name = link.lstrip('@') or link
+
+    bio = str(info.get('bio') or info.get('description') or '')
+    owner = _can_switch_roles(user.bale_user_id or '')
+    proved = bool(user.bale_user_id) and str(user.bale_user_id) in bio
+    if info.get('error') and not owner:
+        return JsonResponse({'ok': False, 'error': 'کانال از بله خوانده نشد. پیوند را بررسی کنید.'}, status=400)
+    if not proved and not owner:
+        return JsonResponse(
+            {'ok': False, 'error': 'شناسهٔ عددی حساب بلهٔ شما باید در توضیحات کانال باشد.'},
+            status=400,
+        )
+
+    existing = Channel.objects.filter(link__iexact=link).first()
+    if existing and existing.manager_id and existing.manager_id != user.id and not owner:
+        return JsonResponse({'ok': False, 'error': 'این کانال برای مدیر دیگری ثبت شده.'}, status=403)
+    if existing:
+        existing.manager = user
+        existing.name = name
+        if info.get('id'):
+            try:
+                existing.bale_peer_id = int(info['id'])
+            except (TypeError, ValueError):
+                pass
+        existing.save()
+        ch = existing
+    else:
+        peer = None
+        if info.get('id'):
+            try:
+                peer = int(info['id'])
+            except (TypeError, ValueError):
+                peer = None
+        ch = Channel.objects.create(
+            name=name,
+            link=link,
+            manager=user,
+            publish_mode=Channel.PUBLISH_MANUAL,
+            bale_peer_id=peer,
+            about=bio[:4000],
+        )
+    try:
+        from integrations.channel_stats import refresh_channel
+
+        refresh_channel(ch)
+        ch.refresh_from_db()
+    except Exception:
+        logger.exception('stats after miniapp register')
+    return JsonResponse({'ok': True, 'channel': _channel_payload(ch)})
 
 
 @csrf_exempt
@@ -243,6 +339,10 @@ def api_orders(request: HttpRequest) -> JsonResponse:
             'manager_status': it.manager_status,
             'execution_status': it.execution_status,
             'price': it.price,
+            'tariff_id': it.tariff_id,
+            'tariff_name': it.tariff.name if it.tariff_id else '',
+            'channel_id': it.channel_id,
+            'date': timezone.localtime(start).date().isoformat() if start else '',
             'start_jalali': format_jalali(timezone.localtime(start).date()) if start else '',
             'published_link': it.published_link or '',
         })
