@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-polling: لینک‌ساز (Bot API) + لینک‌یار (aiobale user)."""
+"""Long-polling: لینک‌ساز (Bot API) + لینک‌یار (aiobale user, optional)."""
 from __future__ import annotations
 
 import logging
@@ -67,13 +67,26 @@ def ensure_token() -> None:
             'BALE_TOKEN missing — لینک‌یار (کاربر) وصل نیست. '
             'حالت linkyar و تأیید تاریخچه محدود می‌شود.'
         )
-    else:
-        log.info('لینک‌یار user token length=%d', len(ut))
+        return
+
+    log.info('لینک‌یار user token length=%d', len(ut))
+    try:
         me = ly.get_me()
-        if me.get('ok'):
-            log.info('لینک‌یار get_me OK user_id=%s', me.get('user_id'))
-        else:
-            log.warning('لینک‌یار get_me failed: %s', me)
+    except ModuleNotFoundError as e:
+        log.warning(
+            'aiobale not installed (%s) — لینک‌یار disabled; '
+            'bot/manual publish still work',
+            e,
+        )
+        return
+    except Exception as e:
+        log.warning('لینک‌یار get_me exception: %s', e)
+        return
+
+    if me.get('ok'):
+        log.info('لینک‌یار get_me OK user_id=%s', me.get('user_id'))
+    else:
+        log.warning('لینک‌یار get_me failed: %s', me)
 
 
 def prepare_polling() -> None:
@@ -105,10 +118,15 @@ def run_background_jobs() -> None:
         if any(pub.get(k) for k in ('published', 'failed_channels', 'manual_reminded')):
             log.info('publish job: %s', pub)
 
-        if ly.user_token():
-            deleted = delete_expired_posts()
-            if deleted:
-                log.info('deleted channel posts: %s', deleted)
+        try:
+            if ly.user_token():
+                deleted = delete_expired_posts()
+                if deleted:
+                    log.info('deleted channel posts: %s', deleted)
+        except ModuleNotFoundError:
+            pass
+        except Exception:
+            log.exception('delete_expired_posts')
 
         escalated = escalate_unconfirmed()
         if escalated:
@@ -116,8 +134,13 @@ def run_background_jobs() -> None:
 
         today = timezone.localdate()
         if _last_daily_audit_date != today:
-            audit = daily_admin_audit()
-            log.info('daily admin audit: %s', audit)
+            try:
+                audit = daily_admin_audit()
+                log.info('daily admin audit: %s', audit)
+            except ModuleNotFoundError:
+                log.warning('daily admin audit skipped (aiobale missing)')
+            except Exception:
+                log.exception('daily admin audit')
             _last_daily_audit_date = today
     except Exception:
         log.exception('background jobs')
