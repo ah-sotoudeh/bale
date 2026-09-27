@@ -120,6 +120,12 @@ def api_channels(request: HttpRequest) -> JsonResponse:
             'bot_is_admin': ch.bot_is_admin,
             'linkyar_is_admin': ch.linkyar_is_admin,
             'tariff_count': ch.tariffs.count(),
+            'members_count': getattr(ch, 'members_count', 0) or 0,
+            'avg_views': getattr(ch, 'avg_views', 0) or 0,
+            'err_percent': str(getattr(ch, 'err_percent', '') or ''),
+            'language': getattr(ch, 'language', '') or '',
+            'about': getattr(ch, 'about', '') or '',
+            'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
         })
     groups = []
     for g in ChannelGroup.objects.filter(manager=user).order_by('id'):
