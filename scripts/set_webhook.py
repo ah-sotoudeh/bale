@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""ثبت وب‌هوک بله روی پورت ۴۴۳. اگر WEBHOOK_SECRET دارید به آدرس ?token= اضافه می‌شود."""
+"""وب‌هوک در این پروژه استفاده نمی‌شود.
+
+ورود بازو فقط long polling است:
+  python scripts/poll_bot.py
+
+این اسکریپت اگر قبلاً وب‌هوک ثبت شده باشد آن را پاک می‌کند.
+"""
 from __future__ import annotations
 
 import os
@@ -14,19 +20,18 @@ import django
 
 django.setup()
 
-from integrations import bale_client as bc
+from integrations import bale_client as bc  # noqa: E402
 
 
 def main() -> None:
-    base = (os.environ.get('MINIAPP_BASE_URL') or os.environ.get('PUBLIC_BASE_URL') or '').rstrip('/')
-    if not base.startswith('https://'):
-        raise SystemExit('MINIAPP_BASE_URL باید https باشد. بله فقط پورت ۴۴۳ و ۸۸ را برای وب‌هوک می‌پذیرد.')
-    url = base + '/bot/webhook/'
-    secret = os.environ.get('WEBHOOK_SECRET', '').strip()
-    if secret:
-        url += '?token=' + secret
-    print(bc.set_webhook(url))
-    print(bc.get_webhook_info())
+    info = bc.get_webhook_info()
+    url = ((info.get('result') or {}).get('url') or '') if isinstance(info, dict) else ''
+    if url:
+        deleted = bc.delete_webhook()
+        print('webhook removed:', url, deleted)
+    else:
+        print('no webhook set')
+    print('run: python scripts/poll_bot.py')
 
 
 if __name__ == '__main__':

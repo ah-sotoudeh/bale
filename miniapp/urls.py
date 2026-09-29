@@ -19,6 +19,8 @@ urlpatterns = [
     path('api/orders', api.api_orders),
     path('api/orders/approve', api_extra.api_order_approve),
     path('api/orders/reject', api_extra.api_order_reject),
+    path('api/orders/suggest', api_shop.api_suggest_time),
+    path('api/orders/answer', api_shop.api_answer_time),
     path('api/free-days', api.api_free_days),
     path('api/calendar', api_shop.api_calendar),
     path('api/busy', api.api_mark_busy),
