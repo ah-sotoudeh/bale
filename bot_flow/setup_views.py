@@ -11,10 +11,6 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-# کلید موقت؛ بعد از migrate می‌توانید SETUP_SECRET را عوض کنید یا این view را حذف کنید
-DEFAULT_SETUP_KEY = 'linkbank-setup-once'
-
-
 def _load_dotenv_files() -> None:
     base = Path(getattr(settings, 'BASE_DIR', Path.cwd()))
     for rel in ('.env', 'config/.env'):
@@ -41,26 +37,15 @@ def _token_ok(request: HttpRequest) -> bool:
     if not got:
         return False
 
-    candidates = [
-        os.environ.get('SETUP_SECRET', '').strip(),
-        os.environ.get('WEBHOOK_SECRET', '').strip(),
-        os.environ.get('BALE_BOT_TOKEN', '').strip(),
-        (os.environ.get('BALE_BOT_TOKEN') or '').strip()[:16],
-        getattr(settings, 'BALE_BOT_TOKEN', '') or '',
-        DEFAULT_SETUP_KEY,
-    ]
-    return got in {c for c in candidates if c}
+    secret = os.environ.get('SETUP_SECRET', '').strip()
+    return bool(secret) and got == secret
 
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def run_migrate(request: HttpRequest) -> HttpResponse:
     if not _token_ok(request):
-        return JsonResponse({
-            'ok': False,
-            'error': 'forbidden',
-            'hint': f'use ?token={DEFAULT_SETUP_KEY} or full BALE_BOT_TOKEN from .env',
-        }, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
 
     out = StringIO()
     err = StringIO()
@@ -84,11 +69,7 @@ def run_migrate(request: HttpRequest) -> HttpResponse:
 @require_http_methods(['GET'])
 def env_check(request: HttpRequest) -> HttpResponse:
     if not _token_ok(request):
-        return JsonResponse({
-            'ok': False,
-            'error': 'forbidden',
-            'hint': f'use ?token={DEFAULT_SETUP_KEY}',
-        }, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
 
     _load_dotenv_files()
 

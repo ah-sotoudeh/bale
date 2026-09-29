@@ -12,7 +12,9 @@ except ImportError:
     pass
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'replace-me-dev-only')
-DEBUG = os.environ.get('DEBUG', '1') == '1'
+DEBUG = os.environ.get('DEBUG', '0') == '1'
+# شناسهٔ عددی بله که ابزار دیباگ (دکمهٔ پرداخت آزمایشی و سوییچ نقش) را می‌بیند
+DEBUG_BALE_ID = os.environ.get('DEBUG_BALE_ID', '').strip()
 
 ALLOWED_HOSTS = (
     os.environ.get('ALLOWED_HOSTS', '*').split(',')
