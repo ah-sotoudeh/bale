@@ -79,7 +79,12 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         return True
     m = CMD_PAID.match(text)
     if m:
+        from bot_flow.access import is_debug_user
+
         sid = _cmd_id(m)
+        if not is_debug_user(bale_uid):
+            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف‌پول بله ثبت می‌شود.')
+            return True
         if sid:
             r = process_payment_paid(int(sid))
             bc.send_message(
@@ -201,6 +206,12 @@ def handle_callback_query(cq: dict) -> None:
         bc.send_message(chat_id, f'تاریخ جدید آیتم #{item_id}: 1405/05/20')
         return
     if data.startswith('paid:'):
+        from bot_flow.access import is_debug_user
+
+        if not is_debug_user(bale_uid):
+            _answer(cq_id, 'فاکتور')
+            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف‌پول بله ثبت می‌شود.')
+            return
         r = process_payment_paid(int(data.split(':')[1]))
         _answer(cq_id)
         bc.send_message(
@@ -257,14 +268,11 @@ def _parse_manager_date(text: str):
         return None
     if 1300 <= y <= 1500:
         try:
-            import jdatetime
+            from bot_flow.jalali import parse_jalali_date
 
-            day = jdatetime.date(y, m, d).togregorian()
-        except Exception:
-            try:
-                day = datetime(y, m, d).date()
-            except ValueError:
-                return None
+            day = parse_jalali_date(y, m, d)
+        except ValueError:
+            return None
     else:
         try:
             day = datetime(y, m, d).date()
