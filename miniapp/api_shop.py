@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from bot_flow.jalali import format_jalali
+from bot_flow.messages import fa_num
 from channels_app.models import Channel, Tariff
 from miniapp.api import _auth_user, _json_body
 from orders import cart as cart_svc
@@ -57,6 +58,30 @@ def _parse_day(body) -> object | None:
         return datetime.strptime(raw, '%Y-%m-%d').date()
     except ValueError:
         return None
+
+
+def _order_deadline_hint(order: Order) -> str:
+    """مهلت مرحلهٔ جاری، از همان managers_deadline، بدون ستون تازه."""
+    if order.status not in ('waiting_payment', 'waiting_managers', 'waiting_customer_confirm'):
+        return ''
+    if not order.managers_deadline:
+        return ''
+    remaining = int((order.managers_deadline - timezone.now()).total_seconds())
+    if order.status == 'waiting_payment':
+        label = 'برای پرداخت'
+    elif order.status == 'waiting_customer_confirm':
+        label = 'برای تأیید زمان'
+    else:
+        label = 'برای پاسخ کانال‌ها'
+    if remaining <= 0:
+        return 'مهلت این مرحله تمام شده'
+    hours = remaining // 3600
+    minutes = (remaining % 3600) // 60
+    if hours >= 48:
+        return f'تا {fa_num(hours // 24)} روز {label}'
+    if hours >= 1:
+        return f'تا {fa_num(hours)} ساعت {label}'
+    return f'تا {fa_num(max(minutes, 1))} دقیقه {label}'
 
 
 def _own_tariff(user, tariff_id):
@@ -444,13 +469,19 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     rows = []
-    for o in Order.objects.filter(customer=user).exclude(status='draft').order_by('-id')[:30]:
+    for o in (
+        Order.objects.filter(customer=user)
+        .exclude(status='draft')
+        .select_related('customer_banner')
+        .order_by('-id')[:40]
+    ):
         rows.append({
             'id': o.id,
             'status': o.status,
             'total': o.total_amount,
             'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
             'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
+            'pay_hint': _order_deadline_hint(o),
         })
     return JsonResponse({'ok': True, 'orders': rows})
 

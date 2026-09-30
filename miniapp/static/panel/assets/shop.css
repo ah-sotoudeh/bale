@@ -1,0 +1,65 @@
+/* لایهٔ ظاهر مینی‌اپ. بعد از Tailwind می‌آید تا کارت، نوار و دکمه خواناتر شوند. */
+
+[data-bale="dark"] {
+  --color-bg: #0d141c;
+  --color-header: #15202b;
+  --color-surface: #1b2836;
+  --color-fg: #f4f8fb;
+  --color-muted: #a9bbce;
+  --color-link: #49c8ff;
+  --color-ok: #3dd68c;
+  --color-danger: #ff7b7b;
+  --color-line: #314458;
+}
+
+[data-bale="light"] {
+  --color-bg: #f4f7f8;
+  --color-header: #ffffff;
+  --color-surface: #ffffff;
+  --color-fg: #171b1f;
+  --color-muted: #5c6b78;
+  --color-link: #0c7f78;
+  --color-ok: #0d8f62;
+  --color-danger: #d32f2f;
+  --color-line: #e1e7ee;
+}
+
+html,
+body,
+#root {
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.bg-header {
+  background: color-mix(in srgb, var(--color-header) 88%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.rounded-2xl.bg-surface {
+  border: 1px solid var(--color-line);
+  box-shadow: 0 10px 28px rgba(8, 18, 28, 0.14);
+}
+
+button.bg-link {
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--color-link) 30%, transparent);
+}
+
+button.bg-link:active {
+  transform: translateY(1px);
+}
+
+nav.bg-header {
+  padding-bottom: max(0.35rem, env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.grid-cols-7 > button {
+  min-height: 2.75rem;
+  border-radius: 0.85rem;
+}
+
+button.border-line:active,
+.rounded-2xl.bg-surface button:active {
+  background: color-mix(in srgb, var(--color-link) 8%, transparent);
+}

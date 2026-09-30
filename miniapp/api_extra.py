@@ -28,7 +28,7 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
         Tariff.objects.filter(is_active=True)
         .select_related('channel', 'group')
         .prefetch_related('group__channels')
-        .order_by('price', 'id')[:80]
+        .order_by('-channel__members_count', 'price', 'id')[:400]
     )
     items = []
     channels: dict = {}

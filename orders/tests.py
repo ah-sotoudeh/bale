@@ -409,3 +409,39 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(result['deactivated_tariffs'], 0)
         self.tariff.refresh_from_db()
         self.assertTrue(self.tariff.is_active)
+
+    def test_customer_sees_order_lines_outside_the_manager_inbox(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        _order, item = self._pending_order()
+        customer = self.client.get('/miniapp/api/orders', {'debug_bale_id': 'c9'})
+        self.assertEqual(customer.status_code, 200, customer.content)
+        rows = customer.json()['orders']
+        self.assertEqual([row['id'] for row in rows], [item.id])
+        self.assertFalse(rows[0]['inbox'])
+        self.assertEqual(rows[0]['group_id'], None)
+        manager = self.client.get('/miniapp/api/orders', {'debug_bale_id': 'm9'})
+        self.assertTrue(manager.json()['orders'][0]['inbox'])
+        stranger = self.client.get('/miniapp/api/orders', {'debug_bale_id': 'zz-new'})
+        self.assertEqual(stranger.json()['orders'], [])
+
+    def test_my_orders_show_the_open_deadline(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        order, _item = self._pending_order()
+        order.status = 'waiting_payment'
+        order.managers_deadline = timezone.now() + timedelta(hours=5, minutes=10)
+        order.save(update_fields=['status', 'managers_deadline'])
+        response = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'c9'})
+        self.assertEqual(response.status_code, 200, response.content)
+        hint = response.json()['orders'][0]['pay_hint']
+        self.assertIn('پرداخت', hint)
+        self.assertIn('۵', hint)
+        order.status = 'waiting_managers'
+        order.save(update_fields=['status'])
+        again = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'c9'})
+        self.assertIn('پاسخ کانال', again.json()['orders'][0]['pay_hint'])

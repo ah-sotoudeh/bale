@@ -7,6 +7,7 @@ import os
 from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, Optional
 
+from django.db.models import Q
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -335,6 +336,18 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'ok': True, 'tariff_id': t.id})
 
 
+def _item_in_manager_inbox(it: OrderItem, user: User) -> bool:
+    """درخواست‌هایی که این کاربر باید به عنوان مدیر کانال جواب بدهد."""
+    if it.manager_id == user.id:
+        return True
+    if it.manager_id:
+        return False
+    if it.channel_id and it.channel and it.channel.manager_id == user.id:
+        return True
+    group = it.tariff.group if it.tariff_id and it.tariff.group_id else None
+    return bool(group and group.manager_id == user.id)
+
+
 @csrf_exempt
 @require_http_methods(['GET'])
 def api_orders(request: HttpRequest) -> JsonResponse:
@@ -343,15 +356,18 @@ def api_orders(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     items = []
+    # مدیر فقط درخواست کانال خودش را می‌بیند. مشتری خط سفارش خودش را هم می‌گیرد
+    # تا زمان پیشنهادی و لینک انتشار در مینی‌اپ گم نشود.
     for it in (
-        OrderItem.objects.filter(manager=user)
-        .select_related('order', 'channel', 'tariff', 'tariff__group')
-        .order_by('-id')[:40]
+        OrderItem.objects.filter(Q(manager=user) | Q(order__customer=user))
+        .select_related('order', 'channel', 'tariff', 'tariff__group', 'tariff__channel')
+        .order_by('-id')[:80]
     ):
         start = it.effective_start
         items.append({
             'id': it.id,
             'order_id': it.order_id,
+            'inbox': _item_in_manager_inbox(it, user),
             'owner': (
                 it.tariff.group.name
                 if it.tariff.group_id
@@ -363,6 +379,7 @@ def api_orders(request: HttpRequest) -> JsonResponse:
             'tariff_id': it.tariff_id,
             'tariff_name': it.tariff.name if it.tariff_id else '',
             'channel_id': it.channel_id,
+            'group_id': it.tariff.group_id if it.tariff_id else None,
             'date': timezone.localtime(start).date().isoformat() if start else '',
             'proposed_date': (
                 timezone.localtime(it.manager_edited_start).date().isoformat()
