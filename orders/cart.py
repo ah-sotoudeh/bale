@@ -383,9 +383,15 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     order.status = 'waiting_payment'
     order.save()
 
+    from bot_flow.access import is_debug_user
+
     lines.append(f'\nمبلغ قابل پرداخت: {total:,} تومان')
-    lines.append('برای شبیه‌سازی پرداخت دکمه زیر را بزنید.')
-    kb = bc.payment_done_keyboard(order.id)
+    kb = None
+    if cust and is_debug_user(cust):
+        lines.append('حساب دیباگ: دکمهٔ زیر پرداخت را شبیه‌سازی می‌کند. کاربران دیگر فقط فاکتور کیف‌پول را می‌بینند.')
+        kb = bc.payment_done_keyboard(order.id)
+    else:
+        lines.append('فاکتور کیف‌پول بله ارسال شد. بعد از پرداخت، سفارش خودش ثبت می‌شود.')
     if cust:
         bc.send_message(cust, '\n'.join(lines), reply_markup=kb)
         payment = bc.create_payment_request(
