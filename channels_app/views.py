@@ -30,9 +30,9 @@ class ChannelAvailabilityView(APIView):
 
 
 class RegisterChannelView(APIView):
-    """Register a channel as belonging to the current user.
+    """ثبت کانال برای کاربر جاری.
 
-    User must have bale_user_id set; that id must appear in the channel bio/description.
+    نام کاربری بله (مثل @link_yar) باید در توضیحات کانال باشد.
     """
 
     def post(self, request):
@@ -40,8 +40,10 @@ class RegisterChannelView(APIView):
         channel_link = request.data.get('channel_link')
         if not channel_link:
             return Response({'detail': 'channel_link required'}, status=status.HTTP_400_BAD_REQUEST)
-        if not getattr(user, 'bale_user_id', None):
-            return Response({'detail': 'user has no bale_user_id'}, status=status.HTTP_400_BAD_REQUEST)
+        from bot_flow.handlers import bio_matches_owner, ownership_prompt
+
+        if not getattr(user, 'bale_username', None):
+            return Response({'ok': False, 'detail': ownership_prompt(user)}, status=status.HTTP_400_BAD_REQUEST)
 
         info = bale_client.get_channel_info(channel_link)
         if info.get('error'):
@@ -51,11 +53,10 @@ class RegisterChannelView(APIView):
             )
 
         bio = info.get('bio') or info.get('description') or ''
-        from bot_flow.access import id_in_text
 
-        if not id_in_text(str(user.bale_user_id), str(bio)):
+        if not bio_matches_owner(str(bio), user):
             return Response(
-                {'ok': False, 'detail': 'لطفاً شناسه‌تان را در بیو کانال وارد کنید'},
+                {'ok': False, 'detail': ownership_prompt(user)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

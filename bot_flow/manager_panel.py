@@ -539,11 +539,10 @@ def try_handle_callback(
 
         sess = _sess(bale_user_id)
         flow.save_session(sess, flow.STATE_AWAIT_LINKS, role='manager', verified_ids=[])
-        proof = user.bale_handle or user.bale_user_id
         bc.send_message(
             str(chat_id),
             'لینک کانال‌ها را بفرستید (هر خط یکی).\n'
-            f'آیدی در بیو: {proof}',
+            f'{flow.ownership_prompt(user)}',
         )
         return True
     if data.startswith('mgr:addtariff:'):

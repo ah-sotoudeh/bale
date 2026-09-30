@@ -537,3 +537,65 @@ class MarketplaceRulesTests(TestCase):
         self.assertIn('لینک‌یار', body['message'])
         self.assertEqual(stranger.json()['done'], 0)
         self.assertEqual(refresh.call_count, 1)
+
+    def test_channel_proof_is_the_username(self):
+        import json
+        import os
+
+        from bot_flow.handlers import bio_matches_owner, ownership_prompt
+
+        owner = User.objects.create_user(
+            username='linkyar',
+            password='pass',
+            bale_user_id='1164810718',
+            bale_username='link_yar',
+        )
+        self.assertFalse(bio_matches_owner('تبلیغ 1164810718', owner))
+        self.assertTrue(bio_matches_owner('همراه @link_yar و @linkpakhsh', owner))
+        self.assertTrue(bio_matches_owner('LINK_YAR', owner))
+        self.assertFalse(bio_matches_owner('@link_yar_shop', owner))
+        bare = User.objects.create_user(username='noname', password='pass', bale_user_id='42')
+        self.assertFalse(bio_matches_owner('42', bare))
+        named = ownership_prompt(owner)
+        self.assertIn('@link_yar', named)
+        self.assertNotIn('1164810718', named)
+        self.assertIn('نام کاربری', ownership_prompt(bare))
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        os.environ['DEBUG_BALE_ID'] = ''
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.addCleanup(lambda: os.environ.pop('DEBUG_BALE_ID', None))
+        info = {'title': 'تست بنر', 'id': 7}
+        with patch('integrations.channel_stats.refresh_channel', return_value={'ok': False}):
+            with patch('integrations.bale_client.get_channel_info', return_value={**info, 'bio': '1164810718'}):
+                denied = self.client.post(
+                    '/miniapp/api/channels/add',
+                    data=json.dumps({'link': '@ownedproof', 'debug_bale_id': '1164810718'}),
+                    content_type='application/json',
+                )
+            self.assertEqual(denied.status_code, 400, denied.content)
+            error = denied.json()['error']
+            self.assertIn('@link_yar', error)
+            self.assertNotIn('1164810718', error)
+            self.assertNotIn('عددی', error)
+            with patch(
+                'integrations.bale_client.get_channel_info',
+                return_value={**info, 'bio': 'لینک‌کالا\n@link_yar'},
+            ):
+                accepted = self.client.post(
+                    '/miniapp/api/channels/add',
+                    data=json.dumps({'link': '@ownedproof', 'debug_bale_id': '1164810718'}),
+                    content_type='application/json',
+                )
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+
+        self.client.force_login(owner)
+        with patch('integrations.bale_client.get_channel_info', return_value={**info, 'bio': '1164810718'}):
+            api_denied = self.client.post(
+                '/api/channels/register/',
+                data=json.dumps({'channel_link': '@ownedproof'}),
+                content_type='application/json',
+            )
+        self.assertEqual(api_denied.status_code, 400, api_denied.content)
+        self.assertIn('@link_yar', api_denied.json()['detail'])
+        self.assertNotIn('1164810718', api_denied.json()['detail'])

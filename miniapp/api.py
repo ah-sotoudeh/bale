@@ -248,16 +248,13 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
     bio = str(info.get('bio') or info.get('description') or '')
     owner = _can_switch_roles(user.bale_user_id or '')
-    from bot_flow.access import id_in_text
+    from bot_flow.handlers import bio_matches_owner, ownership_prompt
 
-    proved = bool(user.bale_user_id) and id_in_text(str(user.bale_user_id), bio)
+    proved = bio_matches_owner(bio, user)
     if info.get('error') and not owner:
         return JsonResponse({'ok': False, 'error': 'کانال از بله خوانده نشد. پیوند را بررسی کنید.'}, status=400)
     if not proved and not owner:
-        return JsonResponse(
-            {'ok': False, 'error': 'شناسهٔ عددی حساب بلهٔ شما باید در توضیحات کانال باشد.'},
-            status=400,
-        )
+        return JsonResponse({'ok': False, 'error': ownership_prompt(user)}, status=400)
 
     existing = Channel.objects.filter(link__iexact=link).first()
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:

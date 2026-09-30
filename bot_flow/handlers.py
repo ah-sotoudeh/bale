@@ -81,32 +81,26 @@ def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
 
 
 def ownership_tokens(manager: User) -> List[str]:
-    tokens: List[str] = []
-    if manager.bale_username:
-        u = manager.bale_username.lstrip('@')
-        tokens.extend([f'@{u}', u])
-    if manager.bale_user_id:
-        tokens.append(str(manager.bale_user_id))
-    seen = set()
-    out: List[str] = []
-    for t in tokens:
-        key = t.lower()
-        if t and key not in seen:
-            seen.add(key)
-            out.append(t)
-    return out
+    handle = (manager.bale_username or '').lstrip('@').strip()
+    if not handle:
+        return []
+    return [f'@{handle}', handle]
 
 
 def bio_matches_owner(bio: str, manager: User) -> bool:
-    from bot_flow.access import id_in_text
-
+    """مالکیت کانال فقط با نام کاربری بله ثابت می‌شود، مثل @link_yar."""
     text = bio or ''
-    if manager.bale_user_id and id_in_text(str(manager.bale_user_id), text):
-        return True
-    handle = (manager.bale_username or '').lstrip('@').strip()
-    if not handle:
+    handle = (getattr(manager, 'bale_username', None) or '').lstrip('@').strip()
+    if not handle or not text:
         return False
     return re.search(r'(?<!\w)@?' + re.escape(handle) + r'(?!\w)', text, re.I) is not None
+
+
+def ownership_prompt(user) -> str:
+    handle = (getattr(user, 'bale_username', None) or '').lstrip('@').strip()
+    if handle:
+        return f'نام کاربری شما باید در توضیحات کانال باشد: @{handle}'
+    return 'اول در بله یک نام کاربری بگذارید (مثل @link_yar) و همان را در توضیحات کانال بنویسید.'
 
 
 def role_keyboard(is_operator: bool = False) -> Dict[str, Any]:
@@ -186,14 +180,13 @@ def handle_role_callback(
             open_panel(chat_id, bale_user_id, username)
             return
         save_session(sess, STATE_AWAIT_LINKS, role='manager', verified_ids=[])
-        proof = user.bale_handle or user.bale_user_id
         bc.send_message(
             str(chat_id),
             'نقش: مدیر کانال ✅\n\n'
             'لینک کانال‌ها را بفرستید (هر خط یکی).\n'
             '• یک لینک = تک‌کانال\n'
             '• چند لینک = مجموعه با تعرفه مشترک\n\n'
-            f'آیدی در بیو: {proof}',
+            f'{ownership_prompt(user)}',
         )
         return
 
@@ -206,7 +199,7 @@ def _verify_and_register_channels(
     ok: List[Channel] = []
     fail: List[str] = []
     notes: List[str] = []
-    proof = manager.bale_handle or manager.bale_user_id or '?'
+    proof = ownership_prompt(manager)
 
     for ref in refs:
         norm = normalize_channel_ref(ref)
@@ -218,7 +211,7 @@ def _verify_and_register_channels(
         bio = str(info.get('bio') or info.get('description') or '')
         title = info.get('title') or norm
         if not bio_matches_owner(bio, manager):
-            fail.append(f'{title} ({norm}): آیدی در بیو نیست. «{proof}»')
+            fail.append(f'{title} ({norm}): {proof}')
             continue
 
         with transaction.atomic():
@@ -268,7 +261,7 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         parts.append('⚠️ اصلاح:\n' + '\n'.join(fail))
 
     if not ok:
-        parts.append('بعد از اصلاح بیو دوباره بفرستید.')
+        parts.append('نام کاربری را در توضیحات کانال بگذارید و دوباره بفرستید.')
         bc.send_message(str(chat_id), '\n\n'.join(parts))
         return True
 
