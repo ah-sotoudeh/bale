@@ -4,7 +4,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+
+from bot_flow.jalali import format_slot
 
 from integrations import bale_client as bale_client
 from orders.models import Order
@@ -191,7 +194,7 @@ def notify_managers_for_order(order: Order) -> None:
             manager_id,
             f'📢 درخواست تبلیغ جدید\n'
             f'هدف: {target}\n'
-            f'زمان: {item.requested_start} تا {item.requested_end}\n'
+            f'زمان: {format_slot(timezone.localtime(item.requested_start))} تا {format_slot(timezone.localtime(item.requested_end))}\n'
             f'مبلغ: {item.price:,} تومان\n'
             f'آیتم: #{item.id} | سفارش: #{order.id}',
             reply_markup=kb,

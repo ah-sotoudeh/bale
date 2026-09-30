@@ -154,6 +154,17 @@ class SlotAndLedgerTests(TestCase):
         self.assertEqual(gregorian_to_jalali(2024, 3, 12), (1402, 12, 22))
         self.assertEqual(parse_jalali_date(1405, 5, 20), date(2026, 8, 11))
 
+    def test_slot_time_stays_jalali_in_rtl_chat(self):
+        from datetime import datetime
+
+        from bot_flow.jalali import format_slot
+
+        text = format_slot(timezone.make_aware(datetime(2026, 10, 3, 12, 0)))
+        self.assertNotIn('+', text)
+        self.assertNotIn('2026', text)
+        self.assertIn('ساعت', text)
+        self.assertIn('۱۲:۰۰', text)
+
     def test_stranger_cannot_mark_paid_from_chat(self):
         from bot_flow.access import is_debug_user
 

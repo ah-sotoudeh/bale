@@ -9,6 +9,7 @@ from typing import Any, Dict
 from django.db import transaction
 from django.utils import timezone
 
+from bot_flow.jalali import format_slot
 from channels_app.models import Channel
 from integrations import bale_client as bc
 from orders.models import OrderItem
@@ -79,7 +80,7 @@ def send_publish_reminders() -> int:
             it.manager.bale_user_id,
             f'⏰ یادآوری انتشار (ارسال دستی)\n'
             f'آیتم #{it.id} — {owner}\n'
-            f'زمان: {timezone.localtime(it.effective_start)}\n'
+            f'زمان: {format_slot(timezone.localtime(it.effective_start))}\n'
             f'پس از ارسال بنر در کانال، دکمه زیر را بزنید.',
             reply_markup=kb,
         )

@@ -96,3 +96,13 @@ def format_jalali(d: date) -> str:
     jy, jm, jd = to_jalali(d)
     weekday = WEEKDAY_FA[d.weekday()]
     return fa_num(f'{weekday} {jy}/{jm:02d}/{jd:02d}')
+
+
+def format_slot(dt) -> str:
+    """تاریخ شمسی و ساعت با رقم فارسی، تا در متن راست‌به‌چپ به‌هم نریزد."""
+    from bot_flow.messages import fa_num
+
+    if dt is None:
+        return '—'
+    clock = fa_num(f'{dt.hour:02d}:{dt.minute:02d}')
+    return f'{format_jalali(dt.date())}، ساعت {clock}'

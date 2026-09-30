@@ -166,6 +166,8 @@ def _notify_manager(order: Order, item: OrderItem) -> None:
 
     t = item.tariff
     owner = t.group.name if t.group_id else (item.channel.name if item.channel else '?')
+    from bot_flow.jalali import format_slot
+
     start = timezone.localtime(item.requested_start)
     kb = bc.inline_keyboard([
         [
@@ -179,7 +181,7 @@ def _notify_manager(order: Order, item: OrderItem) -> None:
         f'درخواست تبلیغ تازه\n'
         f'کانال: {owner}\n'
         f'طرح: {t.name}\n'
-        f'زمان: {start}\n'
+        f'زمان: {format_slot(start)}\n'
         f'مبلغ: {fa_money(item.price)}\n'
         f'نوبت {fa_num(item.id)} از سفارش {fa_num(order.id)}\n'
         f'تا {fa_num(MANAGER_HOURS)} ساعت برای پاسخ وقت دارید. '
