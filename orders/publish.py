@@ -288,14 +288,20 @@ def publish_due_items() -> Dict[str, int]:
                     failed += 1
                     continue
                 res = _post_via_bot(ch, from_chat, msg_id, order.banner_caption or '')
+                bot_mid = ((res.get('api') or {}).get('result') or {}).get('message_id')
                 time.sleep(1.5)
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [bot_id] if x])
                 if meta and meta.get('permalink'):
                     any_ok = True
+                    if bot_mid:
+                        meta['bot_message_id'] = int(bot_mid)
                     _finalize_channel_ok(item, ch, meta, posts)
                 elif res.get('ok'):
                     any_ok = True
-                    posts.append({'channel_id': ch.id, 'ref': channel_ref(ch), 'permalink': ''})
+                    row = {'channel_id': ch.id, 'ref': channel_ref(ch), 'permalink': ''}
+                    if bot_mid:
+                        row['bot_message_id'] = int(bot_mid)
+                    posts.append(row)
                     if order.customer.bale_user_id:
                         bc.send_message(order.customer.bale_user_id, f'✅ بنر در «{ch.name}» ارسال شد.')
                 else:
@@ -427,8 +433,15 @@ def delete_expired_posts() -> int:
             posts = []
         for p in posts:
             mid, date, ref = p.get('message_id'), p.get('date') or 0, p.get('ref')
+            bot_mid = p.get('bot_message_id')
+            touched = False
+            if bot_mid and ref:
+                bc.delete_message(str(ref), int(bot_mid))
+                touched = True
             if mid and ref:
                 ly.delete_message(str(ref), int(mid), message_date=int(date or 0))
+                touched = True
+            if touched:
                 n += 1
         item.channel_message_id = ''
         item.save(update_fields=['channel_message_id'])

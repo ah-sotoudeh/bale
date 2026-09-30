@@ -696,7 +696,9 @@ class MarketplaceRulesTests(TestCase):
                 )
             self.assertEqual(denied.status_code, 400, denied.content)
             error = denied.json()['error']
+            self.assertEqual(denied.json()['code'], 'owner_username')
             self.assertIn('@link_yar', error)
+            self.assertIn('درباره', error)
             self.assertNotIn('1164810718', error)
             self.assertNotIn('عددی', error)
             with patch(
@@ -720,6 +722,43 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(api_denied.status_code, 400, api_denied.content)
         self.assertIn('@link_yar', api_denied.json()['detail'])
         self.assertNotIn('1164810718', api_denied.json()['detail'])
+
+    def test_debug_manager_still_needs_username_in_about(self):
+        import json
+        import os
+
+        User.objects.create_user(
+            username='linkyar-debug',
+            password='pass',
+            bale_user_id='1164810718',
+            bale_username='link_yar',
+        )
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        os.environ['DEBUG_BALE_ID'] = '1164810718'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.addCleanup(lambda: os.environ.pop('DEBUG_BALE_ID', None))
+        info = {'title': 'تست بنر', 'id': 7}
+        with patch('integrations.channel_stats.refresh_channel', return_value={'ok': False}):
+            with patch('integrations.bale_client.get_channel_info', return_value={**info, 'bio': 'تبلیغات'}):
+                denied = self.client.post(
+                    '/miniapp/api/channels/add',
+                    data=json.dumps({'link': '@debugproof', 'debug_bale_id': '1164810718'}),
+                    content_type='application/json',
+                )
+            self.assertEqual(denied.status_code, 400, denied.content)
+            body = denied.json()
+            self.assertEqual(body['code'], 'owner_username')
+            self.assertIn('@link_yar', body['message'])
+            self.assertIn('درباره', body['message'])
+            with patch('integrations.bale_client.get_channel_info', return_value={'error': 'not_found'}):
+                missed = self.client.post(
+                    '/miniapp/api/channels/add',
+                    data=json.dumps({'link': '@debugproof', 'debug_bale_id': '1164810718'}),
+                    content_type='application/json',
+                )
+        self.assertEqual(missed.status_code, 400, missed.content)
+        self.assertEqual(missed.json()['code'], 'lookup_failed')
+        self.assertIn('پیوند', missed.json()['message'])
 
 
 class MiniappLiveActionTests(TestCase):
@@ -833,6 +872,32 @@ class MiniappLiveActionTests(TestCase):
         self.assertEqual(customer.json()['operator_banners'], [])
         self.assertEqual(customer.json()['operator_payouts'], [])
 
+    @patch('orders.publish.ly.delete_message', return_value={'ok': True})
+    @patch('orders.publish.bc.delete_message', return_value={'ok': True})
+    def test_expired_ad_is_removed_by_both_accounts(self, bot_del, ly_del):
+        import json
+
+        item = self._item('executed')
+        item.requested_end = timezone.now() - timedelta(hours=1)
+        item.published_at = timezone.now() - timedelta(hours=2)
+        item.channel_message_id = json.dumps(
+            [{
+                'message_id': 55,
+                'date': 1700000000000,
+                'ref': '@linktest',
+                'bot_message_id': 9,
+            }],
+            ensure_ascii=False,
+        )
+        item.save(update_fields=['requested_end', 'published_at', 'channel_message_id'])
+        from orders.publish import delete_expired_posts
+
+        self.assertEqual(delete_expired_posts(), 1)
+        bot_del.assert_called_once_with('@linktest', 9)
+        ly_del.assert_called_once_with('@linktest', 55, message_date=1700000000000)
+        item.refresh_from_db()
+        self.assertEqual(item.channel_message_id, '')
+
     def test_live_bundle_calls_the_order_endpoints(self):
         bundle = self.client.get('/miniapp/assets/index-Ce1t18yS.js')
         self.assertEqual(bundle.status_code, 200)
@@ -842,3 +907,7 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('operator_banners', script)
         self.assertIn("owner:`customer`", script)
         self.assertIn('debug_bale_id', script)
+        self.assertIn('بیایید کانالتان را راه بیندازیم', script)
+        self.assertIn('سفارش تبلیغ، همین‌جا', script)
+        self.assertIn('نام کاربری خودتان را در «درباره» کانال بنویسید', script)
+        self.assertIn('steps:C().manager.emptyChannelSteps', script)

@@ -452,6 +452,36 @@ def load_channel_history(channel_ref: str, limit: int = 6) -> Dict[str, Any]:
     return _run(_with_client(_fn))
 
 
+async def _post_method_raw(client, method) -> Dict[str, Any]:
+    """پست خام. پاسخ SendMessage در aiobale بدون context کلاینت می‌شکند، ولی خود ارسال انجام شده."""
+    from aiobale.utils import clean_grpc
+    from aiobale.utils.grpc_post import add_header
+    import aiohttp
+
+    session = client.session
+    if not session.session or session.session.closed:
+        session.session = aiohttp.ClientSession()
+    headers = {
+        'User-Agent': session.user_agent,
+        'Origin': 'https://web.bale.ai',
+        'content-type': 'application/grpc-web+proto',
+        **{k[0].upper() + k[1:]: v for k, v in session._get_meta().items()},
+        **session._build_headers(client.token),
+    }
+    url = f'{session.post_url}/{method.__service__}/{method.__method__}'
+    data = method.model_dump(by_alias=True, exclude_none=True)
+    payload = add_header(session.encoder(data))
+    req = await session.session.post(url=url, headers=headers, data=payload)
+    content = await req.read()
+    grpc_err = req.headers.get('grpc-message')
+    if grpc_err:
+        return {'ok': False, 'error': str(grpc_err)}
+    raw = session.decoder(clean_grpc(content)) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return {'ok': True, 'raw': raw}
+
+
 async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text: str) -> Dict[str, Any]:
     from aiobale.enums import ChatType, PeerType
     from aiobale.types import Chat, Peer, MessageContent, TextMessage
@@ -461,9 +491,10 @@ async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text:
     errors: List[str] = []
     mid = generate_id()
     content = MessageContent(text=TextMessage(value=text))
+    # کانال بله با نوع کانال قبول می‌شود. گروه و سوپرگروه InvalidArgument می‌دهند.
     combos = [
-        (PeerType.GROUP, ChatType.GROUP),
         (PeerType.GROUP, ChatType.CHANNEL),
+        (PeerType.GROUP, ChatType.GROUP),
         (PeerType.GROUP, ChatType.SUPER_GROUP),
     ]
 
@@ -475,18 +506,27 @@ async def _send_text_raw(client, peer_id: int, access_hash: Optional[int], text:
         chat = Chat(id=peer_id, type=ctype)
         call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
         try:
-            result = await client(call)
-            msg = getattr(result, 'message', result)
-            return {
-                'ok': True,
-                'message_id': getattr(msg, 'message_id', mid),
-                'date': getattr(msg, 'date', None),
-                'peer_id': peer_id,
-                'combo': f'{ptype}/{ctype}',
-                'without_quote': True,
-            }
+            posted = await _post_method_raw(client, call)
         except Exception as e:
             errors.append(f'{ptype}/{ctype}: {e}')
+            continue
+        if not posted.get('ok'):
+            errors.append(f'{ptype}/{ctype}: {posted.get("error")}')
+            continue
+        raw = posted.get('raw') or {}
+        date = raw.get('2', raw.get(2))
+        try:
+            date_i = int(date) if date is not None else None
+        except (TypeError, ValueError):
+            date_i = None
+        return {
+            'ok': True,
+            'message_id': int(mid),
+            'date': date_i,
+            'peer_id': peer_id,
+            'combo': f'{ptype}/{ctype}',
+            'without_quote': True,
+        }
 
     return {'ok': False, 'error': 'send_failed', 'tries': errors, 'peer_id': peer_id}
 

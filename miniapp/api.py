@@ -252,10 +252,19 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     from bot_flow.handlers import bio_matches_owner, ownership_prompt
 
     proved = bio_matches_owner(bio, user)
-    if info.get('error') and not owner:
-        return JsonResponse({'ok': False, 'error': 'کانال از بله خوانده نشد. پیوند را بررسی کنید.'}, status=400)
-    if not proved and not owner:
-        return JsonResponse({'ok': False, 'error': ownership_prompt(user)}, status=400)
+    looked_up = not info.get('error')
+    if not looked_up:
+        missing = 'کانال را از بله نخواندیم. پیوند را یک بار دیگر بررسی کنید.'
+        return JsonResponse(
+            {'ok': False, 'error': missing, 'message': missing, 'code': 'lookup_failed'},
+            status=400,
+        )
+    if not proved:
+        prompt = ownership_prompt(user)
+        return JsonResponse(
+            {'ok': False, 'error': prompt, 'message': prompt, 'code': 'owner_username'},
+            status=400,
+        )
 
     existing = Channel.objects.filter(link__iexact=link).first()
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:

@@ -225,6 +225,24 @@ def forward_message(to_chat_id: str, from_chat_id: str, message_id: int) -> Dict
         return {'error': _redact(str(e)), 'ok': False}
 
 
+def delete_message(chat_id: str, message_id: int) -> Dict[str, Any]:
+    """حذف پستی که خود لینک‌ساز فرستاده. شناسه، message_id بات است نه شناسه داخلی بله."""
+    url = _bot_url('deleteMessage')
+    payload = {'chat_id': chat_id, 'message_id': int(message_id)}
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code >= 400:
+            logger.warning('deleteMessage %s', r.status_code)
+            return {'ok': False, 'error': 'delete_failed', '_http': r.status_code}
+        data = r.json()
+        if isinstance(data, dict) and 'ok' not in data:
+            data['ok'] = True
+        return data
+    except requests.RequestException as e:
+        logger.exception('delete_message failed')
+        return {'ok': False, 'error': _redact(str(e))}
+
+
 def copy_message(
     to_chat_id: str,
     from_chat_id: str,

@@ -99,8 +99,14 @@ def bio_matches_owner(bio: str, manager: User) -> bool:
 def ownership_prompt(user) -> str:
     handle = (getattr(user, 'bale_username', None) or '').lstrip('@').strip()
     if handle:
-        return f'نام کاربری شما باید در توضیحات کانال باشد: @{handle}'
-    return 'اول در بله یک نام کاربری بگذارید (مثل @link_yar) و همان را در توضیحات کانال بنویسید.'
+        return (
+            f'برای اینکه کانال را به نام شما ثبت کنیم، @{handle} را در بخش «درباره» کانال بنویسید. '
+            'بعد پیوند کانال را دوباره بفرستید.'
+        )
+    return (
+        'اول در بله برای خودتان یک نام کاربری بگذارید، مثل @link_yar. '
+        'بعد همان را در بخش «درباره» کانال بنویسید تا کانال را وصل کنیم.'
+    )
 
 
 def role_keyboard(is_operator: bool = False) -> Dict[str, Any]:
