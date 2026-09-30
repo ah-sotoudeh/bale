@@ -41,38 +41,43 @@ class OrdersWebhookFlowTests(TestCase):
     @patch('integrations.bale_client.create_payment_request')
     @patch('integrations.bale_client.send_message')
     def test_manager_approve_creates_payment_request(self, mock_send_message, mock_create_payment):
-        # manager approves
-        url = reverse('webhook-manager-response')
-        payload = {'order_item_id': self.item.id, 'manager_bale_id': self.manager.bale_user_id, 'action': 'approve'}
-        mock_create_payment.return_value = {'payment_url': 'https://pay.example/123'}
-        resp = self.client.post(url, payload, format='json')
-        self.assertEqual(resp.status_code, 200)
-        # reload order
+        from orders.cart import process_manager_item
+
+        self.item.manager_status = 'pending'
+        self.item.save()
+        mock_create_payment.return_value = {'ok': True}
+        result = process_manager_item(self.item.id, self.manager.bale_user_id, 'approve')
+        self.assertTrue(result.get('ok'), result)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, 'waiting_payment')
-        # customer should receive payment link via send_message
         mock_send_message.assert_called()
         mock_create_payment.assert_called()
+        closed = self.client.post(reverse('webhook-manager-response'), {'order_item_id': self.item.id}, format='json')
+        self.assertEqual(closed.status_code, 410)
 
-    @patch('integrations.bale_client.schedule_message')
-    @patch('integrations.bale_client.bot_is_channel_admin')
+    @patch('integrations.bale_client.forward_message')
     @patch('integrations.bale_client.send_message')
-    def test_payment_webhook_marks_paid(self, mock_send_message, mock_bot_admin, mock_schedule):
+    def test_payment_records_only_from_waiting_payment(self, mock_send_message, mock_forward):
+        from orders.services import process_payment_paid
+
+        mock_forward.return_value = {'ok': False}
+        self.order.status = 'waiting_managers'
+        self.order.save()
+        denied = process_payment_paid(self.order.id)
+        self.assertFalse(denied.get('ok'))
         self.order.status = 'waiting_payment'
         self.order.save()
         self.item.manager_status = 'approved'
         self.item.save()
-        mock_bot_admin.return_value = False
-        url = reverse('webhook-payment')
-        payload = {'order_id': self.order.id, 'status': 'paid'}
-        resp = self.client.post(url, payload, format='json')
-        self.assertEqual(resp.status_code, 200)
+        result = process_payment_paid(self.order.id)
+        self.assertTrue(result.get('ok'), result)
         self.order.refresh_from_db()
         self.item.refresh_from_db()
         self.assertEqual(self.order.status, 'paid')
         self.assertEqual(self.item.execution_status, 'paid')
         mock_send_message.assert_called()
-        mock_schedule.assert_not_called()
+        closed = self.client.post(reverse('webhook-payment'), {'order_id': self.order.id, 'status': 'paid'}, format='json')
+        self.assertEqual(closed.status_code, 410)
 
 
 class SlotAndLedgerTests(TestCase):
@@ -140,6 +145,22 @@ class SlotAndLedgerTests(TestCase):
                 manager_status='pending',
                 duration_hours=24,
             )
+
+    def test_jalali_roundtrip_for_manager_dates(self):
+        from datetime import date
+
+        from bot_flow.jalali import gregorian_to_jalali, parse_jalali_date
+
+        self.assertEqual(gregorian_to_jalali(2024, 3, 12), (1402, 12, 22))
+        self.assertEqual(parse_jalali_date(1405, 5, 20), date(2026, 8, 11))
+
+    def test_stranger_cannot_mark_paid_from_chat(self):
+        from bot_flow.access import is_debug_user
+
+        os_environ = __import__('os').environ
+        os_environ['DEBUG_BALE_ID'] = '80619262'
+        self.assertTrue(is_debug_user('80619262'))
+        self.assertFalse(is_debug_user(self.customer.bale_user_id))
 
     def test_earn_is_idempotent(self):
         a = credit_manager_for_execution(self.manager, 10000, 77)
