@@ -25,16 +25,51 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     qs = list(
-        Tariff.objects.filter(is_active=True).select_related('channel', 'group').order_by('price', 'id')[:80]
+        Tariff.objects.filter(is_active=True)
+        .select_related('channel', 'group')
+        .prefetch_related('group__channels')
+        .order_by('price', 'id')[:80]
     )
     items = []
+    channels: dict = {}
+    groups: dict = {}
     owned = set()
+
+    def _public_channel(ch):
+        return {
+            'id': ch.id,
+            'name': ch.name,
+            'link': ch.link,
+            'publish_mode': ch.publish_mode,
+            'bot_is_admin': ch.bot_is_admin,
+            'linkyar_is_admin': ch.linkyar_is_admin,
+            'manual_remind_hours': ch.manual_remind_hours,
+            'members_count': ch.members_count or 0,
+            'avg_views': ch.avg_views or 0,
+            'daily_reach': ch.daily_reach or 0,
+            'err_percent': str(ch.err_percent or ''),
+            'language': ch.language or '',
+            'about': ch.about or '',
+            'stats_updated_at': ch.stats_updated_at.isoformat() if ch.stats_updated_at else '',
+        }
+
     for t in qs:
         if user and (
             (t.channel_id and t.channel.manager_id == user.id)
             or (t.group_id and t.group.manager_id == user.id)
         ):
             owned.add(t.id)
+        if t.channel_id and t.channel_id not in channels:
+            channels[t.channel_id] = _public_channel(t.channel)
+        if t.group_id and t.group_id not in groups:
+            group_channels = list(t.group.channels.all())
+            groups[t.group_id] = {
+                'id': t.group_id,
+                'name': t.group.name,
+                'channel_ids': [ch.id for ch in group_channels],
+            }
+            for ch in group_channels:
+                channels.setdefault(ch.id, _public_channel(ch))
         items.append({
             'id': t.id,
             'name': t.name,
@@ -45,6 +80,8 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else ''),
             'channel_id': t.channel_id,
             'group_id': t.group_id,
+            'members_count': (t.channel.members_count if t.channel_id else 0) or 0,
+            'avg_views': (t.channel.avg_views if t.channel_id else 0) or 0,
         })
     today = timezone.localdate()
     until = today + timedelta(days=13)
@@ -62,7 +99,13 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
                 'date': day.isoformat(),
                 'manual': False,
             })
-    return JsonResponse({'ok': True, 'tariffs': items, 'busy': busy})
+    return JsonResponse({
+        'ok': True,
+        'tariffs': items,
+        'busy': busy,
+        'channels': list(channels.values()),
+        'groups': list(groups.values()),
+    })
 
 
 def _set_item_status(request: HttpRequest, action: str) -> JsonResponse:
