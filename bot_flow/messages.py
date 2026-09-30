@@ -251,7 +251,7 @@ MSG_BANNER_FEE_NOTE = 'هزینه بنر بعدی در کانال مرجع (اع
 MSG_CATALOG_HEADER = '📋 فهرست تعرفه‌ها — صفحه {page}'
 MSG_NO_FREE_DAYS = 'برای «{owner} — {tariff}» در این بازه نوبت خالی نیست.'
 MSG_PICK_DAY_HEADER = '📅 روزهای خالی\n{owner} — {tariff} — {price}'
-MSG_CART_ADDED = '➕ به سبد افزوده شد.\n\n{summary}'
+MSG_CART_ADDED = '➕ به سبد اضافه شد.\n\n{summary}'
 MSG_CHECKOUT_OK = '✅ سفارش شماره {order_id} با {count} قلم ثبت شد و برای مدیران ارسال شد.'
 MSG_ORDER_LINE = 'شماره {id} | {status} | {count} قلم | {amount}'
 
