@@ -92,13 +92,17 @@ def _run(coro):
         return asyncio.run(coro)
 
     try:
-        asyncio.get_running_loop()
-        import concurrent.futures
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(_runner).result(timeout=180)
-    except RuntimeError:
-        return _runner()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(_runner).result(timeout=180)
+        except RuntimeError:
+            return _runner()
+    except ModuleNotFoundError:
+        logger.warning('aiobale نصب نیست؛ کار لینک‌یار انجام نشد.')
+        return {'ok': False, 'error': 'aiobale_missing'}
 
 
 async def _with_client(async_fn):

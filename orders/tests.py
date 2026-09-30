@@ -76,6 +76,17 @@ class OrdersWebhookFlowTests(TestCase):
         self.assertEqual(self.order.status, 'paid')
         self.assertEqual(self.item.execution_status, 'paid')
         mock_send_message.assert_called()
+        texts = []
+        for call in mock_send_message.call_args_list:
+            if len(call.args) > 1:
+                texts.append(str(call.args[1]))
+            elif 'text' in call.kwargs:
+                texts.append(str(call.kwargs['text']))
+        joined = '\n'.join(texts)
+        self.assertIn('ساعت', joined)
+        self.assertNotIn('2026', joined)
+        self.assertNotIn('+00', joined)
+        self.assertIn('لینک‌ساز خودکار', joined)
         closed = self.client.post(reverse('webhook-payment'), {'order_id': self.order.id, 'status': 'paid'}, format='json')
         self.assertEqual(closed.status_code, 410)
 
@@ -496,6 +507,40 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(result['deactivated_tariffs'], 0)
         self.tariff.refresh_from_db()
         self.assertTrue(self.tariff.is_active)
+
+    @patch('orders.publish.bc.send_message')
+    @patch('orders.publish.bc.forward_message', return_value={'ok': True, 'result': {'message_id': 9}})
+    @patch('orders.publish.bc.get_me', return_value={'ok': True, 'result': {'id': 355714786}})
+    @patch('orders.publish.check_bot_admin', return_value='admin')
+    @patch('orders.publish.recover_permalink', return_value={'permalink': 'https://ble.ir/linktest/1/2'})
+    @patch('orders.publish.ly.get_me', side_effect=ModuleNotFoundError('aiobale'))
+    def test_bot_publish_runs_when_linkyar_library_is_missing(self, *_mocks):
+        from orders.publish import publish_due_items
+
+        start = timezone.now() - timedelta(hours=2)
+        order = Order.objects.create(
+            customer=self.customer,
+            status='paid',
+            banner_from_chat_id='@linktest',
+            banner_message_id='42',
+        )
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=12),
+            price=1000,
+            manager=self.manager,
+            manager_status='approved',
+            execution_status='paid',
+            duration_hours=12,
+        )
+        self.channel.publish_mode = 'bot'
+        self.channel.save(update_fields=['publish_mode'])
+        result = publish_due_items()
+        self.assertEqual(result['published'], 1)
+        self.assertEqual(result['failed_channels'], 0)
 
     def test_customer_sees_order_lines_outside_the_manager_inbox(self):
         import os

@@ -142,12 +142,20 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
             target = item.channel.name if item.channel else '?'
             if item.tariff_id and item.tariff.group_id:
                 target = item.tariff.group.name
+            mode_code = item.channel.publish_mode if item.channel_id else 'bot'
+            if mode_code == 'manual':
+                follow = 'در زمان نوبت یادآوری می‌آید تا خودتان منتشر کنید.'
+            elif mode_code == 'linkyar':
+                follow = 'سر ساعت، لینک‌یار خودکار منتشر می‌کند.'
+            else:
+                follow = 'سر ساعت، لینک‌ساز خودکار منتشر می‌کند.'
+            when = format_slot(timezone.localtime(item.effective_start))
             bale_client.send_message(
                 item.manager.bale_user_id,
                 f'💳 سفارش پرداخت شد.\n'
                 f'آیتم #{item.id} — {target}\n'
-                f'زمان انتشار: {item.effective_start}\n'
-                f'در حالت خودکار سر ساعت ارسال می‌شود؛ در حالت دستی یادآوری می‌آید.',
+                f'زمان انتشار: {when}\n'
+                f'{follow}',
             )
 
     if order.customer.bale_user_id:

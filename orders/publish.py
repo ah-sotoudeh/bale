@@ -37,8 +37,12 @@ def _bot_numeric_id() -> Optional[int]:
 
 
 def _linkyar_numeric_id() -> Optional[int]:
-    me = ly.get_me()
-    if not me.get('ok'):
+    try:
+        me = ly.get_me()
+    except Exception:
+        logger.warning('linkyar get_me failed')
+        return None
+    if not isinstance(me, dict) or not me.get('ok'):
         return None
     try:
         return int(me.get('user_id')) if me.get('user_id') is not None else None
