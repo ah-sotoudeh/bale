@@ -67,6 +67,16 @@ def user_facing_error(code: str) -> str:
     return mapping.get(code, 'خطایی رخ داد. یک بار دیگر تلاش کنید.')
 
 
+def banner_stage(banner: CustomerBanner) -> str:
+    """ready بعد از تأیید، rejected اگر آخرین درخواست رد شده، وگرنه در انتظار بررسی."""
+    if banner.from_linkbank:
+        return 'ready'
+    req = banner.publish_requests.order_by('-id').first()
+    if req and req.status == 'rejected':
+        return 'rejected'
+    return 'pending'
+
+
 def create_publish_request(
     user: User,
     *,
@@ -74,8 +84,16 @@ def create_publish_request(
     storage_message_id: str,
     caption: str = '',
     media_kind: str = '',
+    banner: CustomerBanner | None = None,
 ) -> Dict[str, Any]:
     fee = fee_for_user(user)
+    if banner is None:
+        banner = CustomerBanner.objects.filter(
+            customer=user,
+            is_active=True,
+            storage_chat_id=str(storage_chat_id),
+            storage_message_id=str(storage_message_id),
+        ).order_by('-id').first()
     req = BannerPublishRequest.objects.create(
         customer=user,
         storage_chat_id=str(storage_chat_id),
@@ -84,6 +102,7 @@ def create_publish_request(
         media_kind=media_kind or '',
         fee_toman=fee,
         status='pending',
+        customer_banner=banner,
     )
     _notify_operator(req)
     return {'ok': True, 'request': req, 'fee': fee}
@@ -144,7 +163,18 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         req.reviewed_at = timezone.now()
         req.save(update_fields=['status', 'reviewed_at'])
         if cust:
-            bc.send_message(cust, f'❌ درخواست بنر #{req.id} رد شد.')
+            title = req.customer_banner.display_title() if req.customer_banner_id else 'بنر'
+            bc.send_message(
+                cust,
+                f'بنر «{title}» تأیید نشد. سفارش پرداخت‌نشده‌ای که با این بنر مانده بود لغو شد.',
+            )
+        if req.customer_banner_id:
+            try:
+                from orders.cart import cancel_orders_waiting_on_banner
+
+                cancel_orders_waiting_on_banner(req.customer_banner)
+            except Exception:
+                logger.exception('cancel orders after banner reject')
         return {'ok': True, 'status': 'rejected', 'message': f'درخواست #{req.id} رد شد.'}
 
     lb = linkbank_channel()
@@ -164,17 +194,34 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     result = fwd.get('result') or {}
     lb_mid = str(result.get('message_id') or '')
 
-    banner = CustomerBanner.objects.create(
-        customer=req.customer,
-        caption=req.caption,
-        storage_chat_id=req.storage_chat_id,
-        storage_message_id=req.storage_message_id,
-        from_linkbank=True,
-        linkbank_chat_id=lb,
-        linkbank_message_id=lb_mid,
-        media_kind=req.media_kind,
-        is_active=True,
-    )
+    banner = req.customer_banner
+    if banner is None:
+        banner = CustomerBanner.objects.filter(
+            customer=req.customer,
+            is_active=True,
+            storage_chat_id=req.storage_chat_id,
+            storage_message_id=req.storage_message_id,
+        ).order_by('-id').first()
+    if banner is None:
+        banner = CustomerBanner.objects.create(
+            customer=req.customer,
+            caption=req.caption,
+            storage_chat_id=req.storage_chat_id,
+            storage_message_id=req.storage_message_id,
+            from_linkbank=True,
+            linkbank_chat_id=lb,
+            linkbank_message_id=lb_mid,
+            media_kind=req.media_kind,
+            is_active=True,
+        )
+    else:
+        banner.from_linkbank = True
+        banner.linkbank_chat_id = lb
+        banner.linkbank_message_id = lb_mid
+        if req.caption and not banner.caption:
+            banner.caption = req.caption
+        banner.is_active = True
+        banner.save()
     req.status = 'approved'
     req.reviewed_at = timezone.now()
     req.customer_banner = banner
@@ -182,15 +229,20 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     req.save()
 
     if cust:
-        fee_note = ''
-        if req.fee_toman:
-            fee_note = f'\n(تعرفه ثبت: {req.fee_toman:,} ت — پرداخت کیف پول در نسخه بعد)'
+        kb = bc.inline_keyboard([
+            [{'text': 'انتخاب کانال', 'callback_data': 'cu:catalog'}],
+        ])
         bc.send_message(
             cust,
-            f'✅ بنر شما در {lb} ثبت شد و دائمی است.{fee_note}\n'
-            f'«{banner.display_title()}» آماده سفارش است.\n'
-            f'/banners',
+            f'بنر «{banner.display_title()}» تأیید شد و آماده است.',
+            reply_markup=kb,
         )
+    try:
+        from orders.cart import release_orders_waiting_on_banner
+
+        release_orders_waiting_on_banner(banner)
+    except Exception:
+        logger.exception('release orders waiting on banner')
     return {
         'ok': True,
         'status': 'approved',

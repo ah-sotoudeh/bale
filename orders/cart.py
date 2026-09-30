@@ -137,16 +137,33 @@ def checkout(order: Order) -> Dict[str, Any]:
         ):
             return {'ok': False, 'error': 'slot_conflict', 'item_id': it.id}
 
-    deadline = timezone.now() + timedelta(hours=MANAGER_HOURS)
-    order.status = 'waiting_managers'
-    order.managers_deadline = deadline
     order.recompute_total()
-    order.save()
     CustomerDraft.objects.filter(order=order).delete()
 
     for it in items:
         it.manager_status = 'pending'
         it.save(update_fields=['manager_status'])
+
+    banner = order.customer_banner
+    ready = bool(banner and banner.from_linkbank)
+    if not ready:
+        order.status = 'waiting_banner'
+        order.managers_deadline = None
+        order.save()
+        cust = order.customer.bale_user_id
+        if cust:
+            bc.send_message(
+                cust,
+                f'سفارش {fa_num(order.id)} ثبت شد.\n'
+                'بنر هنوز در انتظار بررسی است. تا تأیید پشتیبانی، برای کانال‌دار فرستاده نمی‌شود '
+                'و پولی از شما کم نمی‌شود.',
+            )
+        return {'ok': True, 'order': order, 'count': len(items), 'held_for_banner': True}
+
+    deadline = timezone.now() + timedelta(hours=MANAGER_HOURS)
+    order.status = 'waiting_managers'
+    order.managers_deadline = deadline
+    order.save()
 
     for it in items:
         _notify_manager(order, it)
@@ -461,11 +478,178 @@ def _release_open_items(order: Order, manager_status: str) -> list:
     return touched
 
 
+REFUND_CUTOFF = timedelta(hours=2)
+
+
+def _open_items(order: Order):
+    return [
+        it
+        for it in order.items.all()
+        if it.manager_status not in ('rejected', 'expired', 'customer_declined')
+        and it.execution_status not in ('cancelled', 'executed')
+    ]
+
+
+def publish_start(order: Order):
+    starts = [it.effective_start for it in _open_items(order) if it.effective_start]
+    return min(starts) if starts else None
+
+
+def refund_window_open(order: Order) -> bool:
+    start = publish_start(order)
+    if start is None:
+        return False
+    return timezone.now() <= start - REFUND_CUTOFF
+
+
+def release_orders_waiting_on_banner(banner) -> int:
+    """بعد از تأیید بنر، سفارش‌های منتظر را برای کانال‌دار می‌فرستد."""
+    n = 0
+    orders = Order.objects.filter(
+        customer_id=banner.customer_id,
+        status='waiting_banner',
+        customer_banner=banner,
+    )
+    for order in orders:
+        order.status = 'waiting_managers'
+        order.managers_deadline = timezone.now() + timedelta(hours=MANAGER_HOURS)
+        order.save(update_fields=['status', 'managers_deadline'])
+        for it in order.items.filter(manager_status='pending'):
+            _notify_manager(order, it)
+        cust = order.customer.bale_user_id
+        if cust:
+            bc.send_message(
+                cust,
+                f'بنر تأیید شد. سفارش {fa_num(order.id)} برای کانال‌ها فرستاده شد. '
+                'پرداخت بعد از قبول کانال است.',
+            )
+        n += 1
+    return n
+
+
+def cancel_orders_waiting_on_banner(banner) -> int:
+    n = 0
+    orders = list(
+        Order.objects.filter(
+            customer_id=banner.customer_id,
+            status='waiting_banner',
+            customer_banner=banner,
+        )
+    )
+    for order in orders:
+        cancel_customer_order(order)
+        n += 1
+    return n
+
+
+def _refunded_so_far(item_id: int) -> int:
+    from django.db.models import Sum
+
+    from wallet.models import WalletLedger
+
+    return int(
+        WalletLedger.objects.filter(ref=f'item:{item_id}', entry_type='refund').aggregate(s=Sum('amount'))[
+            's'
+        ]
+        or 0
+    )
+
+
+def refund_paid_order(order: Order, amount: Optional[int] = None, *, reason: str = '') -> Dict[str, Any]:
+    """بازگشت پول پرداخت‌شده به اعتبار مشتری. مبلغ خالی یعنی کل سفارش."""
+    from wallet.services import credit
+
+    note = (reason or f'بازگشت سفارش {fa_num(order.id)} به اعتبار')[:255]
+    with transaction.atomic():
+        order = Order.objects.select_for_update().select_related('customer').get(pk=order.pk)
+        if order.status != 'paid':
+            return {'ok': False, 'error': 'not_paid'}
+        items = _open_items(order)
+        remaining = 0
+        for it in items:
+            already = _refunded_so_far(it.id)
+            remaining += max(0, int(it.price) - already)
+        if remaining <= 0:
+            return {'ok': False, 'error': 'already_refunded'}
+        pay = remaining if amount is None else min(int(amount), remaining)
+        if pay <= 0:
+            return {'ok': False, 'error': 'bad_amount'}
+        full = pay >= remaining
+        left = pay
+        credited = 0
+        for it in items:
+            if left <= 0:
+                break
+            already = _refunded_so_far(it.id)
+            room = max(0, int(it.price) - already)
+            chunk = min(room, left)
+            if chunk <= 0:
+                continue
+            credit(
+                order.customer,
+                chunk,
+                'refund',
+                ref=f'item:{it.id}',
+                note=note,
+                idempotency_key=f'refund:item:{it.id}:{int(already) + chunk}'[:80],
+            )
+            credited += chunk
+            left -= chunk
+            if full or chunk >= room:
+                it.manager_status = 'customer_declined'
+                it.execution_status = 'cancelled'
+                it.save()
+        if full:
+            order.status = 'cancelled'
+            order.total_amount = 0
+            order.save(update_fields=['status', 'total_amount'])
+    cust = order.customer.bale_user_id
+    if cust:
+        bc.send_message(
+            cust,
+            f'{fa_money(credited)} بابت سفارش {fa_num(order.id)} به اعتبار شما در لینک‌بان برگشت.',
+        )
+    if full:
+        told = set()
+        for it in order.items.select_related('manager'):
+            mid = it.manager.bale_user_id if it.manager else ''
+            if not mid or mid in told:
+                continue
+            told.add(mid)
+            bc.send_message(
+                mid,
+                f'سفارش {fa_num(order.id)} لغو شد و روزش آزاد است. مبلغ به اعتبار مشتری برگشت.',
+            )
+    return {'ok': True, 'credited': credited, 'full': full, 'order_status': order.status}
+
+
 def cancel_customer_order(order: Order) -> Dict[str, Any]:
-    """مشتری قبل از پرداخت سفارش را می‌بندد و روزهای قفل‌شده آزاد می‌شوند."""
+    """پیش از پرداخت روز آزاد می‌شود. بعد از پرداخت، تا ۲ ساعت مانده به انتشار به اعتبار برمی‌گردد."""
     if order.status == 'cancelled':
         return {'ok': True, 'order_status': 'cancelled', 'already': True}
-    if order.status not in ('draft', 'waiting_managers', 'waiting_customer_confirm', 'waiting_payment'):
+    if order.status == 'paid':
+        if not refund_window_open(order):
+            from bot_flow.jalali import format_slot
+
+            start = publish_start(order)
+            when = format_slot(timezone.localtime(start)) if start else ''
+            return {
+                'ok': False,
+                'error': 'too_late',
+                'message': (
+                    'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. '
+                    + (f'زمان انتشار: {when}. ' if when else '')
+                    + 'اگر مشکلی هست، اعتراض ثبت کنید.'
+                ),
+            }
+        return refund_paid_order(order, reason=f'لغو سفارش {fa_num(order.id)} توسط مشتری')
+    if order.status not in (
+        'draft',
+        'waiting_banner',
+        'waiting_managers',
+        'waiting_customer_confirm',
+        'waiting_payment',
+    ):
         return {'ok': False, 'error': 'not_cancellable'}
     touched = _release_open_items(order, 'customer_declined')
     order.status = 'cancelled'

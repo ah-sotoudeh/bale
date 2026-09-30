@@ -510,7 +510,7 @@ def api_orders(request: HttpRequest) -> JsonResponse:
         items.append({
             'id': it.id,
             'order_id': it.order_id,
-            'inbox': _item_in_manager_inbox(it, user),
+            'inbox': _item_in_manager_inbox(it, user) and it.order.status != 'waiting_banner',
             'owner': (
                 it.tariff.group.name
                 if it.tariff.group_id

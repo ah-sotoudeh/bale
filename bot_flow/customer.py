@@ -70,23 +70,35 @@ def open_customer_home(chat_id: str, bale_user_id: str, username: str = '') -> N
     user = ensure_user(bale_user_id, username)
     sess = get_session(bale_user_id)
     save_session(sess, STATE_CUST_HOME, role='customer')
-    n_b = CustomerBanner.objects.filter(customer=user, is_active=True, from_linkbank=True).count()
+    from orders.banner_publish import banner_stage
+
+    owned = list(CustomerBanner.objects.filter(customer=user, is_active=True))
+    n_b = sum(1 for b in owned if banner_stage(b) == 'ready')
+    n_pending = sum(1 for b in owned if banner_stage(b) == 'pending')
     draft = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
     n_cart = draft.items.count() if draft else 0
     n_open = Order.objects.filter(
         customer=user,
-        status__in=('waiting_managers', 'waiting_customer_confirm', 'waiting_payment', 'paid'),
+        status__in=(
+            'waiting_banner',
+            'waiting_managers',
+            'waiting_customer_confirm',
+            'waiting_payment',
+            'paid',
+        ),
     ).count()
     from wallet import services as ws
 
-    bal = ws.available_balance(user)
+    bal = ws.balance_breakdown(user)
     text = (
         'بخش مشتری\n\n'
         f'شناسه: {user.bale_handle or user.bale_user_id}\n'
         f'بنر آماده: {n_b}\n'
+        f'در انتظار بررسی: {n_pending}\n'
         f'در سبد: {n_cart}\n'
         f'سفارش باز: {n_open}\n'
-        f'موجودی: {bal:,} تومان\n\n'
+        f'اعتبار: {bal["credit"]:,} تومان\n'
+        f'در امانت: {bal["escrow"]:,} تومان\n\n'
         'یک گزینه را انتخاب کنید:'
     )
     bc.send_message(str(chat_id), text, reply_markup=customer_home_keyboard())
@@ -98,9 +110,16 @@ def start_customer(chat_id: str, bale_user_id: str, username: str = '') -> None:
 
 def show_banner_list(chat_id: str, bale_user_id: str) -> None:
     user = ensure_user(bale_user_id)
+    from orders.banner_publish import banner_stage
+
     banners = list(
-        CustomerBanner.objects.filter(customer=user, is_active=True, from_linkbank=True).order_by('-id')[:20]
+        CustomerBanner.objects.filter(customer=user, is_active=True).order_by('-id')[:20]
     )
+    stage_label = {
+        'ready': 'آماده برای سفارش',
+        'pending': 'در انتظار بررسی',
+        'rejected': 'رد شده',
+    }
     lb = linkbank_username()
     lines = [
         '🖼 بنرهای من',
@@ -115,8 +134,9 @@ def show_banner_list(chat_id: str, bale_user_id: str) -> None:
         lines.append('هنوز بنری ندارید. از کانال مرجع بازارسال کنید یا بنر جدید بفرستید.')
     else:
         for b in banners:
+            label = stage_label.get(banner_stage(b), '')
             rows.append([{
-                'text': f'📌 {b.display_title()}'[:60],
+                'text': f'📌 {b.display_title()} · {label}'[:60],
                 'callback_data': f'cu:banner:{b.id}',
             }])
     rows.append(_nav_row())
@@ -366,6 +386,7 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
                 storage_message_id=str(msg_id),
                 caption=caption,
                 media_kind=_media_kind(message),
+                banner=banner,
             )
         except Exception:
             logger.exception('banner request')
@@ -421,10 +442,12 @@ def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
 
 def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
     user = ensure_user(bale_user_id)
+    from orders.banner_publish import banner_stage
+
     banner = CustomerBanner.objects.filter(
-        id=banner_id, customer=user, is_active=True, from_linkbank=True
+        id=banner_id, customer=user, is_active=True
     ).first()
-    if not banner:
+    if not banner or banner_stage(banner) == 'rejected':
         bc.send_message(str(chat_id), 'بنر معتبر پیدا نشد.')
         show_banner_list(chat_id, bale_user_id)
         return

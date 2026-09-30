@@ -1123,3 +1123,172 @@ class CustomerBannerFlowTests(TestCase):
         )
         self.assertEqual(denied.status_code, 403)
         self.assertIn('کانال شما', denied.json()['message'])
+
+
+class CriticalMoneyTests(TestCase):
+    def setUp(self):
+        self.customer = User.objects.create_user(username='qa', password='pass', bale_user_id='qa-1')
+        self.manager = User.objects.create_user(username='qa-mgr', password='pass', bale_user_id='qa-m')
+        self.channel = Channel.objects.create(name='تست', link='@linktest', manager=self.manager)
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='تست QA', duration_hours=24, price=1000, start_hour=11
+        )
+
+    def _paid_item(self, hours_ahead):
+        start = timezone.now() + timedelta(hours=hours_ahead)
+        order = Order.objects.create(
+            customer=self.customer, status='paid', total_amount=1000, banner_message_id='1'
+        )
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=1000,
+            manager=self.manager,
+            manager_status='approved',
+            execution_status='paid',
+            duration_hours=24,
+        )
+        return order
+
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_pending_banner_is_listed_and_checkout_waits(self, send):
+        from orders.banner_publish import banner_stage
+        from orders.cart import checkout
+        from orders.models import CustomerBanner
+
+        banner = CustomerBanner.objects.create(
+            customer=self.customer,
+            title='تست QA',
+            caption='تست QA - لطفا نادیده بگیرید',
+            storage_chat_id='1',
+            storage_message_id='9',
+            from_linkbank=False,
+            media_kind='photo',
+        )
+        self.assertEqual(banner_stage(banner), 'pending')
+        order = Order.objects.create(
+            customer=self.customer,
+            status='draft',
+            banner_message_id='9',
+            banner_from_chat_id='1',
+            customer_banner=banner,
+        )
+        start = timezone.now() + timedelta(days=4)
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=1000,
+            manager=self.manager,
+            manager_status='cart',
+            duration_hours=24,
+        )
+        result = checkout(order)
+        self.assertTrue(result.get('ok'), result)
+        self.assertTrue(result.get('held_for_banner'))
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'waiting_banner')
+        sent = '\n'.join(str(c.args[1]) for c in send.call_args_list if len(c.args) > 1)
+        self.assertNotIn('درخواست تبلیغ تازه', sent)
+
+    @patch('wallet.services.is_operator', return_value=True)
+    @patch('integrations.bale_client.forward_message', return_value={'ok': True, 'result': {'message_id': 77}})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_approval_updates_the_same_banner(self, send, _fwd, _op):
+        from orders.banner_publish import create_publish_request, operator_decide
+        from orders.models import CustomerBanner
+
+        banner = CustomerBanner.objects.create(
+            customer=self.customer,
+            caption='تست QA - لطفا نادیده بگیرید',
+            storage_chat_id='1',
+            storage_message_id='15',
+            from_linkbank=False,
+            media_kind='photo',
+        )
+        req = create_publish_request(
+            self.customer,
+            storage_chat_id='1',
+            storage_message_id='15',
+            caption=banner.caption,
+            media_kind='photo',
+            banner=banner,
+        )['request']
+        decided = operator_decide(req.id, 'op', True)
+        self.assertTrue(decided.get('ok'), decided)
+        banner.refresh_from_db()
+        self.assertTrue(banner.from_linkbank)
+        self.assertEqual(CustomerBanner.objects.filter(customer=self.customer).count(), 1)
+        sent = '\n'.join(str(c.args[1]) for c in send.call_args_list if len(c.args) > 1)
+        self.assertIn('تأیید شد و آماده است', sent)
+
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_customer_can_refund_a_paid_order_into_credit(self, _send):
+        from orders.cart import add_to_cart, cancel_customer_order
+        from wallet.services import balance_breakdown
+
+        order = self._paid_item(48)
+        result = cancel_customer_order(order)
+        self.assertTrue(result.get('ok'), result)
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'cancelled')
+        self.assertEqual(balance_breakdown(self.customer)['credit'], 1000)
+        other = User.objects.create_user(username='nextqa', password='pass', bale_user_id='qa-2')
+        day = timezone.localtime(order.items.first().requested_start).date()
+        opened = add_to_cart(other, self.tariff, day)
+        self.assertTrue(opened['ok'], opened)
+
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_refund_closes_inside_two_hours(self, _send):
+        from orders.cart import cancel_customer_order
+
+        order = self._paid_item(1)
+        result = cancel_customer_order(order)
+        self.assertFalse(result.get('ok'))
+        self.assertEqual(result.get('error'), 'too_late')
+        self.assertIn('۲ ساعت', result.get('message') or '')
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'paid')
+
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_a_second_payment_returns_to_credit(self, _send):
+        from orders.bale_pay import handle_successful_payment
+        from wallet.services import balance_breakdown
+
+        order = Order.objects.create(customer=self.customer, status='waiting_payment', total_amount=1000)
+        payload = f'order-{order.id}'
+
+        def pay(charge):
+            handle_successful_payment({
+                'chat': {'id': 'qa-1'},
+                'successful_payment': {
+                    'invoice_payload': payload,
+                    'total_amount': 10_000,
+                    'telegram_payment_charge_id': charge,
+                },
+            })
+
+        pay('charge-a')
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'paid')
+        self.assertEqual(balance_breakdown(self.customer)['credit'], 0)
+        pay('charge-a')
+        self.assertEqual(balance_breakdown(self.customer)['credit'], 0)
+        pay('charge-b')
+        self.assertEqual(balance_breakdown(self.customer)['credit'], 1000)
+
+    @patch('orders.bale_pay.bc.create_payment_request', return_value={'ok': True})
+    def test_the_same_invoice_is_not_sent_twice_in_a_row(self, create):
+        from orders.bale_pay import send_order_invoices
+
+        order = Order.objects.create(customer=self.customer, status='waiting_payment', total_amount=1000)
+        first = send_order_invoices(order, 'qa-1')
+        second = send_order_invoices(order, 'qa-1')
+        self.assertEqual(first['sent'], 1)
+        self.assertEqual(second['sent'], 0)
+        self.assertEqual(create.call_count, 1)

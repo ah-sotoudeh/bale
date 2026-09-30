@@ -32,6 +32,7 @@ class WalletLedger(models.Model):
         ('payout_paid', 'PayoutPaid'),
         ('payout_unlock', 'PayoutUnlock'),  # if request cancelled
         ('spend', 'Spend'),  # use wallet balance on new order (future)
+        ('escrow', 'Escrow'),  # پرداخت دیده‌شده؛ در موجودی قابل برداشت جمع نمی‌شود
         ('adjust', 'Adjust'),
     ]
     user = models.ForeignKey(

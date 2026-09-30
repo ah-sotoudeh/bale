@@ -103,6 +103,29 @@ def process_manager_response(
     return process_manager_item(order_item_id, str(manager_bale_id), action, new_start=parsed)
 
 
+def _note_customer_payment(order: Order) -> None:
+    """ردیف قابل دیدن در گردش اعتبار. مبلغ در جمع موجودی نمی‌آید."""
+    from django.db import IntegrityError
+
+    from bot_flow.messages import fa_money, fa_num
+    from wallet.models import WalletLedger
+
+    key = f'payshow:{order.id}'
+    if WalletLedger.objects.filter(idempotency_key=key).exists():
+        return
+    try:
+        WalletLedger.objects.create(
+            user=order.customer,
+            amount=int(order.total_amount or 0),
+            entry_type='escrow',
+            ref=f'order:{order.id}',
+            note=f'پرداخت سفارش {fa_num(order.id)} · {fa_money(order.total_amount)}',
+            idempotency_key=key,
+        )
+    except IntegrityError:
+        return
+
+
 def process_payment_paid(order_id: int) -> Dict[str, Any]:
     from django.db import transaction
 
@@ -150,24 +173,35 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
             else:
                 follow = 'سر ساعت، لینک‌ساز خودکار منتشر می‌کند.'
             when = format_slot(timezone.localtime(item.effective_start))
+            from bot_flow.messages import fa_money, fa_num
+
             bale_client.send_message(
                 item.manager.bale_user_id,
-                f'💳 سفارش پرداخت شد.\n'
-                f'آیتم #{item.id} — {target}\n'
-                f'زمان انتشار: {when}\n'
+                f'سفارش {fa_num(order.id)} پرداخت شد.\n'
+                f'{target}\n'
+                f'زمان انتشار: {when}، {fa_money(item.price)}\n'
                 f'{follow}',
             )
 
     if order.customer.bale_user_id:
         extra = ''
         if ref.get('ok'):
-            extra = f'\nبنر روی کانال مرجع ({ref.get("ref_chat")}) ثبت شد.'
+            extra = f'\nبنر روی کانال مرجع ثبت شد.'
         elif ref.get('error'):
-            extra = '\n(ثبت روی کانال مرجع فعلاً ممکن نشد؛ پیگیری فنی)'
+            extra = '\nثبت روی کانال مرجع فعلاً ممکن نشد. پشتیبانی پیگیری می‌کند.'
+        from bot_flow.messages import fa_money, fa_num
+
+        slots = []
+        for item in order.items.filter(manager_status='approved'):
+            target = item.channel.name if item.channel else 'کانال'
+            when = format_slot(timezone.localtime(item.effective_start))
+            slots.append(f'{target}: {when}، {fa_money(item.price)}')
+        slot_text = '\n'.join(slots)
         bale_client.send_message(
             order.customer.bale_user_id,
-            f'سفارش #{order.id} پرداخت شد. در زمان مقرر منتشر می‌شود.{extra}',
+            f'سفارش {fa_num(order.id)} پرداخت شد.\n{slot_text}\nدر زمان مقرر منتشر می‌شود.{extra}',
         )
+    _note_customer_payment(order)
 
     return {
         'ok': True,

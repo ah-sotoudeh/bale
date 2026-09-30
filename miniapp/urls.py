@@ -49,4 +49,5 @@ urlpatterns = [
     path('api/operator/banners', api_shop.api_operator_banners),
     path('api/operator/banner-decide', api_shop.api_operator_banner_decide),
     path('api/operator/resolve', api_shop.api_operator_resolve),
+    path('api/operator/refund', api_shop.api_operator_refund),
 ]

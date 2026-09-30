@@ -33,9 +33,51 @@ def net_manager_earn(price_toman: int) -> int:
     return price_toman - fee_amount(price_toman)
 
 
+def customer_escrow_toman(user: User) -> int:
+    from orders.models import OrderItem
+
+    total = (
+        OrderItem.objects.filter(
+            order__customer=user,
+            order__status='paid',
+            execution_status__in=(
+                'paid',
+                'remind_sent',
+                'awaiting_manager_publish',
+                'awaiting_customer_confirm',
+                'awaiting_operator',
+            ),
+        ).aggregate(s=Sum('price'))['s']
+        or 0
+    )
+    return int(total)
+
+
+def manager_escrow_toman(user: User) -> int:
+    from orders.models import OrderItem
+
+    total = (
+        OrderItem.objects.filter(
+            manager=user,
+            order__status='paid',
+            execution_status__in=(
+                'paid',
+                'remind_sent',
+                'awaiting_manager_publish',
+                'awaiting_customer_confirm',
+                'awaiting_operator',
+            ),
+        ).aggregate(s=Sum('price'))['s']
+        or 0
+    )
+    return int(total)
+
+
 def balance_breakdown(user: User) -> Dict[str, int]:
     qs = WalletLedger.objects.filter(user=user)
-    total = qs.aggregate(s=Sum('amount'))['s'] or 0
+    # اعتبار مشتری فقط بازگشت‌هاست. درآمد کانال‌دار جداست. ردیف امانت در جمع هیچ‌کدام نمی‌آید.
+    available = qs.exclude(entry_type__in=('escrow', 'refund')).aggregate(s=Sum('amount'))['s'] or 0
+    credit = qs.filter(entry_type='refund').aggregate(s=Sum('amount'))['s'] or 0
     locked = (
         PayoutRequest.objects.filter(user=user, status='pending').aggregate(s=Sum('amount_toman'))[
             's'
@@ -47,17 +89,23 @@ def balance_breakdown(user: User) -> Dict[str, int]:
         or 0
     )
     return {
-        'available': total,
-        'locked_pending': locked,
-        'paid_out': paid,
-        'ledger_sum': total,
+        'available': int(available),
+        'credit': int(credit),
+        'locked_pending': int(locked),
+        'paid_out': int(paid),
+        'ledger_sum': int(available),
+        'escrow': customer_escrow_toman(user),
+        'manager_escrow': manager_escrow_toman(user),
     }
 
 
 def recent_ledger(user: User, limit: int = 12) -> List[Dict[str, Any]]:
     rows = []
-    rows_qs = WalletLedger.objects.filter(user=user).exclude(
-        idempotency_key__startswith='inv:'
+    rows_qs = (
+        WalletLedger.objects.filter(user=user)
+        .exclude(idempotency_key__startswith='inv:')
+        .exclude(idempotency_key__startswith='invsent:')
+        .exclude(idempotency_key__startswith='charge:')
     )
     for entry in rows_qs.order_by('-id')[:limit]:
         rows.append(

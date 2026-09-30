@@ -30,7 +30,7 @@ ERR_FA = {
     'bad_fields': 'نام، ساعت، مدت و قیمت را کامل بنویسید.',
     'bad_date': 'این تاریخ معتبر نیست.',
     'empty_cart': 'سبد خالی است. اول یک روز خالی بردارید.',
-    'no_banner': 'اول یک بنر آماده از لینک‌بانک انتخاب کنید.',
+    'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، افزودن به سبد بسته است.',
     'slot_conflict': 'این روز پر است. روز دیگری را انتخاب کنید.',
     'no_channel': 'کانالی برای این تعرفه نیست.',
     'already_pending': 'یک درخواست تسویه باز دارید.',
@@ -41,13 +41,19 @@ ERR_FA = {
     'need_holder_name': 'نام صاحب حساب لازم است.',
     'not_pending': 'این سفارش دیگر در انتظار نیست.',
     'inactive': 'این تعرفه فعال نیست.',
-    'not_cancellable': 'این سفارش دیگر لغو نمی‌شود. اگر پرداخت شده، از پشتیبانی بخواهید.',
+    'not_cancellable': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
+    'too_late': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
+    'not_paid': 'این سفارش پرداخت نشده است.',
+    'already_refunded': 'مبلغ این سفارش قبلاً برگشته است.',
     'inactive_tariff': 'این تعرفه خاموش است و روزش فروخته نمی‌شود.',
 }
 
 
-def _err(code: str, status: int = 400) -> JsonResponse:
-    return JsonResponse({'ok': False, 'error': code, 'message': ERR_FA.get(code, 'خطا')}, status=status)
+def _err(code: str, status: int = 400, message: str = '') -> JsonResponse:
+    return JsonResponse(
+        {'ok': False, 'error': code, 'message': message or ERR_FA.get(code, 'خطا')},
+        status=status,
+    )
 
 
 def _parse_day(body) -> object | None:
@@ -257,13 +263,17 @@ def api_banners(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    from orders.banner_publish import banner_stage
+
     rows = []
     for b in CustomerBanner.objects.filter(customer=user, is_active=True)[:40]:
+        stage = banner_stage(b)
         rows.append({
             'id': b.id,
             'title': b.display_title(),
             'caption': b.caption or '',
-            'from_linkbank': b.from_linkbank,
+            'from_linkbank': stage == 'ready',
+            'stage': stage,
             'media_kind': b.media_kind,
         })
     return JsonResponse({'ok': True, 'banners': rows})
@@ -388,10 +398,12 @@ def api_cart_banner(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
+    from orders.banner_publish import banner_stage
+
     b = CustomerBanner.objects.filter(
-        id=body.get('banner_id'), customer=user, is_active=True, from_linkbank=True
+        id=body.get('banner_id'), customer=user, is_active=True
     ).first()
-    if not b:
+    if not b or banner_stage(b) == 'rejected':
         return _err('no_banner')
     order = cart_svc.get_or_create_draft(user)
     order.customer_banner = b
@@ -475,6 +487,13 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
         .select_related('customer_banner')
         .order_by('-id')[:40]
     ):
+        can_pay = o.status == 'waiting_payment'
+        can_cancel = o.status in (
+            'waiting_banner',
+            'waiting_managers',
+            'waiting_customer_confirm',
+            'waiting_payment',
+        ) or (o.status == 'paid' and cart_svc.refund_window_open(o))
         rows.append({
             'id': o.id,
             'status': o.status,
@@ -482,6 +501,9 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
             'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
             'pay_hint': _order_deadline_hint(o),
+            'can_pay': can_pay,
+            'can_cancel': can_cancel,
+            'can_dispute': o.status == 'paid' and not can_cancel,
         })
     return JsonResponse({'ok': True, 'orders': rows})
 
@@ -503,7 +525,7 @@ def api_order_cancel(request: HttpRequest) -> JsonResponse:
         return _err('not_found', 404)
     result = cart_svc.cancel_customer_order(order)
     if not result.get('ok'):
-        return _err(result.get('error') or 'not_cancellable')
+        return _err(result.get('error') or 'not_cancellable', message=str(result.get('message') or ''))
     return JsonResponse(result)
 
 
@@ -661,3 +683,42 @@ def api_operator_resolve(request: HttpRequest) -> JsonResponse:
 
         return JsonResponse(_with_message(result), status=400)
     return JsonResponse({'ok': True, 'status': result.get('status') or ''})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_refund(request: HttpRequest) -> JsonResponse:
+    """بازگشت کامل یا بخشیِ سفارش پرداخت‌شده به اعتبار مشتری."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return _err('forbidden', 403)
+    body = _json_body(request)
+    try:
+        order_id = int(body.get('order_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    order = Order.objects.filter(id=order_id).first()
+    if not order:
+        return _err('not_found', 404)
+    amount = body.get('amount')
+    try:
+        amount_i = int(amount) if amount not in (None, '') else None
+    except (TypeError, ValueError):
+        return _err('bad_fields')
+    result = cart_svc.refund_paid_order(
+        order,
+        amount_i,
+        reason=f'بازگشت توسط پشتیبانی، سفارش {order.id}',
+    )
+    if not result.get('ok'):
+        return _err(result.get('error') or 'not_paid', message=str(result.get('message') or ''))
+    credited = int(result.get('credited') or 0)
+    return JsonResponse({
+        'ok': True,
+        'credited': credited,
+        'full': bool(result.get('full')),
+        'message': f'{credited} تومان به اعتبار مشتری برگشت.',
+    })

@@ -84,7 +84,9 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
     user = _ensure_user(bale_user_id, username)
     bal = ws.available_balance(user)
     n_ch = Channel.objects.filter(manager=user).count()
-    n_pending = OrderItem.objects.filter(manager=user, manager_status='pending').count()
+    n_pending = OrderItem.objects.filter(
+        manager=user, manager_status='pending'
+    ).exclude(order__status='waiting_banner').count()
     text = (
         '🎛️ پنل مدیر کانال\n\n'
         f'آیدی: {user.bale_handle or user.bale_user_id}\n'

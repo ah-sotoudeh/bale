@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, Optional
 
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from bot_flow.messages import fa_money, fa_num
 from integrations import bale_client as bc
@@ -141,6 +142,36 @@ def record_paid_part(order: Order, index: int, amount: int) -> bool:
     return True
 
 
+def _invoice_recently_sent(order_id: int, index: int) -> bool:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    row = WalletLedger.objects.filter(idempotency_key=f'invsent:{order_id}:{index}').first()
+    if not row or not row.created_at:
+        return False
+    return timezone.now() - row.created_at < timedelta(minutes=20)
+
+
+def _mark_invoice_sent(order: Order, index: int) -> None:
+    from django.utils import timezone
+
+    key = f'invsent:{order.id}:{index}'
+    row = WalletLedger.objects.filter(idempotency_key=key).first()
+    if row:
+        row.created_at = timezone.now()
+        row.save(update_fields=['created_at'])
+        return
+    WalletLedger.objects.create(
+        user=order.customer,
+        amount=0,
+        entry_type='adjust',
+        ref=f'order-{order.id}',
+        note='invoice-sent',
+        idempotency_key=key,
+    )
+
+
 def send_order_invoices(order: Order, chat_id: str) -> Dict[str, Any]:
     """فاکتورهای مانده را می‌فرستد. هر کدام حداکثر یک میلیون تومان است."""
     parts = payment_parts(order.total_amount)
@@ -152,6 +183,9 @@ def send_order_invoices(order: Order, chat_id: str) -> Dict[str, Any]:
         if paid.get(index) == amount:
             skipped += 1
             continue
+        if _invoice_recently_sent(order.id, index):
+            skipped += 1
+            continue
         result = bc.create_payment_request(
             chat_id=str(chat_id),
             amount=amount,
@@ -161,6 +195,7 @@ def send_order_invoices(order: Order, chat_id: str) -> Dict[str, Any]:
         )
         if result.get('ok'):
             sent += 1
+            _mark_invoice_sent(order, index)
         else:
             failed += 1
     return {
@@ -179,7 +214,7 @@ def announce_invoices(chat_id: str, result: Dict[str, Any]) -> None:
     if sent and parts <= 1:
         bc.send_message(
             str(chat_id),
-            'فاکتور کیف‌پول بله آمد. پس از پرداخت موفق، سفارش خودش ثبت می‌شود.',
+            'فاکتور بالا را با کیف پول بله بپردازید. تا پرداخت، پولی در امانت نیست.',
         )
     elif sent:
         bc.send_message(
@@ -251,6 +286,12 @@ def handle_pre_checkout(query: Dict[str, Any]) -> None:
     if order.status == 'paid':
         bc.answer_pre_checkout_query(qid, False, 'این سفارش قبلاً پرداخت شده است')
         return
+    if order.status in ('cancelled', 'rejected'):
+        bc.answer_pre_checkout_query(qid, False, 'این سفارش لغو شده است')
+        return
+    if order.managers_deadline and order.managers_deadline < timezone.now():
+        bc.answer_pre_checkout_query(qid, False, 'مهلت پرداخت این سفارش تمام شده')
+        return
     if order.status != 'waiting_payment':
         bc.answer_pre_checkout_query(qid, False, 'سفارش آماده پرداخت نیست')
         return
@@ -269,6 +310,57 @@ def handle_pre_checkout(query: Dict[str, Any]) -> None:
         bc.answer_pre_checkout_query(qid, False, 'مبلغ با فاکتور یکی نیست')
         return
     bc.answer_pre_checkout_query(qid, True)
+
+
+def _payment_charge_id(pay: Dict[str, Any]) -> str:
+    return str(
+        pay.get('telegram_payment_charge_id') or pay.get('provider_payment_charge_id') or ''
+    ).strip()[:48]
+
+
+def remember_payment_charge(order: Order, pay: Dict[str, Any]) -> bool:
+    """True یعنی این کد پیگیری تازه است."""
+    cid = _payment_charge_id(pay)
+    if not cid:
+        return False
+    key = f'charge:{cid}'[:80]
+    if WalletLedger.objects.filter(idempotency_key=key).exists():
+        return False
+    try:
+        WalletLedger.objects.create(
+            user=order.customer,
+            amount=0,
+            entry_type='adjust',
+            ref=f'order-{order.id}',
+            note=cid,
+            idempotency_key=key,
+        )
+    except IntegrityError:
+        return False
+    return True
+
+
+def _credit_extra_payment(order: Order, paid_rial: int, pay: Dict[str, Any], chat_id: str = '') -> None:
+    if not remember_payment_charge(order, pay):
+        return
+    toman = int(paid_rial) // 10
+    if toman <= 0:
+        return
+    from wallet.services import credit
+
+    credit(
+        order.customer,
+        toman,
+        'refund',
+        ref=f'order:{order.id}',
+        note=f'پرداخت تکراری سفارش {fa_num(order.id)} به اعتبار برگشت',
+        idempotency_key=f'extra:{_payment_charge_id(pay)}'[:80],
+    )
+    if chat_id:
+        bc.send_message(
+            chat_id,
+            f'این سفارش قبلاً پرداخت شده بود. {fa_money(toman)} به اعتبار شما در لینک‌بان برگشت.',
+        )
 
 
 def handle_successful_payment(message: Dict[str, Any]) -> None:
@@ -291,6 +383,7 @@ def handle_successful_payment(message: Dict[str, Any]) -> None:
                 bc.send_message(chat_id, 'پرداخت رسید ولی سفارش پیدا نشد.')
             return
         if order.status == 'paid':
+            _credit_extra_payment(order, paid_rial, pay, chat_id)
             return
         if order.status != 'waiting_payment':
             if chat_id:
@@ -307,6 +400,7 @@ def handle_successful_payment(message: Dict[str, Any]) -> None:
             return
         index, part_amount = sliced
         fresh = record_paid_part(order, index, part_amount)
+        remember_payment_charge(order, pay)
         complete = order_is_fully_paid(order)
         parts = payment_parts(order.total_amount)
         got = paid_part_amounts(order)
