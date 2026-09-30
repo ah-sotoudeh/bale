@@ -526,13 +526,23 @@ def show_my_orders(chat_id: str, bale_user_id: str) -> None:
             reply_markup=customer_home_keyboard(),
         )
         return
-    from bot_flow.messages import format_order_line_customer
+    from bot_flow.messages import fa_num, format_order_line_customer
 
     lines = ['سفارش‌های اخیر:']
+    pay_rows = []
     for o in orders:
         n = o.items.exclude(manager_status='cart').count() or o.items.count()
         lines.append(format_order_line_customer(o.id, o.status, n, o.total_amount))
-    bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=customer_home_keyboard())
+        if o.status == 'waiting_payment' and (o.total_amount or 0) > 0:
+            pay_rows.append([
+                {'text': f'پرداخت سفارش {fa_num(o.id)}', 'callback_data': f'cu:pay:{o.id}'},
+            ])
+    home = customer_home_keyboard()['inline_keyboard']
+    bc.send_message(
+        str(chat_id),
+        '\n'.join(lines),
+        reply_markup=bc.inline_keyboard(pay_rows + home),
+    )
 
 
 def handle_customer_callback(
@@ -593,6 +603,27 @@ def handle_customer_callback(
         return True
     if data == 'cu:orders':
         show_my_orders(chat_id, bale_user_id)
+        return True
+    if data.startswith('cu:pay:'):
+        try:
+            order_id = int(data.split(':')[2])
+        except (IndexError, ValueError):
+            return True
+        order = Order.objects.filter(id=order_id, customer=user, status='waiting_payment').first()
+        if not order:
+            bc.send_message(str(chat_id), 'این سفارش الان قابل پرداخت نیست.')
+            return True
+        from orders.bale_pay import announce_invoices, order_is_fully_paid, send_order_invoices
+        from orders.services import process_payment_paid
+
+        if order_is_fully_paid(order):
+            process_payment_paid(order.id)
+            return True
+        result = send_order_invoices(order, str(chat_id))
+        if result['sent'] == 0 and result['failed'] == 0:
+            bc.send_message(str(chat_id), 'فاکتور تازه‌ای نمانده. اگر همه را پرداخت کرده‌اید، کمی بعد دوباره نگاه کنید.')
+            return True
+        announce_invoices(str(chat_id), result)
         return True
     if data == 'cu:wallet':
         from bot_flow.manager_panel import show_wallet

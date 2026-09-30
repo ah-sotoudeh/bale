@@ -56,7 +56,10 @@ def balance_breakdown(user: User) -> Dict[str, int]:
 
 def recent_ledger(user: User, limit: int = 12) -> List[Dict[str, Any]]:
     rows = []
-    for entry in WalletLedger.objects.filter(user=user).order_by('-id')[:limit]:
+    rows_qs = WalletLedger.objects.filter(user=user).exclude(
+        idempotency_key__startswith='inv:'
+    )
+    for entry in rows_qs.order_by('-id')[:limit]:
         rows.append(
             {
                 'id': entry.id,

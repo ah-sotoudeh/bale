@@ -119,6 +119,7 @@ LINKYAR_USERNAME = os.environ.get('LINKYAR_USERNAME', '@linkyar')
 
 BALE_CARD_NUMBER = os.environ.get('BALE_CARD_NUMBER', '')
 # توکن کیف‌پول از @botfather — برای sendInvoice و createInvoiceLink
+# هر انتقال حداکثر ۱٬۰۰۰٬۰۰۰ تومان است؛ مبلغ بیشتر چند فاکتور جدا می‌شود.
 BALE_PROVIDER_TOKEN = os.environ.get('BALE_PROVIDER_TOKEN', '')
 BALE_API_URL = os.environ.get('BALE_API_URL', 'https://tapi.bale.ai')
 REFERENCE_CHANNEL = os.environ.get('REFERENCE_CHANNEL', '@linktest')

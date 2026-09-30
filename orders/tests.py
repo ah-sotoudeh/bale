@@ -210,6 +210,82 @@ class BaleInvoiceTests(TestCase):
         })
         mock_answer.assert_called_with('q2', True)
 
+    def test_amounts_above_one_million_split_into_invoices(self):
+        from orders.bale_pay import payment_parts, send_order_invoices
+
+        self.assertEqual(payment_parts(1_000_000), [1_000_000])
+        self.assertEqual(payment_parts(1_000_001), [1_000_000, 1])
+        self.assertEqual(payment_parts(2_500_000), [1_000_000, 1_000_000, 500_000])
+        self.order.total_amount = 2_500_000
+        self.order.save(update_fields=['total_amount'])
+        with patch('orders.bale_pay.bc.create_payment_request', return_value={'ok': True}) as create:
+            result = send_order_invoices(self.order, 'p1')
+        self.assertEqual(result['sent'], 3)
+        self.assertEqual(result['failed'], 0)
+        amounts = [call.kwargs['amount'] for call in create.call_args_list]
+        payloads = [call.kwargs['payload'] for call in create.call_args_list]
+        self.assertEqual(amounts, [1_000_000, 1_000_000, 500_000])
+        self.assertTrue(all(amount <= 1_000_000 for amount in amounts))
+        self.assertEqual(payloads[0], f'order-{self.order.id}-p1-1000000')
+        self.assertEqual(payloads[2], f'order-{self.order.id}-p3-500000')
+
+    @patch('orders.bale_pay.bc.create_invoice_link', return_value={'ok': True, 'invoice_params': 'inv', 'amount_rial': 10_000_000})
+    def test_miniapp_opens_the_next_unpaid_slice(self, link):
+        from orders.bale_pay import invoice_for_order
+
+        self.order.total_amount = 1_500_000
+        self.order.save(update_fields=['total_amount'])
+        first = invoice_for_order(self.order)
+        self.assertEqual(first['amount_toman'], 1_000_000)
+        self.assertEqual(first['part'], 1)
+        self.assertEqual(first['parts'], 2)
+        self.assertIn('بخش', first['message'])
+        self.assertLessEqual(link.call_args.kwargs['amount_toman'], 1_000_000)
+
+    @patch('orders.bale_pay.bc.answer_pre_checkout_query')
+    @patch('integrations.bale_client.send_message')
+    def test_order_stays_open_until_every_wallet_part_is_paid(self, _send, mock_answer):
+        from orders.bale_pay import handle_pre_checkout, handle_successful_payment
+        from wallet.models import WalletLedger
+        from wallet.services import available_balance, recent_ledger
+
+        self.order.total_amount = 2_500_000
+        self.order.save(update_fields=['total_amount'])
+        oid = self.order.id
+        handle_pre_checkout({
+            'id': 'whole',
+            'invoice_payload': f'order-{oid}',
+            'total_amount': 25_000_000,
+        })
+        self.assertFalse(mock_answer.call_args.args[1])
+
+        def pay(payload, rial):
+            handle_successful_payment({
+                'chat': {'id': 'p1'},
+                'successful_payment': {'invoice_payload': payload, 'total_amount': rial},
+            })
+
+        pay(f'order-{oid}-p1-1000000', 10_000_000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'waiting_payment')
+        self.assertEqual(WalletLedger.objects.filter(idempotency_key__startswith=f'inv:{oid}:').count(), 1)
+        self.assertEqual(available_balance(self.customer), 0)
+        self.assertEqual(recent_ledger(self.customer), [])
+        pay(f'order-{oid}-p1-1000000', 10_000_000)
+        self.assertEqual(WalletLedger.objects.filter(idempotency_key__startswith=f'inv:{oid}:').count(), 1)
+        handle_pre_checkout({
+            'id': 'again',
+            'invoice_payload': f'order-{oid}-p1-1000000',
+            'total_amount': 10_000_000,
+        })
+        self.assertFalse(mock_answer.call_args.args[1])
+        pay(f'order-{oid}-p2-1000000', 10_000_000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'waiting_payment')
+        pay(f'order-{oid}-p3-500000', 5_000_000)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, 'paid')
+
 
 class MarketplaceRulesTests(TestCase):
     def setUp(self):

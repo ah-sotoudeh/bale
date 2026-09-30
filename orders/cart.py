@@ -418,7 +418,18 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
 
     from bot_flow.access import is_debug_user
 
+    from orders.bale_pay import WALLET_MAX_TOMAN, payment_parts
+
+    parts = payment_parts(total)
     lines.append(f'\nمبلغ قابل پرداخت: {fa_money(total)}')
+    if len(parts) > 1:
+        lines.append(
+            f'سقف هر انتقال کیف‌پول {fa_money(WALLET_MAX_TOMAN)} است. '
+            f'این مبلغ در {fa_num(len(parts))} درخواست جدا می‌آید:'
+        )
+        for index, part in enumerate(parts, start=1):
+            lines.append(f'{fa_num(index)}. {fa_money(part)}')
+        lines.append('سفارش بعد از پرداخت همهٔ درخواست‌ها ثبت می‌شود.')
     lines.append(
         f'تا {fa_num(PAYMENT_HOLD_HOURS)} ساعت برای پرداخت وقت دارید. '
         'بعد از آن، روزها دوباره آزاد می‌شوند.'
@@ -430,20 +441,10 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
         kb = bc.payment_done_keyboard(order.id)
     if cust:
         bc.send_message(cust, '\n'.join(lines), reply_markup=kb)
-        payment = bc.create_payment_request(
-            chat_id=cust,
-            amount=total,
-            title=f'پرداخت سفارش {order.id}',
-            description=f'تبلیغ، سفارش {order.id}',
-            payload=f'order-{order.id}',
-        )
-        if payment.get('ok'):
-            bc.send_message(
-                cust,
-                'فاکتور کیف‌پول بله در پیام قبلی آمد. پس از پرداخت موفق، سفارش خودش ثبت می‌شود.',
-            )
-        elif payment.get('payment_url'):
-            bc.send_message(cust, f'لینک پرداخت: {payment["payment_url"]}', reply_markup=kb)
+        from orders.bale_pay import announce_invoices, send_order_invoices
+
+        payment = send_order_invoices(order, cust)
+        announce_invoices(cust, payment)
 
     return {'ok': True, 'order_status': 'waiting_payment', 'total': total}
 
