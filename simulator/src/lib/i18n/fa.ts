@@ -164,7 +164,7 @@ export const fa = {
     starN: "{n} ستاره",
     groupTitle: "مجموعه {name}",
     groupCount: "{n} کانال با تعرفه مشترک",
-    channelMeta: "{mode} · لینک‌ساز {admin}",
+    channelMeta: "{mode} · {admin}",
     tariffMeta: "{owner} · ساعت {hour} · {hours} ساعت · {price}",
     dayCount: "{n} روز پر",
     membersLine: "{members} عضو · بازدید {views} · {cpm} / هزار",

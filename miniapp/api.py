@@ -66,6 +66,8 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'publish_mode_label': ch.publish_mode_label,
         'bot_is_admin': ch.bot_is_admin,
         'linkyar_is_admin': ch.linkyar_is_admin,
+        'bot_checked_at': ch.bot_checked_at.isoformat() if ch.bot_checked_at else '',
+        'linkyar_checked_at': ch.linkyar_checked_at.isoformat() if ch.linkyar_checked_at else '',
         'manual_remind_hours': ch.manual_remind_hours,
         'tariff_count': ch.tariffs.count(),
         'members_count': getattr(ch, 'members_count', 0) or 0,
@@ -174,7 +176,11 @@ def api_channels(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_refresh_channel_stats(request: HttpRequest) -> JsonResponse:
-    """یک کانال را همین حالا با لینک‌یار می‌خواند. بقیه را پولینگ، نوبتی، تازه می‌کند."""
+    """کانال‌هایی که تعرفهٔ فعال دارند را با لینک‌یار می‌خواند.
+
+    باز شدن مینی‌اپ فقط کانال‌های کهنه یا بدون بازدید را می‌خواند.
+    دکمهٔ «خواندن دوباره» با force همان کانال‌های تعرفه‌دار را از نو می‌خواند.
+    """
     user, err = _auth_user(request)
     if err:
         return err
@@ -187,9 +193,20 @@ def api_refresh_channel_stats(request: HttpRequest) -> JsonResponse:
     if not ws.is_operator(user.bale_user_id or ''):
         qs = qs.filter(manager=user)
     body = _json_body(request)
-    if body.get('channel_id'):
-        qs = qs.filter(id=body.get('channel_id'))
-    picked = list(qs.order_by(F('stats_updated_at').asc(nulls_first=True), 'id')[:1])
+    explicit = body.get('channel_id')
+    if explicit:
+        qs = qs.filter(id=explicit)
+    else:
+        qs = qs.filter(Q(tariffs__is_active=True) | Q(groups__tariffs__is_active=True)).distinct()
+        if not body.get('force'):
+            cutoff = timezone.now() - timedelta(minutes=30)
+            recent_zero = timezone.now() - timedelta(minutes=2)
+            qs = qs.filter(
+                Q(stats_updated_at__isnull=True)
+                | Q(stats_updated_at__lt=cutoff)
+                | Q(avg_views=0, stats_updated_at__lt=recent_zero)
+            )
+    picked = list(qs.order_by(F('stats_updated_at').asc(nulls_first=True), 'id')[:1 if explicit else 4])
     done = 0
     failed = 0
     message = ''

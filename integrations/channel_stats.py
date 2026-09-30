@@ -108,6 +108,31 @@ def _guess_lang(text: str) -> str:
     return ''
 
 
+def _remember_linkyar_admin(channel, reading: Dict[str, Any]) -> None:
+    flag = reading.get('linkyar_is_admin')
+    if flag is True or flag is False:
+        channel.linkyar_is_admin = bool(flag)
+        channel.linkyar_checked_at = timezone.now()
+
+
+def _check_bot_admin_if_configured(channel) -> None:
+    """پرچم لینک‌ساز فقط وقتی توکن بازو هست نوشته می‌شود. نبودن توکن یعنی «بررسی نشده»."""
+    try:
+        from integrations.bale_client import _token
+
+        token = _token()
+    except Exception:
+        return
+    if not token or token == 'your_bot_token_here':
+        return
+    try:
+        from orders.publish import check_bot_admin
+
+        check_bot_admin(channel)
+    except Exception:
+        logger.exception('bot admin during stats')
+
+
 def refresh_channel(channel) -> Dict[str, Any]:
     from integrations import linkyar_client as ly
 
@@ -122,17 +147,24 @@ def refresh_channel(channel) -> Dict[str, Any]:
     if not reading.get('ok'):
         channel.stats_error = str(reading.get('error') or 'collect_failed')[:255]
         channel.stats_updated_at = timezone.now()
-        channel.save(update_fields=['stats_error', 'stats_updated_at'])
+        _remember_linkyar_admin(channel, reading)
+        channel.save(update_fields=['stats_error', 'stats_updated_at', 'linkyar_is_admin', 'linkyar_checked_at'])
         return reading
 
     summary = summarize_reading(reading.get('members'), reading.get('posts') or [])
     members = summary['members'] if summary['members'] is not None else channel.members_count
-    avg_views = summary['avg_views'] if summary['avg_views'] is not None else channel.avg_views
-    daily = summary['daily_reach'] if summary['daily_reach'] is not None else channel.daily_reach
+    views_failed = bool(reading.get('views_error')) and summary['avg_views'] is None
+    if views_failed:
+        avg_views = channel.avg_views
+        daily = channel.daily_reach
+    else:
+        avg_views = summary['avg_views'] if summary['avg_views'] is not None else channel.avg_views
+        daily = summary['daily_reach'] if summary['daily_reach'] is not None else channel.daily_reach
     if not members and avg_views is None:
         channel.stats_error = str(reading.get('views_error') or reading.get('group_error') or 'empty')[:255]
         channel.stats_updated_at = timezone.now()
-        channel.save(update_fields=['stats_error', 'stats_updated_at'])
+        _remember_linkyar_admin(channel, reading)
+        channel.save(update_fields=['stats_error', 'stats_updated_at', 'linkyar_is_admin', 'linkyar_checked_at'])
         return {'ok': False, 'error': channel.stats_error}
 
     from channels_app.models import ChannelStatSnapshot
@@ -162,7 +194,9 @@ def refresh_channel(channel) -> Dict[str, Any]:
         err = channel.err_percent
     channel.err_percent = Decimal(str(err or 0))
     channel.stats_updated_at = now
-    channel.stats_error = ''
+    channel.stats_error = str(reading.get('views_error') or '')[:255] if views_failed else ''
+    _remember_linkyar_admin(channel, reading)
+    _check_bot_admin_if_configured(channel)
     channel.save()
     ChannelStatSnapshot.objects.create(
         channel=channel,

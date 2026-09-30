@@ -76,6 +76,8 @@ export type Channel = {
   publishMode: PublishMode;
   botIsAdmin: boolean;
   linkyarIsAdmin: boolean;
+  botChecked?: boolean;
+  linkyarChecked?: boolean;
   remindHours: number;
   members: number;
   avgViews: number;

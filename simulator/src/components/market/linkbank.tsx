@@ -65,6 +65,16 @@ function tail(iban: string) {
   return iban.slice(-4);
 }
 
+function adminPhrase(ch: Channel) {
+  if (ch.publishMode === "manual") return "خودتان منتشر می‌کنید";
+  const linkyar = ch.publishMode === "linkyar";
+  const who = linkyar ? "لینک‌یار" : "لینک‌ساز";
+  const checked = linkyar ? ch.linkyarChecked : ch.botChecked;
+  if (checked === false) return `${who} هنوز بررسی نشده`;
+  const isAdmin = linkyar ? ch.linkyarIsAdmin : ch.botIsAdmin;
+  return isAdmin ? `${who} ادمین است` : `${who} ادمین نیست`;
+}
+
 export function LinkBank({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     const done = useMarket.persist.rehydrate();
@@ -537,7 +547,7 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
                   <span className="block truncate text-[11px] text-muted">
                     {fill(copy().common.channelMeta, {
                       mode: MODE_LABEL[ch.publishMode],
-                      admin: ch.botIsAdmin ? copy().common.yesAdmin : copy().common.noAdmin,
+                      admin: adminPhrase(ch),
                     })}
                   </span>
                   <span className="block truncate text-[11px] text-muted">
@@ -2258,7 +2268,11 @@ function Operator({ screen, toast }: { screen: Screen; toast: (m: string) => voi
                   {fill(copy().stats.membersViews, { members: faNum(ch.members), views: faNum(ch.avgViews) })}
                 </p>
                 <p className="mt-0.5 text-[11px] text-muted">
-                  {ch.linkyarIsAdmin ? copy().operator.adminYes : copy().operator.adminNo}
+                  {ch.linkyarChecked === false
+                    ? "لینک‌یار هنوز بررسی نشده"
+                    : ch.linkyarIsAdmin
+                      ? copy().operator.adminYes
+                      : copy().operator.adminNo}
                   {" · "}
                   {ch.statsAt ? formatJalali(new Date(ch.statsAt)) : copy().stats.empty}
                 </p>

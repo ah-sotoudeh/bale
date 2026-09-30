@@ -43,6 +43,8 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'publish_mode': ch.publish_mode,
             'bot_is_admin': ch.bot_is_admin,
             'linkyar_is_admin': ch.linkyar_is_admin,
+            'bot_checked_at': ch.bot_checked_at.isoformat() if ch.bot_checked_at else '',
+            'linkyar_checked_at': ch.linkyar_checked_at.isoformat() if ch.linkyar_checked_at else '',
             'manual_remind_hours': ch.manual_remind_hours,
             'members_count': ch.members_count or 0,
             'avg_views': ch.avg_views or 0,

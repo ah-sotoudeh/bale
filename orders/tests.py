@@ -632,6 +632,59 @@ class MarketplaceRulesTests(TestCase):
         self.channel.refresh_from_db()
         self.assertIsNotNone(self.channel.stats_updated_at)
 
+    def test_refresh_stores_views_and_linkyar_admin(self):
+        from integrations.channel_stats import refresh_channel
+
+        now = int(timezone.now().timestamp() * 1000)
+        day = 86_400_000
+        reading = {
+            'ok': True,
+            'peer_id': 1497133952,
+            'title': 'تست بنر',
+            'about': 'همراه @link_yar',
+            'members': 8,
+            'posts': [
+                {'message_id': 1, 'date': now - 3 * day, 'views': 4, 'forwards': 0},
+                {'message_id': 2, 'date': now - 2 * day, 'views': 6, 'forwards': 1},
+            ],
+            'linkyar_is_admin': True,
+        }
+        with patch('integrations.linkyar_client.collect_channel_stats', return_value=reading):
+            result = refresh_channel(self.channel)
+        self.assertTrue(result['ok'], result)
+        self.channel.refresh_from_db()
+        self.assertEqual(self.channel.members_count, 8)
+        self.assertEqual(self.channel.avg_views, 5)
+        self.assertTrue(self.channel.linkyar_is_admin)
+        self.assertIsNotNone(self.channel.linkyar_checked_at)
+        self.assertIsNone(self.channel.bot_checked_at)
+
+    def test_refresh_asks_linkyar_only_for_due_tariff_channels(self):
+        import json
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        Channel.objects.create(
+            name='plain',
+            link='@plain',
+            manager=self.manager,
+            avg_views=20,
+            stats_updated_at=timezone.now(),
+        )
+        self.channel.avg_views = 0
+        self.channel.stats_updated_at = timezone.now() - timedelta(minutes=10)
+        self.channel.save(update_fields=['avg_views', 'stats_updated_at'])
+        with patch('integrations.channel_stats.refresh_channel', return_value={'ok': True}) as refresh:
+            owner = self.client.post(
+                '/miniapp/api/channels/refresh',
+                data=json.dumps({'debug_bale_id': 'm9'}),
+                content_type='application/json',
+            )
+        self.assertEqual(owner.status_code, 200, owner.content)
+        self.assertEqual(refresh.call_count, 1)
+        self.assertEqual(refresh.call_args.args[0].link, self.channel.link)
+
     def test_reread_button_calls_linkyar_for_the_owner_only(self):
         import json
         import os
@@ -911,3 +964,6 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('سفارش تبلیغ، همین‌جا', script)
         self.assertIn('نام کاربری خودتان را در «درباره» کانال بنویسید', script)
         self.assertIn('steps:C().manager.emptyChannelSteps', script)
+        self.assertIn('queueMicrotask(()=>t().refreshChannelStats())', script)
+        self.assertIn('هنوز بررسی نشده', script)
+        self.assertIn('iA(`/channels/refresh`,n?{force:!0}:{})', script)
