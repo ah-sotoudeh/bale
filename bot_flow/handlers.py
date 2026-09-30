@@ -395,8 +395,9 @@ def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
 
 def _extract_int(s: str) -> Optional[int]:
-    m = re.search(r'(\d{1,4})', s or '')
-    return int(m.group(1)) if m else None
+    from bot_flow.messages import parse_user_int
+
+    return parse_user_int(s)
 
 
 def parse_tariff_lines(text: str) -> List[Tuple[str, Optional[int], int, int]]:

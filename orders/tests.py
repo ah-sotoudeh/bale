@@ -378,3 +378,34 @@ class MarketplaceRulesTests(TestCase):
         self.assertTrue(result.get('ok'), result)
         order.refresh_from_db()
         self.assertEqual(order.status, 'waiting_managers')
+
+    def test_tariff_with_orders_is_switched_off_not_deleted(self):
+        from orders.cart import retire_tariff
+
+        _order, item = self._pending_order()
+        self.assertTrue(retire_tariff(self.tariff))
+        self.tariff.refresh_from_db()
+        self.assertFalse(self.tariff.is_active)
+        item.refresh_from_db()
+        self.assertEqual(item.price, 20000)
+        self.tariff.price = 90000
+        self.tariff.save(update_fields=['price'])
+        item.refresh_from_db()
+        self.assertEqual(item.price, 20000)
+
+    def test_tariff_price_keeps_full_toman_amount(self):
+        from bot_flow.handlers import parse_tariff_lines
+
+        rows = parse_tariff_lines('طرح عادی | ۱۰ | ۲۴ | ۲۰۰٬۰۰۰')
+        self.assertEqual(rows, [('طرح عادی', 10, 24, 200000)])
+
+    @patch('orders.publish.check_bot_admin', return_value='unknown')
+    def test_failed_admin_check_does_not_hide_tariffs(self, _check):
+        from orders.publish import daily_admin_audit
+
+        self.channel.publish_mode = 'bot'
+        self.channel.save(update_fields=['publish_mode'])
+        result = daily_admin_audit()
+        self.assertEqual(result['deactivated_tariffs'], 0)
+        self.tariff.refresh_from_db()
+        self.assertTrue(self.tariff.is_active)

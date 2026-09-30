@@ -4,11 +4,22 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 _EN = '0123456789'
 _FA = '۰۱۲۳۴۵۶۷۸۹'
 _TRANS = str.maketrans(_EN, _FA)
+
+
+def parse_user_int(value: Any) -> Optional[int]:
+    """عدد انگلیسی یا فارسی، با جداکنندهٔ هزارگان. قیمت ۲۰۰٬۰۰۰ همان ۲۰۰۰۰۰ می‌ماند."""
+    raw = str(value or '').translate(str.maketrans(_FA, _EN))
+    raw = raw.replace('٬', '').replace(',', '').replace(' ', '')
+    match = re.search(r'(\d{1,12})', raw)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def fa_num(value: Any) -> str:

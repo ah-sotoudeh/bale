@@ -184,7 +184,23 @@ def run_polling(timeout: int = 25) -> None:
             time.sleep(5)
 
 
+def log_database() -> None:
+    from django.conf import settings
+
+    db = settings.DATABASES['default']
+    engine = db.get('ENGINE', '')
+    name = db.get('NAME', '')
+    if 'sqlite' in engine:
+        log.warning(
+            'دیتابیس فایل است و با به‌روزرسانی کد پاک نمی‌شود: %s',
+            name,
+        )
+        return
+    log.info('دیتابیس MySQL «%s». به‌روزرسانی کد، تعرفه و سفارش را پاک نمی‌کند.', name)
+
+
 def main() -> None:
+    log_database()
     ensure_token()
     prepare_polling()
     run_polling()

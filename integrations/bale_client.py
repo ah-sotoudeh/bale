@@ -341,20 +341,36 @@ def get_chat_member(chat_id: str, user_id: str) -> Dict[str, Any]:
         return {'error': _redact(str(e))}
 
 
-def bot_is_channel_admin(channel_id: str) -> bool:
+def bot_admin_state(channel_id: str) -> str:
+    """admin، not_admin، یا unknown. خطای شبکه نباید تعرفه را خاموش کند."""
     me = get_me()
+    if me.get('error'):
+        return 'unknown'
     bot_id = None
     if me.get('ok') or 'result' in me:
         bot_id = (me.get('result') or {}).get('id')
     if not bot_id:
         bot_id = me.get('id')
     if not bot_id:
-        return False
+        return 'unknown'
     member = get_chat_member(str(channel_id), str(bot_id))
-    if member.get('error') or not member.get('ok', True):
-        return False
+    if member.get('error'):
+        return 'unknown'
+    if not member.get('ok', True):
+        code = member.get('error_code')
+        if code in (400, 403):
+            return 'not_admin'
+        return 'unknown'
     status_name = (member.get('result') or {}).get('status') or ''
-    return status_name in ('administrator', 'creator')
+    if status_name in ('administrator', 'creator'):
+        return 'admin'
+    if status_name:
+        return 'not_admin'
+    return 'unknown'
+
+
+def bot_is_channel_admin(channel_id: str) -> bool:
+    return bot_admin_state(channel_id) == 'admin'
 
 
 def _provider_token() -> str:

@@ -67,7 +67,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'bale_site.wsgi.application'
 
-USE_SQLITE = os.environ.get('USE_SQLITE', '1') == '1'
+# اگر نام دیتابیس اصلی آمده باشد و USE_SQLITE صریح نباشد، همان MySQL استفاده می‌شود.
+# پیش‌فرض اسکیولایت فقط برای وقتی است که هیچ پایگاه دیگری تنظیم نشده.
+# به‌روزرسانی فایل‌ها این انتخاب را عوض نمی‌کند و ردیف‌ها را پاک نمی‌کند.
+_use_sqlite = os.environ.get('USE_SQLITE')
+_db_name = os.environ.get('DB_NAME', '').strip()
+if _use_sqlite is None and _db_name:
+    USE_SQLITE = False
+else:
+    USE_SQLITE = (_use_sqlite or '1') == '1'
 DB_ENGINE = os.environ.get('DB_ENGINE', '').lower()
 
 if USE_SQLITE or DB_ENGINE in ('sqlite', 'sqlite3'):

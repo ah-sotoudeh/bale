@@ -488,6 +488,26 @@ def cancel_customer_order(order: Order) -> Dict[str, Any]:
     return {'ok': True, 'order_status': 'cancelled', 'released': len(touched)}
 
 
+def retire_tariff(tariff: Tariff) -> bool:
+    """تعرفهٔ دارای سفارش یا رزرو حذف نمی‌شود تا ردیف‌های مدیر پاک نشود.
+
+    True یعنی فقط خاموش شد و داده‌ها ماندند.
+    """
+    from orders.models import SlotReservation
+
+    kept = (
+        OrderItem.objects.filter(tariff=tariff).exists()
+        or SlotReservation.objects.filter(tariff=tariff).exists()
+    )
+    if kept:
+        if tariff.is_active:
+            tariff.is_active = False
+            tariff.save(update_fields=['is_active'])
+        return True
+    tariff.delete()
+    return False
+
+
 def cancel_unpaid_orders() -> int:
     """سفارش آمادهٔ پرداخت که مهلتش گذشته، روز را برای مشتری بعدی آزاد می‌کند."""
     now = timezone.now()

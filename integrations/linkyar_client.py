@@ -372,11 +372,20 @@ def diagnose_channel(channel_ref: str) -> Dict[str, Any]:
     return _run(_with_client(_fn))
 
 
-def is_admin_of_channel(channel_ref: str) -> bool:
-    d = diagnose_channel(channel_ref)
-    perms = d.get('permissions') or {}
-    if not isinstance(perms, dict):
-        return False
+def linkyar_admin_state(channel_ref: str) -> str:
+    """admin، not_admin، یا unknown. قطع ارتباط آمار را با حذف تعرفه عوض نمی‌کند."""
+    try:
+        d = diagnose_channel(channel_ref)
+    except Exception:
+        return 'unknown'
+    if not isinstance(d, dict) or d.get('error') or d.get('permissions_error'):
+        return 'unknown'
+    resolve = d.get('resolve') or {}
+    if isinstance(resolve, dict) and resolve and not resolve.get('ok', True):
+        return 'unknown'
+    perms = d.get('permissions')
+    if not isinstance(perms, dict) or not perms:
+        return 'unknown'
 
     def _b(key):
         v = perms.get(key)
@@ -384,7 +393,13 @@ def is_admin_of_channel(channel_ref: str) -> bool:
             return bool(v.get('value') or v.get('1'))
         return bool(v)
 
-    return _b('send_message') or _b('send_media')
+    if _b('send_message') or _b('send_media'):
+        return 'admin'
+    return 'not_admin'
+
+
+def is_admin_of_channel(channel_ref: str) -> bool:
+    return linkyar_admin_state(channel_ref) == 'admin'
 
 
 def load_channel_history(channel_ref: str, limit: int = 6) -> Dict[str, Any]:

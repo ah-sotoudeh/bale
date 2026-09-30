@@ -214,8 +214,9 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
     parts = [p.strip() for p in re.split(r'[|،,]', text) if p.strip()]
 
     def _num(s: str) -> Optional[int]:
-        m = re.search(r'(\d{1,4})', s or '')
-        return int(m.group(1)) if m else None
+        from bot_flow.messages import parse_user_int
+
+        return parse_user_int(s)
 
     start_hour = None
     try:
@@ -250,16 +251,24 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         tar.name = name[:100]
         tar.start_hour = start_hour
         tar.duration_hours = int(dur)
+        if int(price) > 1_000_000_000 or int(dur) > 720:
+            bc.send_message(str(chat_id), 'قیمت یا مدت خارج از حد مجاز است. قیمت را به تومان و بدون شمارهٔ اضافه بنویسید.')
+            return True
         tar.price = int(price)
         tar.save()
         _save(sess, 'idle')
         hour_s = f'{tar.start_hour:02d}:00' if tar.start_hour is not None else '—'
         bc.send_message(
             str(chat_id),
-            f'✅ تعرفه به‌روز شد: {tar.name}\n'
-            f'ارسال {fa_num(hour_s)} | {fa_num(tar.duration_hours)} ساعت | {fa_money(tar.price)}',
+            f'تعرفه به‌روز شد: {tar.name}\n'
+            f'ارسال {fa_num(hour_s)} | {fa_num(tar.duration_hours)} ساعت | {fa_money(tar.price)}\n'
+            'سفارش‌هایی که قبلاً ثبت شده‌اند با همان قیمت قبلی می‌مانند.',
             reply_markup=main_keyboard(),
         )
+        return True
+
+    if int(price) > 1_000_000_000 or int(dur) <= 0 or int(dur) > 720:
+        bc.send_message(str(chat_id), 'قیمت یا مدت خارج از حد مجاز است. قیمت را به تومان و بدون شمارهٔ اضافه بنویسید.')
         return True
 
     if not ch:
@@ -581,9 +590,19 @@ def try_handle_callback(
         if not tar:
             bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
             return True
+        from orders.cart import retire_tariff
+
         name = tar.name
-        tar.delete()
-        bc.send_message(str(chat_id), f'🗑 تعرفه «{name}» حذف شد.', reply_markup=main_keyboard())
+        kept = retire_tariff(tar)
+        if kept:
+            bc.send_message(
+                str(chat_id),
+                f'تعرفه «{name}» سفارش یا روز رزرو دارد، پس حذف نشد و فقط خاموش شد. '
+                'سفارش‌ها و روزهای قبلی سر جایشان ماندند.',
+                reply_markup=main_keyboard(),
+            )
+        else:
+            bc.send_message(str(chat_id), f'تعرفه «{name}» حذف شد. سفارشی به آن وصل نبود.', reply_markup=main_keyboard())
         return True
     if data == 'mgr:op_payout_file':
         operator_payout_file(chat_id, user)

@@ -51,20 +51,22 @@ def channel_ref(ch: Channel) -> str:
     return link or str(ch.id)
 
 
-def check_linkyar_admin(ch: Channel) -> bool:
-    ok = ly.is_admin_of_channel(channel_ref(ch))
-    ch.linkyar_is_admin = ok
-    ch.linkyar_checked_at = timezone.now()
-    ch.save(update_fields=['linkyar_is_admin', 'linkyar_checked_at'])
-    return ok
+def check_linkyar_admin(ch: Channel) -> str:
+    state = ly.linkyar_admin_state(channel_ref(ch))
+    if state in ('admin', 'not_admin'):
+        ch.linkyar_is_admin = state == 'admin'
+        ch.linkyar_checked_at = timezone.now()
+        ch.save(update_fields=['linkyar_is_admin', 'linkyar_checked_at'])
+    return state
 
 
-def check_bot_admin(ch: Channel) -> bool:
-    ok = bc.bot_is_channel_admin(channel_ref(ch))
-    ch.bot_is_admin = ok
-    ch.bot_checked_at = timezone.now()
-    ch.save(update_fields=['bot_is_admin', 'bot_checked_at'])
-    return ok
+def check_bot_admin(ch: Channel) -> str:
+    state = bc.bot_admin_state(channel_ref(ch))
+    if state in ('admin', 'not_admin'):
+        ch.bot_is_admin = state == 'admin'
+        ch.bot_checked_at = timezone.now()
+        ch.save(update_fields=['bot_is_admin', 'bot_checked_at'])
+    return state
 
 
 def deactivate_tariffs_for_channel(ch: Channel, reason: str) -> int:
@@ -98,10 +100,10 @@ def daily_admin_audit() -> Dict[str, int]:
         mode = ch.publish_mode or Channel.PUBLISH_BOT
         if mode == Channel.PUBLISH_MANUAL:
             continue
-        if mode == Channel.PUBLISH_BOT and not check_bot_admin(ch):
-            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌ساز ادمین نیست')
-        elif mode == Channel.PUBLISH_LINKYAR and not check_linkyar_admin(ch):
-            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌یار ادمین نیست')
+        if mode == Channel.PUBLISH_BOT and check_bot_admin(ch) == 'not_admin':
+            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌ساز دیگر مدیر کانال نیست')
+        elif mode == Channel.PUBLISH_LINKYAR and check_linkyar_admin(ch) == 'not_admin':
+            deactivated += deactivate_tariffs_for_channel(ch, 'لینک‌یار دیگر مدیر کانال نیست')
     return {'checked': checked, 'deactivated_tariffs': deactivated}
 
 
@@ -242,6 +244,7 @@ def publish_due_items() -> Dict[str, int]:
 
         posts: List[Dict[str, Any]] = []
         any_ok = any_manual = False
+        retry_later = False
         t0_ms = int(time.time() * 1000)
         from_chat = str(order.banner_from_chat_id)
         try:
@@ -272,8 +275,12 @@ def publish_due_items() -> Dict[str, int]:
                 continue
 
             if mode == Channel.PUBLISH_BOT:
-                if not check_bot_admin(ch):
-                    _fail_one_channel(item, ch, 'لینک‌ساز ادمین نیست')
+                state = check_bot_admin(ch)
+                if state == 'unknown':
+                    retry_later = True
+                    continue
+                if state != 'admin':
+                    _fail_one_channel(item, ch, 'لینک‌ساز مدیر کانال نیست')
                     failed += 1
                     continue
                 res = _post_via_bot(ch, from_chat, msg_id, order.banner_caption or '')
@@ -293,8 +300,12 @@ def publish_due_items() -> Dict[str, int]:
                 continue
 
             if mode == Channel.PUBLISH_LINKYAR:
-                if not check_linkyar_admin(ch):
-                    _fail_one_channel(item, ch, 'لینک‌یار ادمین نیست')
+                state = check_linkyar_admin(ch)
+                if state == 'unknown':
+                    retry_later = True
+                    continue
+                if state != 'admin':
+                    _fail_one_channel(item, ch, 'لینک‌یار مدیر کانال نیست')
                     failed += 1
                     continue
                 _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '')
@@ -308,6 +319,9 @@ def publish_due_items() -> Dict[str, int]:
                 else:
                     _fail_one_channel(item, ch, 'تأیید لینک‌یار ناموفق')
                     failed += 1
+
+        if retry_later and not any_ok and not any_manual:
+            continue
 
         if any_manual and not any_ok:
             item.execution_status = 'awaiting_manager_publish'
