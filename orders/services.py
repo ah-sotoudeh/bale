@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 import logging
-import os
-from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from django.utils.dateparse import parse_datetime
 
 from integrations import bale_client as bale_client
-from orders.availability import effective_window, has_slot_conflict
-from orders.models import ManagerResponse, Order, OrderItem
-from users.models import User
+from orders.models import Order
 
 logger = logging.getLogger(__name__)
 
@@ -91,146 +87,17 @@ def process_manager_response(
     new_start: Optional[str] = None,
     extra_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """یک مسیر با سبد: رد یک کانال بقیهٔ سفارش را نمی‌بندد و /paid_ به مشتری عادی نمی‌رود."""
+    del extra_payload
     action = (action or '').lower().strip()
-    if action not in ('approve', 'reject', 'edit'):
-        return {'ok': False, 'error': 'invalid_action', 'detail': 'action must be approve|reject|edit'}
-
-    try:
-        item = OrderItem.objects.select_related(
-            'order', 'channel', 'tariff', 'manager', 'order__customer'
-        ).get(id=order_item_id)
-    except OrderItem.DoesNotExist:
-        return {'ok': False, 'error': 'item_not_found'}
-
-    try:
-        manager = User.objects.get(bale_user_id=str(manager_bale_id))
-    except User.DoesNotExist:
-        return {'ok': False, 'error': 'manager_not_found'}
-
-    if item.manager_id and item.manager_id != manager.id:
-        return {'ok': False, 'error': 'not_item_manager'}
-
-    if action == 'edit' and new_start:
-        parsed = parse_datetime(new_start)
-        if not parsed:
-            return {'ok': False, 'error': 'invalid_new_start'}
-        new_end = parsed + timedelta(hours=item.booked_duration())
-        if has_slot_conflict(
-            item.tariff, parsed, new_end, exclude_item_id=item.id, channel=item.channel
-        ):
-            return {'ok': False, 'error': 'slot_conflict'}
-        item.manager_edited_start = parsed
-
-    if action in ('approve', 'edit'):
-        start, end = effective_window(item)
-        if action == 'edit' and new_start:
-            parsed = parse_datetime(new_start)
-            if parsed:
-                start = parsed
-                end = parsed + timedelta(hours=item.booked_duration())
-        if has_slot_conflict(
-            item.tariff, start, end, exclude_item_id=item.id, channel=item.channel
-        ):
-            return {'ok': False, 'error': 'slot_conflict'}
-
-    item.manager_status = (
-        'approved' if action == 'approve' else ('rejected' if action == 'reject' else 'edited')
-    )
-    try:
-        item.save()
-    except Exception as exc:
-        from orders.slots import SlotConflict
-
-        if isinstance(exc, SlotConflict):
-            return {'ok': False, 'error': 'slot_conflict'}
-        raise
-
-    payload = {'order_item_id': order_item_id, 'manager_bale_id': manager_bale_id, 'action': action}
+    parsed = None
     if new_start:
-        payload['new_start'] = new_start
-    if extra_payload:
-        payload.update(extra_payload)
-    ManagerResponse.objects.create(order_item=item, manager=manager, action=action, payload=payload)
+        parsed = parse_datetime(new_start)
+        if action == 'edit' and not parsed:
+            return {'ok': False, 'error': 'invalid_new_start'}
+    from orders.cart import process_manager_item
 
-    order = item.order
-    pending = order.items.filter(manager_status='pending').exists()
-    result: Dict[str, Any] = {
-        'ok': True,
-        'order_id': order.id,
-        'item_id': item.id,
-        'item_status': item.manager_status,
-        'order_status': order.status,
-        'pending_left': pending,
-    }
-
-    if pending:
-        return result
-
-    rejected_any = order.items.filter(manager_status='rejected').exists()
-    if rejected_any:
-        order.status = 'rejected'
-        order.save()
-        result['order_status'] = order.status
-        if order.customer.bale_user_id:
-            bale_client.send_message(
-                order.customer.bale_user_id,
-                f'متاسفیم، یکی از کانال‌ها سفارش شما را رد کرد. سفارش #{order.id} رد شد.',
-            )
-        return result
-
-    order.status = 'waiting_payment'
-    order.save()
-    result['order_status'] = order.status
-
-    if not order.customer.bale_user_id:
-        return result
-
-    callback = os.environ.get('WEBHOOK_BASE_URL')
-    if callback:
-        callback = callback.rstrip('/') + '/api/webhooks/payment/'
-
-    payment = bale_client.create_payment_request(
-        chat_id=order.customer.bale_user_id,
-        amount=order.total_amount,
-        callback_url=callback,
-        payload=f'order-{order.id}',
-        title=f'پرداخت سفارش #{order.id}',
-        description=f'هزینه تبلیغ — سفارش #{order.id}',
-    )
-    result['payment'] = {'ok': payment.get('ok'), 'error': payment.get('error')}
-
-    from bot_flow.access import is_debug_user
-
-    paid_cmd = f'/paid_{order.id}'
-    pay_kb = bale_client.payment_done_keyboard(order.id) if is_debug_user(order.customer.bale_user_id or '') else None
-    amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount:,} تومان'
-
-    if payment.get('payment_url'):
-        bale_client.send_message(
-            order.customer.bale_user_id,
-            f"همه مدیران تایید کردند. لطفاً پرداخت را تکمیل کنید: {payment.get('payment_url')}",
-            reply_markup=pay_kb,
-        )
-    elif payment.get('ok'):
-        bale_client.send_message(
-            order.customer.bale_user_id,
-            f'همه مدیران تایید کردند. فاکتور پرداخت برای سفارش #{order.id} ارسال شد.\n'
-            f'پس از پرداخت دکمه زیر را بزن یا: {paid_cmd}',
-            reply_markup=pay_kb,
-        )
-    else:
-        bale_client.send_message(
-            order.customer.bale_user_id,
-            f'همه مدیران تایید کردند.\n{amount_line}\n'
-            + (
-                f'حساب دیباگ: برای شبیه‌سازی {paid_cmd}'
-                if pay_kb
-                else 'فاکتور کیف‌پول را کامل کنید تا سفارش ثبت شود.'
-            ),
-            reply_markup=pay_kb,
-        )
-
-    return result
+    return process_manager_item(order_item_id, str(manager_bale_id), action, new_start=parsed)
 
 
 def process_payment_paid(order_id: int) -> Dict[str, Any]:
