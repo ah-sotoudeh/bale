@@ -19,6 +19,7 @@ from users.models import User
 logger = logging.getLogger(__name__)
 
 MANAGER_HOURS = int(os.environ.get('MANAGER_RESPONSE_HOURS', '12'))
+PAYMENT_HOLD_HOURS = int(os.environ.get('PAYMENT_HOLD_HOURS', '24'))
 
 
 @transaction.atomic
@@ -52,6 +53,8 @@ def add_to_cart(
     tariff: Tariff,
     day,
 ) -> Dict[str, Any]:
+    if not tariff.is_active:
+        return {'ok': False, 'error': 'inactive_tariff'}
     start, end = slot_for_day(tariff, day)
     channel = tariff.channel
     if tariff.group_id:
@@ -381,11 +384,13 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     total = sum(i.price for i in approved)
     order.total_amount = total
     order.status = 'waiting_payment'
+    order.managers_deadline = timezone.now() + timedelta(hours=PAYMENT_HOLD_HOURS)
     order.save()
 
     from bot_flow.access import is_debug_user
 
     lines.append(f'\nمبلغ قابل پرداخت: {total:,} تومان')
+    lines.append(f'مهلت پرداخت: {PAYMENT_HOLD_HOURS} ساعت. بعد از آن روزها دوباره آزاد می‌شوند.')
     kb = None
     if cust and is_debug_user(cust):
         lines.append('حساب دیباگ: دکمهٔ زیر پرداخت را شبیه‌سازی می‌کند. کاربران دیگر فقط فاکتور کیف‌پول را می‌بینند.')
@@ -405,3 +410,63 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
             bc.send_message(cust, f'لینک پرداخت: {payment["payment_url"]}', reply_markup=kb)
 
     return {'ok': True, 'order_status': 'waiting_payment', 'total': total}
+
+
+def _release_open_items(order: Order, manager_status: str) -> list:
+    touched = []
+    for item in order.items.select_related('manager', 'channel', 'tariff'):
+        if item.manager_status not in ('cart', 'pending', 'approved', 'edited'):
+            continue
+        item.manager_status = manager_status
+        item.execution_status = 'cancelled'
+        item.save()
+        touched.append(item)
+    return touched
+
+
+def cancel_customer_order(order: Order) -> Dict[str, Any]:
+    """مشتری قبل از پرداخت سفارش را می‌بندد و روزهای قفل‌شده آزاد می‌شوند."""
+    if order.status == 'cancelled':
+        return {'ok': True, 'order_status': 'cancelled', 'already': True}
+    if order.status not in ('draft', 'waiting_managers', 'waiting_customer_confirm', 'waiting_payment'):
+        return {'ok': False, 'error': 'not_cancellable'}
+    touched = _release_open_items(order, 'customer_declined')
+    order.status = 'cancelled'
+    order.total_amount = 0
+    order.save(update_fields=['status', 'total_amount'])
+    CustomerDraft.objects.filter(order=order).delete()
+    cust = order.customer.bale_user_id
+    if cust:
+        bc.send_message(cust, f'سفارش #{order.id} لغو شد و روزهایش آزاد شد.')
+    told = set()
+    for item in touched:
+        mid = item.manager.bale_user_id if item.manager else ''
+        if not mid or mid in told:
+            continue
+        told.add(mid)
+        bc.send_message(mid, f'مشتری سفارش #{order.id} را قبل از پرداخت لغو کرد.')
+    return {'ok': True, 'order_status': 'cancelled', 'released': len(touched)}
+
+
+def cancel_unpaid_orders() -> int:
+    """سفارش آمادهٔ پرداخت که مهلتش گذشته، روز را برای مشتری بعدی آزاد می‌کند."""
+    now = timezone.now()
+    n = 0
+    qs = Order.objects.filter(
+        status='waiting_payment',
+        managers_deadline__isnull=False,
+        managers_deadline__lt=now,
+    ).select_related('customer')
+    for order in qs:
+        _release_open_items(order, 'expired')
+        order.status = 'cancelled'
+        order.total_amount = 0
+        order.save(update_fields=['status', 'total_amount'])
+        cust = order.customer.bale_user_id
+        if cust:
+            bc.send_message(
+                cust,
+                f'مهلت پرداخت سفارش #{order.id} تمام شد. روزها دوباره آزاد شدند.',
+            )
+        n += 1
+    return n
