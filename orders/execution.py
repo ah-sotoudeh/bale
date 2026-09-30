@@ -39,11 +39,7 @@ def send_publish_reminders() -> int:
     هر کانال می‌تواند manual_remind_hours جدا داشته باشد (پیش‌فرض ۲).
     """
     now = timezone.now()
-    items = _item_qs().filter(
-        execution_status='paid',
-        requested_start__gte=now - timedelta(minutes=30),
-        requested_start__lte=now + timedelta(hours=48),
-    )
+    items = _item_qs().filter(execution_status='paid')
     n = 0
     for it in items:
         if not it.manager or not it.manager.bale_user_id:
@@ -59,6 +55,8 @@ def send_publish_reminders() -> int:
         if not start:
             continue
         start_cmp = start if timezone.is_aware(start) else timezone.make_aware(start)
+        if start_cmp < now - timedelta(minutes=30):
+            continue
         max_h = max(
             (getattr(c, 'manual_remind_hours', None) or REMIND_HOURS_BEFORE)
             for c in manual_chs
