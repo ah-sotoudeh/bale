@@ -967,3 +967,159 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('queueMicrotask(()=>t().refreshChannelStats())', script)
         self.assertIn('هنوز بررسی نشده', script)
         self.assertIn('iA(`/channels/refresh`,n?{force:!0}:{})', script)
+        self.assertIn('شرایط و قوانین', script)
+        self.assertIn('isOperator:op', script)
+        self.assertIn('پیوند کانال را بنویسید', script)
+        rules = self.client.get('/miniapp/rules/')
+        self.assertEqual(rules.status_code, 200)
+        self.assertIn('قمار', rules.content.decode('utf-8'))
+
+
+class CustomerBannerFlowTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='buyer', password='pass', bale_user_id='cust-1')
+        self.manager = User.objects.create_user(username='owner', password='pass', bale_user_id='mgr-1')
+        self.channel = Channel.objects.create(name='shop', link='@shop', manager=self.manager)
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='noon', duration_hours=24, price=1000, start_hour=11
+        )
+
+    def _sent_text(self, mock_send):
+        parts = []
+        for call in mock_send.call_args_list:
+            if call.args:
+                parts.append(str(call.args[1] if len(call.args) > 1 else call.args[0]))
+        return '\n'.join(parts)
+
+    @patch('integrations.bale_client.forward_message', return_value={'ok': True})
+    @patch('integrations.bale_client.answer_callback_query', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_photo_banner_is_saved_and_confirmed(self, send, _answer, _forward):
+        from bot_flow.customer import handle_customer_callback
+        from bot_flow.dispatch import handle_update
+        from orders.models import CustomerBanner
+
+        handle_customer_callback('900', 'cust-1', 'cu:new', cq_id='c1')
+        handle_update({
+            'update_id': 1,
+            'message': {
+                'message_id': 50,
+                'chat': {'id': 900},
+                'from': {'id': 'cust-1'},
+                'photo': [{'file_id': 'ph'}],
+                'caption': 'خرید دمپایی تابستانی از این فروشگاه',
+            },
+        })
+        banner = CustomerBanner.objects.get(customer=self.user)
+        self.assertEqual(banner.media_kind, 'photo')
+        self.assertIn('دمپایی', banner.caption)
+        draft = Order.objects.get(customer=self.user, status='draft')
+        self.assertEqual(draft.banner_message_id, '50')
+        text = self._sent_text(send)
+        self.assertIn('بنر دریافت شد', text)
+        self.assertIn('کانال را انتخاب کنید', text)
+        markup = ''
+        for call in send.call_args_list:
+            raw = call.kwargs.get('reply_markup')
+            if raw:
+                markup += str(raw)
+        self.assertIn('cu:catalog', markup)
+        self.assertIn('ویرایش', markup)
+
+    @patch('integrations.bale_client.answer_callback_query', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_short_text_explains_the_banner_rule(self, send, _answer):
+        from bot_flow.customer import handle_customer_callback
+        from bot_flow.dispatch import handle_update
+        from orders.models import CustomerBanner
+
+        handle_customer_callback('900', 'cust-1', 'cu:new', cq_id='c1')
+        send.reset_mock()
+        handle_update({
+            'update_id': 2,
+            'message': {
+                'message_id': 51,
+                'chat': {'id': 900},
+                'from': {'id': 'cust-1'},
+                'text': 'سلام',
+            },
+        })
+        self.assertEqual(CustomerBanner.objects.count(), 0)
+        self.assertIn('عکس', self._sent_text(send))
+
+    @patch('integrations.bale_client.forward_message', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_a_sentence_can_be_a_text_banner(self, send, _forward):
+        from bot_flow.dispatch import handle_update
+        from users.models import BotSession
+
+        BotSession.objects.create(bale_user_id='cust-1', state='cust_await_banner', data={})
+        handle_update({
+            'update_id': 3,
+            'message': {
+                'message_id': 52,
+                'chat': {'id': 900},
+                'from': {'id': 'cust-1'},
+                'text': 'تبلیغ فروشگاه کفش، ارسال رایگان تا آخر هفته',
+            },
+        })
+        draft = Order.objects.get(customer=self.user, status='draft')
+        self.assertEqual(draft.banner_message_id, '52')
+        self.assertIn('بنر دریافت شد', self._sent_text(send))
+
+    @patch('integrations.bale_client.answer_callback_query', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_a_second_tap_does_not_send_the_same_panel_again(self, send, _answer):
+        from bot_flow.dispatch import handle_callback_query
+
+        payload = {
+            'id': 'cq-1',
+            'data': 'cu:new',
+            'from': {'id': 'cust-1'},
+            'message': {'message_id': 7, 'chat': {'id': 900}},
+        }
+        handle_callback_query(payload)
+        first = send.call_count
+        handle_callback_query({**payload, 'id': 'cq-2'})
+        self.assertEqual(send.call_count, first)
+        self.assertGreater(first, 0)
+
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    def test_help_and_menu_are_known_commands(self, send):
+        from bot_flow.dispatch import handle_update
+
+        handle_update({
+            'update_id': 4,
+            'message': {'message_id': 1, 'chat': {'id': 900}, 'from': {'id': 'cust-1'}, 'text': '/help'},
+        })
+        self.assertIn('راهنما', self._sent_text(send))
+        send.reset_mock()
+        handle_update({
+            'update_id': 5,
+            'message': {'message_id': 2, 'chat': {'id': 900}, 'from': {'id': 'cust-1'}, 'text': '/menu'},
+        })
+        self.assertIn('لینک‌ساز', self._sent_text(send))
+
+    def test_every_user_can_switch_customer_and_manager(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        me = self.client.get('/miniapp/api/me', {'debug_bale_id': 'cust-1'})
+        self.assertEqual(me.status_code, 200, me.content)
+        self.assertTrue(me.json()['can_switch_roles'])
+        self.assertFalse(me.json()['is_operator'])
+
+    def test_marking_someone_elses_day_is_a_persian_error(self):
+        import json
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        denied = self.client.post(
+            '/miniapp/api/busy-day',
+            data=json.dumps({'tariff_id': self.tariff.id, 'date': '2026-10-08', 'debug_bale_id': 'cust-1'}),
+            content_type='application/json',
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn('کانال شما', denied.json()['message'])

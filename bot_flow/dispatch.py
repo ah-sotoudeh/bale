@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, time as dtime
 
 from django.utils import timezone
@@ -31,6 +32,8 @@ from wallet.services import (
 )
 
 log = logging.getLogger('poll_bot')
+
+_recent_callbacks: dict[tuple, float] = {}
 
 _INVISIBLE = re.compile(r'[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff\u00a0]')
 CMD_APPROVE = re.compile(r'^/approve(?:@[^\s_]+)?(?:_(\d+)|(?:\s+(\d+))?\s*)$', re.I)
@@ -151,6 +154,18 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
     return False
 
 
+def _callback_is_repeat(bale_uid: str, data: str, message_id) -> bool:
+    """لمس دوبارهٔ همان دکمه، تا چند ثانیه، پیام تازه نمی‌سازد."""
+    now = time.monotonic()
+    key = (str(bale_uid), data, str(message_id or ''))
+    stale = [item for item, seen in _recent_callbacks.items() if now - seen > 30]
+    for item in stale:
+        _recent_callbacks.pop(item, None)
+    seen = _recent_callbacks.get(key)
+    _recent_callbacks[key] = now
+    return seen is not None and now - seen < 4
+
+
 def handle_callback_query(cq: dict) -> None:
     cq_id = cq.get('id')
     data = (cq.get('data') or '').strip()
@@ -159,6 +174,11 @@ def handle_callback_query(cq: dict) -> None:
     username = from_user.get('username') or ''
     msg = cq.get('message') or {}
     chat_id = str((msg.get('chat') or {}).get('id') or '')
+
+    _answer(cq_id, '')
+    if _callback_is_repeat(bale_uid, data, msg.get('message_id')):
+        log.info('callback repeat ignored %r user=%s', data, bale_uid)
+        return
 
     log.info('callback %r user=%s', data, bale_uid)
 
@@ -340,8 +360,25 @@ def handle_update(update: dict) -> None:
     if not chat_id or not bale_uid:
         return
 
-    if norm.startswith('/start'):
+    if norm.startswith('/start') or norm in ('/menu', '/منو'):
         flow.handle_start(chat_id, bale_uid, username)
+        return
+
+    if norm in ('/help', '/راهنما'):
+        from bot_flow.messages import MSG_HELP
+
+        bc.send_message(chat_id, MSG_HELP, reply_markup=flow.role_keyboard(is_operator=is_operator(bale_uid)))
+        return
+
+    if norm in ('/rules', '/law', '/قوانین'):
+        bc.send_message(
+            chat_id,
+            'شرایط و قوانین لینک‌بان داخل مینی‌اپ، دکمهٔ «شرایط و قوانین» است.\n'
+            'خلاصه: تبلیغ قمار، رمزارز، محتوای مستهجن، فیشینگ و ادعای «تضمینی» پذیرفته نمی‌شود. '
+            'پول تا پایان مدت انتشار امانی می‌ماند و اگر کانال منتشر نکند برمی‌گردد. '
+            'معامله خارج از سامانه ممنوع است. حذف خودکار پست فقط تا ۴۸ ساعت بعد از ارسال ممکن است.',
+            reply_markup=flow.role_keyboard(is_operator=is_operator(bale_uid)),
+        )
         return
 
     try:
@@ -367,12 +404,21 @@ def handle_update(update: dict) -> None:
         or msg.get('forward_origin')
         or msg.get('forward_from')
     )
-    if msg.get('photo') or msg.get('video') or msg.get('document') or is_forward:
+    waiting_banner = False
+    try:
+        sess_now = BotSession.objects.filter(bale_user_id=bale_uid).only('state').first()
+        waiting_banner = bool(sess_now and sess_now.state in ('cust_await_banner', 'cust_banner_hub'))
+    except Exception:
+        log.exception('banner state')
+    has_media = bool(msg.get('photo') or msg.get('video') or msg.get('animation') or msg.get('document'))
+    if has_media or is_forward or waiting_banner:
         try:
             if cust.handle_banner_message(chat_id, bale_uid, msg):
                 return
         except Exception:
             log.exception('banner handle')
+            bc.send_message(chat_id, 'بنر را نگرفتیم. یک بار دیگر همان عکس یا متن را بفرستید.')
+            return
 
     if handle_legacy_commands(chat_id, bale_uid, norm):
         return

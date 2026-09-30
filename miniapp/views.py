@@ -39,6 +39,12 @@ def manager_app(request: HttpRequest) -> HttpResponse:
     return mini_app(request)
 
 
+@xframe_options_exempt
+def rules_page(_request: HttpRequest) -> HttpResponse:
+    html = (PANEL / 'rules.html').read_text(encoding='utf-8')
+    return _framed(HttpResponse(html, content_type='text/html; charset=utf-8'))
+
+
 def panel_asset(_request: HttpRequest, name: str) -> FileResponse:
     file = _safe(PANEL / 'assets', name)
     content_type = guess_type(file.name)[0] or 'application/octet-stream'

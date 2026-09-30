@@ -24,6 +24,12 @@
         try {
           w.onEvent("themeChanged", paint);
         } catch (e) {}
+        try {
+          w.onEvent("settingsButtonClicked", function () {
+            location.assign("/miniapp/rules/");
+          });
+          if (w.SettingsButton && w.SettingsButton.show) w.SettingsButton.show();
+        } catch (e) {}
         return true;
       }
       document.addEventListener("DOMContentLoaded", paintBale);

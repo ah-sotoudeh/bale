@@ -102,6 +102,14 @@ def prepare_polling() -> None:
     if url:
         bc.delete_webhook()
         log.info('Webhook deleted')
+    bc.set_my_commands([
+        {'command': 'start', 'description': 'شروع و انتخاب نقش'},
+        {'command': 'menu', 'description': 'منوی اصلی'},
+        {'command': 'help', 'description': 'راهنما'},
+        {'command': 'customer', 'description': 'بخش مشتری'},
+        {'command': 'panel', 'description': 'بخش مدیر کانال'},
+        {'command': 'rules', 'description': 'شرایط و قوانین'},
+    ])
 
 
 _stats_lock = threading.Lock()

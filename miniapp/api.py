@@ -135,7 +135,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
         },
         'wallet': br,
         'is_operator': is_op,
-        'can_switch_roles': _can_switch_roles(user.bale_user_id or ''),
+        'can_switch_roles': True,
         'debug': debug_user,
         'channel_count': ch_count,
         'can_be_manager': True,

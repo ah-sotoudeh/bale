@@ -153,6 +153,17 @@ def set_webhook(url: str) -> Dict[str, Any]:
         return {'error': _redact(str(e))}
 
 
+def set_my_commands(commands: list) -> Dict[str, Any]:
+    endpoint = _bot_url('setMyCommands')
+    try:
+        r = requests.post(endpoint, json={'commands': commands}, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except requests.RequestException as e:
+        logger.warning('setMyCommands failed: %s', _redact(str(e)))
+        return {'ok': False, 'error': 'commands_failed'}
+
+
 def delete_webhook() -> Dict[str, Any]:
     endpoint = _bot_url('deleteWebhook')
     try:

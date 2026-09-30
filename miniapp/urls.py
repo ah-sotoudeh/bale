@@ -1,11 +1,12 @@
 from django.urls import path
 
 from miniapp import api, api_extra, api_shop
-from miniapp.views import manager_app, media_file, mini_app, panel_asset
+from miniapp.views import manager_app, media_file, mini_app, panel_asset, rules_page
 
 urlpatterns = [
     path('assets/<path:name>', panel_asset, name='miniapp_asset'),
     path('media/<path:name>', media_file, name='miniapp_media'),
+    path('rules/', rules_page, name='miniapp_rules'),
     path('', mini_app, name='miniapp_home'),
     path('manager/', manager_app, name='miniapp_manager'),
     path('api/me', api.api_me),
