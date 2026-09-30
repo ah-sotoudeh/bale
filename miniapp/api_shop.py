@@ -40,6 +40,8 @@ ERR_FA = {
     'need_holder_name': 'نام صاحب حساب لازم است.',
     'not_pending': 'این سفارش دیگر در انتظار نیست.',
     'inactive': 'این تعرفه فعال نیست.',
+    'not_cancellable': 'این سفارش دیگر قابل لغو نیست.',
+    'inactive_tariff': 'این تعرفه فعال نیست.',
 }
 
 
@@ -451,6 +453,27 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
         })
     return JsonResponse({'ok': True, 'orders': rows})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_order_cancel(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    try:
+        order_id = int(body.get('order_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    order = Order.objects.filter(id=order_id, customer=user).first()
+    if not order:
+        return _err('not_found', 404)
+    result = cart_svc.cancel_customer_order(order)
+    if not result.get('ok'):
+        return _err(result.get('error') or 'not_cancellable')
+    return JsonResponse(result)
 
 
 @csrf_exempt
