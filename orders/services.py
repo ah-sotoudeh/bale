@@ -199,8 +199,10 @@ def process_manager_response(
     )
     result['payment'] = {'ok': payment.get('ok'), 'error': payment.get('error')}
 
+    from bot_flow.access import is_debug_user
+
     paid_cmd = f'/paid_{order.id}'
-    pay_kb = bale_client.payment_done_keyboard(order.id)
+    pay_kb = bale_client.payment_done_keyboard(order.id) if is_debug_user(order.customer.bale_user_id or '') else None
     amount_line = f'مبلغ سفارش #{order.id}: {order.total_amount:,} تومان'
 
     if payment.get('payment_url'):
@@ -220,7 +222,11 @@ def process_manager_response(
         bale_client.send_message(
             order.customer.bale_user_id,
             f'همه مدیران تایید کردند.\n{amount_line}\n'
-            f'برای شبیه‌سازی پرداخت دکمه را بزن یا: {paid_cmd}',
+            + (
+                f'حساب دیباگ: برای شبیه‌سازی {paid_cmd}'
+                if pay_kb
+                else 'فاکتور کیف‌پول را کامل کنید تا سفارش ثبت شود.'
+            ),
             reply_markup=pay_kb,
         )
 
@@ -228,18 +234,27 @@ def process_manager_response(
 
 
 def process_payment_paid(order_id: int) -> Dict[str, Any]:
+    from django.db import transaction
+
     try:
-        order = Order.objects.prefetch_related(
-            'items__channel', 'items__manager', 'items__tariff', 'customer_banner'
-        ).select_related('customer', 'customer_banner').get(id=order_id)
+        with transaction.atomic():
+            order = (
+                Order.objects.select_for_update()
+                .select_related('customer', 'customer_banner')
+                .get(id=order_id)
+            )
+            if order.status == 'paid':
+                return {'ok': True, 'order_id': order.id, 'order_status': 'paid', 'already': True}
+            if order.status != 'waiting_payment':
+                return {'ok': False, 'error': 'not_waiting_payment'}
+            order.status = 'paid'
+            order.save(update_fields=['status'])
     except Order.DoesNotExist:
         return {'ok': False, 'error': 'order_not_found'}
 
-    if order.status == 'paid':
-        return {'ok': True, 'order_id': order.id, 'order_status': 'paid', 'already': True}
-
-    order.status = 'paid'
-    order.save(update_fields=['status'])
+    order = Order.objects.prefetch_related(
+        'items__channel', 'items__manager', 'items__tariff', 'customer_banner'
+    ).select_related('customer', 'customer_banner').get(id=order_id)
 
     ref = ensure_banner_on_reference(order)
     if not ref.get('ok'):
