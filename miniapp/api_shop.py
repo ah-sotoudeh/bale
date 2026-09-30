@@ -560,7 +560,7 @@ def api_operator_paid(request: HttpRequest) -> JsonResponse:
     if not body.get('confirm'):
         built = ws.build_payout_batch(user)
         if not built.get('ok'):
-            return JsonResponse({'ok': False, 'error': built.get('error'), 'message': 'درخواست بازی نیست.'}, status=400)
+            return JsonResponse({'ok': False, 'error': built.get('error'), 'message': 'درخواست تسویه باز نیست.'}, status=400)
         return JsonResponse({
             'ok': True,
             'file_text': built.get('file_text') or '',
@@ -580,3 +580,84 @@ def api_operator_paid(request: HttpRequest) -> JsonResponse:
         'marked_paid': True,
         'notified': len(marked.get('notified') or []),
     })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_order_confirm(request: HttpRequest) -> JsonResponse:
+    """تأیید یا اعتراض مشتری به انتشار. وضعیت فقط از همین مسیر عوض می‌شود."""
+    from integrations import bale_client as bc
+    from orders.banner_publish import operator_chat_id
+    from orders.execution import customer_confirm_execution
+
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    try:
+        item_id = int(body.get('item_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    accept = bool(body.get('accept'))
+    result = customer_confirm_execution(item_id, str(user.bale_user_id or ''), accept)
+    if not result.get('ok'):
+        from miniapp.api import _with_message
+
+        return JsonResponse(_with_message(result), status=400)
+    note = str(body.get('note') or '').strip()[:240]
+    if not accept and note:
+        op = operator_chat_id()
+        if op:
+            try:
+                bc.send_message(op, f'یادداشت مشتری برای نوبت {item_id}:\n{note}')
+            except Exception:
+                pass
+    return JsonResponse({'ok': True, 'status': result.get('status') or ''})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_order_published(request: HttpRequest) -> JsonResponse:
+    """دکمه «منتشر شد» تاریخچه کانال را می‌خواند و اگر بنر باشد نوبت را می‌بندد."""
+    from orders.publish import verify_manager_published
+
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    try:
+        item_id = int(body.get('item_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    result = verify_manager_published(item_id, str(user.bale_user_id or ''))
+    if not result.get('ok'):
+        from miniapp.api import _with_message
+
+        return JsonResponse(_with_message(result), status=400)
+    return JsonResponse({'ok': True, 'permalinks': result.get('permalinks') or []})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_resolve(request: HttpRequest) -> JsonResponse:
+    from orders.execution import operator_resolve
+
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return _err('forbidden', 403)
+    body = _json_body(request)
+    try:
+        item_id = int(body.get('item_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    result = operator_resolve(item_id, str(user.bale_user_id or ''), bool(body.get('executed')))
+    if not result.get('ok'):
+        from miniapp.api import _with_message
+
+        return JsonResponse(_with_message(result), status=400)
+    return JsonResponse({'ok': True, 'status': result.get('status') or ''})

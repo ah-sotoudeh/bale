@@ -143,6 +143,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
             'operator': is_op,
         },
         'pending_orders': OrderItem.objects.filter(manager=user, manager_status='pending').count(),
+        **_operator_queues(is_op),
     })
 
 
@@ -386,6 +387,55 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'ok': True, 'tariff_id': t.id})
 
 
+def _operator_queues(is_op: bool) -> Dict[str, Any]:
+    """صف بنر، تسویه و بررسی انتشار. فقط برای پشتیبانی پر می‌شود."""
+    empty = {'operator_banners': [], 'operator_payouts': [], 'operator_reviews': []}
+    if not is_op:
+        return empty
+    from orders.models import BannerPublishRequest
+
+    banners = []
+    for req in BannerPublishRequest.objects.filter(status='pending').select_related('customer').order_by('id')[:40]:
+        caption = (req.caption or '').strip()
+        banners.append({
+            'id': req.id,
+            'customer': req.customer.bale_user_id or '',
+            'fee_toman': req.fee_toman,
+            'caption': caption[:800],
+            'title': (caption[:40] or f'بنر {req.id}'),
+            'media_kind': req.media_kind or 'photo',
+        })
+    payouts = []
+    for payout in PayoutRequest.objects.filter(status='pending').order_by('id')[:80]:
+        payouts.append({
+            'id': payout.id,
+            'amount_toman': payout.amount_toman,
+            'iban': payout.iban,
+            'holder_name': payout.holder_name,
+            'status': payout.status,
+        })
+    reviews = []
+    for item in (
+        OrderItem.objects.filter(execution_status='awaiting_operator')
+        .select_related('channel', 'tariff', 'tariff__group')
+        .order_by('id')[:40]
+    ):
+        owner = ''
+        if item.tariff_id and item.tariff.group_id:
+            owner = item.tariff.group.name
+        elif item.channel_id:
+            owner = item.channel.name
+        note = owner or f'نوبت {item.id}'
+        if item.published_link:
+            note = f'{note} · {item.published_link}'
+        reviews.append({'item_id': item.id, 'note': note[:240]})
+    return {
+        'operator_banners': banners,
+        'operator_payouts': payouts,
+        'operator_reviews': reviews,
+    }
+
+
 def _fail(error: str, status: int = 400) -> JsonResponse:
     from bot_flow.messages import user_error
 
@@ -545,8 +595,11 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
             {
                 'id': p.id,
                 'amount_toman': p.amount_toman,
+                'iban': p.iban,
                 'iban_tail': (p.iban or '')[-6:],
+                'holder_name': p.holder_name,
                 'status': p.status,
+                'created_at': p.created_at.isoformat() if p.created_at else '',
             }
             for p in PayoutRequest.objects.filter(user=user).order_by('-id')[:10]
         ]

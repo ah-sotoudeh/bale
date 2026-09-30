@@ -63,3 +63,18 @@ button.border-line:active,
 .rounded-2xl.bg-surface button:active {
   background: color-mix(in srgb, var(--color-link) 8%, transparent);
 }
+
+.mt-2.flex.gap-2,
+.mt-2.grid.grid-cols-2 {
+  align-items: stretch;
+}
+
+.mt-2.flex.gap-2 > button {
+  flex: 1 1 8rem;
+}
+
+.font-medium.text-link.truncate {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}

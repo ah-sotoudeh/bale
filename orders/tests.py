@@ -720,3 +720,125 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(api_denied.status_code, 400, api_denied.content)
         self.assertIn('@link_yar', api_denied.json()['detail'])
         self.assertNotIn('1164810718', api_denied.json()['detail'])
+
+
+class MiniappLiveActionTests(TestCase):
+    def setUp(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.customer = User.objects.create_user(username='live-c', password='pass', bale_user_id='c-live')
+        self.manager = User.objects.create_user(username='live-m', password='pass', bale_user_id='m-live')
+        self.channel = Channel.objects.create(name='live', link='@live', manager=self.manager)
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='day', duration_hours=24, price=1000, start_hour=11
+        )
+
+    def _item(self, execution):
+        start = timezone.now() + timedelta(days=2)
+        order = Order.objects.create(customer=self.customer, status='paid', total_amount=1000)
+        return OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=1000,
+            manager=self.manager,
+            manager_status='approved',
+            execution_status=execution,
+            duration_hours=24,
+        )
+
+    def _post(self, path, payload):
+        import json
+
+        return self.client.post(path, data=json.dumps(payload), content_type='application/json')
+
+    def test_confirm_rejects_the_wrong_stage_in_persian(self):
+        item = self._item('paid')
+        response = self._post(
+            '/miniapp/api/orders/confirm',
+            {'item_id': item.id, 'accept': True, 'debug_bale_id': 'c-live'},
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        body = response.json()
+        self.assertEqual(body['error'], 'bad_status')
+        self.assertIn('ممکن', body['message'])
+        item.refresh_from_db()
+        self.assertEqual(item.execution_status, 'paid')
+
+    @patch('integrations.bale_client.send_message')
+    @patch('orders.execution.credit_manager_for_execution')
+    def test_customer_confirm_writes_the_order(self, _credit, _send):
+        item = self._item('awaiting_customer_confirm')
+        response = self._post(
+            '/miniapp/api/orders/confirm',
+            {'item_id': item.id, 'accept': True, 'debug_bale_id': 'c-live'},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        item.refresh_from_db()
+        self.assertEqual(item.execution_status, 'executed')
+        stranger = self._post(
+            '/miniapp/api/orders/confirm',
+            {'item_id': item.id, 'accept': False, 'debug_bale_id': 'm-live'},
+        )
+        self.assertEqual(stranger.status_code, 400)
+        self.assertEqual(stranger.json()['error'], 'not_customer')
+
+    def test_published_button_uses_channel_history(self):
+        item = self._item('paid')
+        with patch(
+            'orders.publish.verify_manager_published',
+            return_value={'ok': False, 'error': 'not_found_in_history'},
+        ):
+            missing = self._post(
+                '/miniapp/api/orders/published',
+                {'item_id': item.id, 'debug_bale_id': 'm-live'},
+            )
+        self.assertEqual(missing.status_code, 400, missing.content)
+        self.assertIn('تاریخچه', missing.json()['message'])
+        with patch(
+            'orders.publish.verify_manager_published',
+            return_value={'ok': True, 'permalinks': ['https://ble.ir/live/1']},
+        ) as verify:
+            found = self._post(
+                '/miniapp/api/orders/published',
+                {'item_id': item.id, 'debug_bale_id': 'm-live'},
+            )
+        self.assertEqual(found.status_code, 200, found.content)
+        verify.assert_called_once()
+        self.assertEqual(verify.call_args.args[0], item.id)
+
+    @patch('wallet.services.OPERATOR_BALE_ID', 'm-live')
+    def test_operator_home_loads_the_banner_queue(self):
+        from orders.models import BannerPublishRequest
+
+        BannerPublishRequest.objects.create(
+            customer=self.customer,
+            storage_chat_id='1',
+            storage_message_id='2',
+            caption='بنر آزمایشی برای صف پشتیبانی',
+            media_kind='photo',
+            fee_toman=0,
+            status='pending',
+        )
+        home = self.client.get('/miniapp/api/me', {'debug_bale_id': 'm-live'})
+        self.assertEqual(home.status_code, 200, home.content)
+        banners = home.json()['operator_banners']
+        self.assertEqual(len(banners), 1)
+        self.assertIn('آزمایشی', banners[0]['caption'])
+        customer = self.client.get('/miniapp/api/me', {'debug_bale_id': 'c-live'})
+        self.assertEqual(customer.json()['operator_banners'], [])
+        self.assertEqual(customer.json()['operator_payouts'], [])
+
+    def test_live_bundle_calls_the_order_endpoints(self):
+        bundle = self.client.get('/miniapp/assets/index-Ce1t18yS.js')
+        self.assertEqual(bundle.status_code, 200)
+        script = b''.join(bundle.streaming_content).decode('utf-8')
+        self.assertIn('/orders/published', script)
+        self.assertIn('/orders/confirm', script)
+        self.assertIn('operator_banners', script)
+        self.assertIn("owner:`customer`", script)
+        self.assertIn('debug_bale_id', script)

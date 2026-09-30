@@ -22,6 +22,8 @@ urlpatterns = [
     path('api/orders/reject', api_extra.api_order_reject),
     path('api/orders/suggest', api_shop.api_suggest_time),
     path('api/orders/answer', api_shop.api_answer_time),
+    path('api/orders/confirm', api_shop.api_order_confirm),
+    path('api/orders/published', api_shop.api_order_published),
     path('api/free-days', api.api_free_days),
     path('api/calendar', api_shop.api_calendar),
     path('api/busy', api.api_mark_busy),
@@ -45,4 +47,5 @@ urlpatterns = [
     path('api/operator/mark-paid', api_shop.api_operator_paid),
     path('api/operator/banners', api_shop.api_operator_banners),
     path('api/operator/banner-decide', api_shop.api_operator_banner_decide),
+    path('api/operator/resolve', api_shop.api_operator_resolve),
 ]
