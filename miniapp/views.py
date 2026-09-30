@@ -46,7 +46,9 @@ def panel_asset(_request: HttpRequest, name: str) -> FileResponse:
         content_type = 'text/javascript; charset=utf-8'
     elif file.suffix == '.css':
         content_type = 'text/css; charset=utf-8'
-    return FileResponse(file.open('rb'), content_type=content_type)
+    resp = FileResponse(file.open('rb'), content_type=content_type)
+    resp['Cache-Control'] = 'no-cache'
+    return resp
 
 
 def media_file(_request: HttpRequest, name: str) -> FileResponse:

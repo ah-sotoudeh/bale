@@ -445,3 +445,23 @@ class MarketplaceRulesTests(TestCase):
         order.save(update_fields=['status'])
         again = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'c9'})
         self.assertIn('پاسخ کانال', again.json()['orders'][0]['pay_hint'])
+
+    def test_stranger_reject_is_persian_and_assets_refresh(self):
+        import json
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        _order, item = self._pending_order()
+        denied = self.client.post(
+            '/miniapp/api/orders/reject',
+            data=json.dumps({'item_id': item.id, 'debug_bale_id': 'zz-deny'}),
+            content_type='application/json',
+        )
+        self.assertEqual(denied.status_code, 400)
+        body = denied.json()
+        self.assertEqual(body['error'], 'not_item_manager')
+        self.assertIn('مدیر', body['message'])
+        asset = self.client.get('/miniapp/assets/shop.css')
+        self.assertEqual(asset.status_code, 200)
+        self.assertIn('no-cache', asset['Cache-Control'])

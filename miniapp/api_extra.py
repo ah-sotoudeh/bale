@@ -125,8 +125,10 @@ def _set_item_status(request: HttpRequest, action: str) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
     result = process_manager_item(item_id, str(user.bale_user_id), action)
     if not result.get('ok'):
+        from miniapp.api import _with_message
+
         code = 404 if result.get('error') in ('item_not_found', 'manager_not_found') else 400
-        return JsonResponse(result, status=code)
+        return JsonResponse(_with_message(result), status=code)
     return JsonResponse(result)
 
 

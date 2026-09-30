@@ -91,11 +91,12 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
                     defaults={'username': f'mini_{debug_id}'[:30]},
                 )
                 return user, None
-        return None, JsonResponse({'ok': False, 'error': payload.get('error') or 'unauthorized'}, status=401)
+        code = payload.get('error') or 'unauthorized'
+        return None, _fail(code, 401)
 
     uid = str((payload.get('user') or {}).get('id') or '')
     if not uid:
-        return None, JsonResponse({'ok': False, 'error': 'no_user'}, status=401)
+        return None, _fail('no_user', 401)
 
     user = User.objects.filter(bale_user_id=uid).first()
     if not user:
@@ -254,10 +255,10 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+        return _fail('not_found', 404)
     mode = body.get('publish_mode')
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        return JsonResponse({'ok': False, 'error': 'bad_mode'}, status=400)
+        return _fail('bad_mode')
     ch.publish_mode = mode
     ch.save(update_fields=['publish_mode'])
     return JsonResponse({'ok': True, 'channel_id': ch.id, 'publish_mode': ch.publish_mode})
@@ -314,7 +315,7 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'channel_not_found'}, status=404)
+        return _fail('channel_not_found', 404)
     try:
         name = str(body.get('name') or '').strip()[:100]
         duration = int(body.get('duration_hours'))
@@ -322,9 +323,9 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         start_hour = body.get('start_hour')
         start_hour = int(start_hour) if start_hour is not None and str(start_hour) != '' else None
     except (TypeError, ValueError):
-        return JsonResponse({'ok': False, 'error': 'bad_fields'}, status=400)
+        return _fail('bad_fields')
     if not name or duration <= 0 or price < 0:
-        return JsonResponse({'ok': False, 'error': 'bad_fields'}, status=400)
+        return _fail('bad_fields')
     t = Tariff.objects.create(
         channel=ch,
         name=name,
@@ -334,6 +335,23 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         is_active=True,
     )
     return JsonResponse({'ok': True, 'tariff_id': t.id})
+
+
+def _fail(error: str, status: int = 400) -> JsonResponse:
+    from bot_flow.messages import user_error
+
+    return JsonResponse(
+        {'ok': False, 'error': error, 'message': user_error(error)},
+        status=status,
+    )
+
+
+def _with_message(result: Dict[str, Any]) -> Dict[str, Any]:
+    from bot_flow.messages import user_error
+
+    if result.get('ok') or result.get('message'):
+        return result
+    return {**result, 'message': user_error(str(result.get('error') or ''))}
 
 
 def _item_in_manager_inbox(it: OrderItem, user: User) -> bool:
@@ -402,12 +420,12 @@ def api_free_days(request: HttpRequest) -> JsonResponse:
     tid = request.GET.get('tariff_id')
     t = Tariff.objects.select_related('channel', 'group').filter(id=tid).first()
     if not t:
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+        return _fail('not_found', 404)
     owner_ok = (t.channel and t.channel.manager_id == user.id) or (
         t.group and t.group.manager_id == user.id
     )
     if not owner_ok:
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        return _fail('forbidden', 403)
     today = timezone.localdate()
     until = today + timedelta(days=13)
     free = [
@@ -437,14 +455,14 @@ def api_mark_busy(request: HttpRequest) -> JsonResponse:
 
             day = parse_jalali_date(int(body['jy']), int(body['jm']), int(body['jd']))
         except (TypeError, ValueError):
-            return JsonResponse({'ok': False, 'error': 'bad_date'}, status=400)
+            return _fail('bad_date')
     if day is None:
-        return JsonResponse({'ok': False, 'error': 'need_date'}, status=400)
+        return _fail('need_date')
 
     ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
     group = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
     if not ch and not group:
-        return JsonResponse({'ok': False, 'error': 'target_required'}, status=400)
+        return _fail('target_required')
 
     start = timezone.make_aware(datetime.combine(day, dtime(0, 0)))
     end = start + timedelta(days=1)
@@ -531,7 +549,7 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
             make_default=True,
         )
     except ValueError as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=400)
+        return _fail(str(e))
     return JsonResponse({'ok': True, 'bank_id': acc.id})
 
 
@@ -549,10 +567,10 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
 
     order = Order.objects.filter(id=body.get('order_id'), customer=user).first()
     if not order:
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+        return _fail('not_found', 404)
     result = invoice_for_order(order)
     status = 200 if result.get('ok') else 400
-    return JsonResponse(result, status=status)
+    return JsonResponse(_with_message(result), status=status)
 
 
 @csrf_exempt
@@ -565,9 +583,9 @@ def api_request_payout(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     bank = BankAccount.objects.filter(id=body.get('bank_id'), user=user).first()
     if not bank:
-        return JsonResponse({'ok': False, 'error': 'bank_not_found'}, status=404)
+        return _fail('bank_not_found', 404)
     r = ws.request_payout(user, bank)
     if not r.get('ok'):
-        return JsonResponse(r, status=400)
+        return JsonResponse(_with_message(r), status=400)
     pr = r['payout']
     return JsonResponse({'ok': True, 'payout_id': pr.id, 'amount_toman': pr.amount_toman})
