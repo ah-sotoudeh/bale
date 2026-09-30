@@ -51,7 +51,9 @@ class RegisterChannelView(APIView):
             )
 
         bio = info.get('bio') or info.get('description') or ''
-        if str(user.bale_user_id) not in str(bio):
+        from bot_flow.access import id_in_text
+
+        if not id_in_text(str(user.bale_user_id), str(bio)):
             return Response(
                 {'ok': False, 'detail': 'لطفاً شناسه‌تان را در بیو کانال وارد کنید'},
                 status=status.HTTP_400_BAD_REQUEST,

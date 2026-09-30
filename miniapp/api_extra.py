@@ -15,12 +15,26 @@ from wallet.models import PayoutRequest
 @csrf_exempt
 @require_http_methods(['GET'])
 def api_catalog(request: HttpRequest) -> JsonResponse:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from orders.models import SlotReservation
+
     user, err = _auth_user(request)
     if err:
         return err
-    qs = Tariff.objects.filter(is_active=True).select_related('channel', 'group').order_by('price', 'id')[:80]
+    qs = list(
+        Tariff.objects.filter(is_active=True).select_related('channel', 'group').order_by('price', 'id')[:80]
+    )
     items = []
+    owned = set()
     for t in qs:
+        if user and (
+            (t.channel_id and t.channel.manager_id == user.id)
+            or (t.group_id and t.group.manager_id == user.id)
+        ):
+            owned.add(t.id)
         items.append({
             'id': t.id,
             'name': t.name,
@@ -32,42 +46,57 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'channel_id': t.channel_id,
             'group_id': t.group_id,
         })
-    return JsonResponse({'ok': True, 'tariffs': items})
+    today = timezone.localdate()
+    until = today + timedelta(days=13)
+    other_ids = [t.id for t in qs if t.id not in owned]
+    busy = []
+    if other_ids:
+        for rid, tid, day in SlotReservation.objects.filter(
+            tariff_id__in=other_ids,
+            slot_date__gte=today,
+            slot_date__lte=until,
+        ).values_list('id', 'tariff_id', 'slot_date'):
+            busy.append({
+                'id': rid,
+                'tariff_id': tid,
+                'date': day.isoformat(),
+                'manual': False,
+            })
+    return JsonResponse({'ok': True, 'tariffs': items, 'busy': busy})
 
 
-def _set_item_status(request: HttpRequest, status: str) -> JsonResponse:
+def _set_item_status(request: HttpRequest, action: str) -> JsonResponse:
+    """تأیید و رد از همان مسیر سبد بازو می‌گذرد تا فاکتور و وضعیت سفارش یکی بماند."""
+    from orders.cart import process_manager_item
+
     user, err = _auth_user(request)
     if err:
         return err
     assert user is not None
+    if not user.bale_user_id:
+        return JsonResponse({'ok': False, 'error': 'no_user'}, status=400)
     body = _json_body(request)
-    it = OrderItem.objects.filter(id=body.get('item_id'), manager=user).first()
-    if not it:
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
-    if it.manager_status != 'pending':
-        return JsonResponse({'ok': False, 'error': 'not_pending'}, status=400)
-    it.manager_status = status
     try:
-        it.save(update_fields=['manager_status'])
-    except Exception as exc:
-        from orders.slots import SlotConflict
-
-        if isinstance(exc, SlotConflict):
-            return JsonResponse({'ok': False, 'error': 'slot_conflict'}, status=409)
-        raise
-    return JsonResponse({'ok': True, 'item_id': it.id, 'manager_status': it.manager_status})
+        item_id = int(body.get('item_id') or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+    result = process_manager_item(item_id, str(user.bale_user_id), action)
+    if not result.get('ok'):
+        code = 404 if result.get('error') in ('item_not_found', 'manager_not_found') else 400
+        return JsonResponse(result, status=code)
+    return JsonResponse(result)
 
 
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_order_approve(request: HttpRequest) -> JsonResponse:
-    return _set_item_status(request, 'approved')
+    return _set_item_status(request, 'approve')
 
 
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_order_reject(request: HttpRequest) -> JsonResponse:
-    return _set_item_status(request, 'rejected')
+    return _set_item_status(request, 'reject')
 
 
 @csrf_exempt
@@ -100,9 +129,11 @@ def api_operator_mark_paid(request: HttpRequest) -> JsonResponse:
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
-    n = 0
-    for p in PayoutRequest.objects.filter(status='pending'):
-        p.status = 'paid'
-        p.save(update_fields=['status'])
-        n += 1
-    return JsonResponse({'ok': True, 'marked': n})
+    return JsonResponse(
+        {
+            'ok': False,
+            'error': 'use_bot',
+            'message': 'تسویه را از بازو بسازید و فقط بعد از واریز بانک تأیید کنید.',
+        },
+        status=400,
+    )
