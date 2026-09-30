@@ -75,9 +75,8 @@ def handle_successful_payment(message: Dict[str, Any]) -> None:
     except ValueError:
         return
     result = process_payment_paid(order_id)
+    if result.get('ok'):
+        return
     chat_id = str((message.get('chat') or {}).get('id') or '')
     if chat_id:
-        if result.get('ok'):
-            bc.send_message(chat_id, f'پرداخت سفارش {order_id} ثبت شد. تبلیغ در زمان مقرر منتشر می‌شود.')
-        else:
-            bc.send_message(chat_id, f'پرداخت رسید ولی ثبت سفارش نشد: {result.get("error")}')
+        bc.send_message(chat_id, f'پرداخت رسید ولی ثبت سفارش نشد: {result.get("error")}')
