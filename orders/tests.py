@@ -465,3 +465,64 @@ class MarketplaceRulesTests(TestCase):
         asset = self.client.get('/miniapp/assets/shop.css')
         self.assertEqual(asset.status_code, 200)
         self.assertIn('no-cache', asset['Cache-Control'])
+
+    def test_channel_stats_ignore_a_brand_new_post_and_a_quiet_day(self):
+        from integrations.channel_stats import summarize_reading
+
+        now = int(timezone.now().timestamp() * 1000)
+        day = 86_400_000
+        summary = summarize_reading(
+            10_000,
+            [
+                {'message_id': 1, 'views': 1000, 'date': now - 3 * day, 'forwards': 4},
+                {'message_id': 2, 'views': 0, 'date': now - 60_000, 'forwards': 0},
+            ],
+        )
+        self.assertEqual(summary['avg_views'], 1000)
+        self.assertEqual(summary['err_percent'], 10.0)
+        self.assertEqual(summary['daily_reach'], 0)
+        quiet = summarize_reading(10_000, [{'message_id': 1, 'views': 500, 'date': now - 3 * day, 'forwards': 0}])
+        self.assertEqual(quiet['daily_reach'], 0)
+        self.assertEqual(quiet['avg_views'], 500)
+
+    def test_stats_job_reads_one_channel_and_a_failure_moves_on(self):
+        from integrations.channel_stats import refresh_channel, refresh_due_channels
+
+        Channel.objects.create(name='second', link='@second', manager=self.manager)
+        with patch('integrations.channel_stats.refresh_channel', return_value={'ok': True}) as refresh:
+            result = refresh_due_channels(limit=1)
+        self.assertEqual(result, {'done': 1, 'failed': 0})
+        self.assertEqual(refresh.call_count, 1)
+        self.channel.link = ''
+        self.channel.save(update_fields=['link'])
+        failed = refresh_channel(self.channel)
+        self.assertFalse(failed['ok'])
+        self.channel.refresh_from_db()
+        self.assertIsNotNone(self.channel.stats_updated_at)
+
+    def test_reread_button_calls_linkyar_for_the_owner_only(self):
+        import json
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        with patch(
+            'integrations.channel_stats.refresh_channel',
+            return_value={'ok': False, 'error': 'BALE_TOKEN missing'},
+        ) as refresh:
+            owner = self.client.post(
+                '/miniapp/api/channels/refresh',
+                data=json.dumps({'debug_bale_id': 'm9'}),
+                content_type='application/json',
+            )
+            stranger = self.client.post(
+                '/miniapp/api/channels/refresh',
+                data=json.dumps({'debug_bale_id': 'c9'}),
+                content_type='application/json',
+            )
+        self.assertEqual(owner.status_code, 200, owner.content)
+        body = owner.json()
+        self.assertEqual(body['failed'], 1)
+        self.assertIn('لینک‌یار', body['message'])
+        self.assertEqual(stranger.json()['done'], 0)
+        self.assertEqual(refresh.call_count, 1)

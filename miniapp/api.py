@@ -57,7 +57,7 @@ def _can_switch_roles(bale_user_id: str) -> bool:
     return uid in allowed
 
 
-def _channel_payload(ch: Channel) -> Dict[str, Any]:
+def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, Any]:
     return {
         'id': ch.id,
         'name': ch.name,
@@ -70,10 +70,12 @@ def _channel_payload(ch: Channel) -> Dict[str, Any]:
         'tariff_count': ch.tariffs.count(),
         'members_count': getattr(ch, 'members_count', 0) or 0,
         'avg_views': getattr(ch, 'avg_views', 0) or 0,
+        'daily_reach': getattr(ch, 'daily_reach', 0) or 0,
         'err_percent': str(getattr(ch, 'err_percent', '') or ''),
         'language': getattr(ch, 'language', '') or '',
         'about': getattr(ch, 'about', '') or '',
         'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
+        'history': history or [],
     }
 
 
@@ -151,7 +153,11 @@ def api_channels(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    channels = [_channel_payload(ch) for ch in Channel.objects.filter(manager=user).order_by('id')]
+    rows = list(Channel.objects.filter(manager=user).order_by('id'))
+    from integrations.channel_stats import recent_snapshots
+
+    history = recent_snapshots([ch.id for ch in rows])
+    channels = [_channel_payload(ch, history.get(ch.id) or []) for ch in rows]
     groups = []
     for g in ChannelGroup.objects.filter(manager=user).order_by('id'):
         groups.append({
@@ -162,6 +168,52 @@ def api_channels(request: HttpRequest) -> JsonResponse:
             'channel_ids': list(g.channels.values_list('id', flat=True)),
         })
     return JsonResponse({'ok': True, 'channels': channels, 'groups': groups})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_refresh_channel_stats(request: HttpRequest) -> JsonResponse:
+    """یک کانال را همین حالا با لینک‌یار می‌خواند. بقیه را پولینگ، نوبتی، تازه می‌کند."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    from django.db.models import F
+
+    from integrations.channel_stats import public_stats_error, recent_snapshots, refresh_channel
+
+    qs = Channel.objects.exclude(link='')
+    if not ws.is_operator(user.bale_user_id or ''):
+        qs = qs.filter(manager=user)
+    body = _json_body(request)
+    if body.get('channel_id'):
+        qs = qs.filter(id=body.get('channel_id'))
+    picked = list(qs.order_by(F('stats_updated_at').asc(nulls_first=True), 'id')[:1])
+    done = 0
+    failed = 0
+    message = ''
+    for ch in picked:
+        try:
+            result = refresh_channel(ch)
+        except Exception:
+            logger.exception('miniapp stats refresh')
+            failed += 1
+            message = 'خواندن آمار این کانال ممکن نشد.'
+            continue
+        ch.refresh_from_db()
+        if result.get('ok'):
+            done += 1
+        else:
+            failed += 1
+            message = public_stats_error(str(result.get('error') or ''))
+    history = recent_snapshots([ch.id for ch in picked])
+    return JsonResponse({
+        'ok': True,
+        'done': done,
+        'failed': failed,
+        'message': '' if done else message,
+        'channels': [_channel_payload(ch, history.get(ch.id) or []) for ch in picked],
+    })
 
 
 @csrf_exempt

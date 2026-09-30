@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -103,8 +104,39 @@ def prepare_polling() -> None:
         log.info('Webhook deleted')
 
 
+_stats_lock = threading.Lock()
+_stats_warned = False
+
+
+def _refresh_one_channel_stats() -> None:
+    """هر بار فقط یک کانال، در نخ جدا، تا getUpdates معطل خواندن لینک‌یار نماند."""
+    global _stats_warned
+    if not _stats_lock.acquire(blocking=False):
+        return
+    try:
+        if not ly.user_token():
+            if not _stats_warned:
+                log.warning('آمار کانال خوانده نمی‌شود چون حساب لینک‌یار تنظیم نشده.')
+                _stats_warned = True
+            return
+        from integrations.channel_stats import refresh_due_channels
+
+        stats = refresh_due_channels(limit=1)
+        if stats.get('done') or stats.get('failed'):
+            log.info('آمار کانال: %s', stats)
+    except ModuleNotFoundError:
+        if not _stats_warned:
+            log.warning('آمار کانال رد شد چون aiobale نصب نیست.')
+            _stats_warned = True
+    except Exception:
+        log.exception('channel stats')
+    finally:
+        _stats_lock.release()
+
+
 def run_background_jobs() -> None:
     global _last_daily_audit_date
+    threading.Thread(target=_refresh_one_channel_stats, name='channel-stats', daemon=True).start()
     try:
         n = expire_timed_out_items()
         if n:

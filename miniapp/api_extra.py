@@ -99,6 +99,11 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
                 'date': day.isoformat(),
                 'manual': False,
             })
+    from integrations.channel_stats import recent_snapshots
+
+    history = recent_snapshots(list(channels.keys()))
+    for cid, payload in channels.items():
+        payload['history'] = history.get(cid) or []
     return JsonResponse({
         'ok': True,
         'tariffs': items,

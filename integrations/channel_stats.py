@@ -28,25 +28,42 @@ def _to_ms(value: Optional[int]) -> Optional[int]:
     return n
 
 
+_HOUR_MS = 3_600_000
+_DAY_MS = 86_400_000
+
+
 def summarize_reading(members: Optional[int], posts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """از فهرست پست‌های خوانده‌شده، بازدید میانگین، نرخ روزانه و استناد را می‌سازد."""
-    view_vals = [int(p['views']) for p in posts if isinstance(p.get('views'), int) and int(p['views']) >= 0]
+    """بازدید میانگین، جمع بازدید ۲۴ ساعت، و نرخ پست را از خواندن لینک‌یار می‌سازد.
+
+    پست تازه‌تر از یک ساعت در میانگین نمی‌آید، چون بازدیدش هنوز جمع نشده.
+    اگر پست تاریخ‌دار هست ولی هیچ‌کدام مال امروز نیست، بازدید روز صفر است.
+    """
+    now_ms = int(timezone.now().timestamp() * 1000)
+    real = [p for p in posts if p.get('message_id')]
+    base = real or list(posts)
+    scored = []
+    for post in base:
+        if not isinstance(post.get('views'), int) or int(post['views']) < 0:
+            continue
+        stamp = _to_ms(post.get('date'))
+        age = now_ms - stamp if stamp else None
+        scored.append((int(post['views']), age, post))
+    mature = [views for views, age, _post in scored if age is None or age >= _HOUR_MS]
+    view_vals = mature or [views for views, _age, _post in scored]
     avg_views = int(sum(view_vals) / len(view_vals)) if view_vals else None
-    dates = [d for d in (_to_ms(p.get('date')) for p in posts) if d]
+    dates = [d for d in (_to_ms(p.get('date')) for p in base) if d]
     span_days = 1.0
     if len(dates) >= 2:
-        span_days = max((max(dates) - min(dates)) / 86_400_000, 1.0)
-    forwards = sum(int(p.get('forwards') or 0) for p in posts)
-    posts_per_day = round(len(posts) / span_days, 2) if posts else 0.0
-    citation = round(forwards / len(posts), 3) if posts else 0.0
-    now_ms = int(timezone.now().timestamp() * 1000)
-    day_views = [
-        int(p['views'])
-        for p in posts
-        if isinstance(p.get('views'), int) and _to_ms(p.get('date')) and now_ms - _to_ms(p.get('date')) <= 86_400_000
-    ]
+        span_days = max((max(dates) - min(dates)) / _DAY_MS, 1.0)
+    forwards = sum(int(p.get('forwards') or 0) for p in base)
+    posts_per_day = round(len(base) / span_days, 2) if base else 0.0
+    citation = round(forwards / len(base), 3) if base else 0.0
+    day_views = [views for views, age, _post in scored if age is not None and 0 <= age <= _DAY_MS]
+    dated = any(age is not None for _views, age, _post in scored)
     if day_views:
         daily_reach = int(sum(day_views))
+    elif dated:
+        daily_reach = 0
     elif avg_views is not None:
         daily_reach = avg_views
     else:
@@ -58,12 +75,29 @@ def summarize_reading(members: Optional[int], posts: List[Dict[str, Any]]) -> Di
         'members': members,
         'avg_views': avg_views,
         'daily_reach': daily_reach,
-        'posts': len(posts),
+        'posts': len(base),
         'forwards': forwards,
         'posts_per_day': posts_per_day,
         'citation_index': citation,
         'err_percent': err,
     }
+
+
+def public_stats_error(raw: str) -> str:
+    text = (raw or '').strip()
+    known = {
+        'link missing': 'پیوند کانال ثبت نشده.',
+        'BALE_TOKEN missing': 'حساب لینک‌یار روی سرور تنظیم نشده.',
+        'empty': 'از این کانال عددی خوانده نشد.',
+        'channel_not_found': 'این کانال در بله پیدا نشد.',
+        'resolve_failed': 'این کانال در بله پیدا نشد.',
+        'no_stats': 'از این کانال عددی خوانده نشد.',
+    }
+    if text in known:
+        return known[text]
+    if text.startswith('token_inject'):
+        return 'ورود لینک‌یار ناموفق بود.'
+    return 'خواندن آمار این کانال ممکن نشد.'
 
 
 def _guess_lang(text: str) -> str:
@@ -80,13 +114,15 @@ def refresh_channel(channel) -> Dict[str, Any]:
     ref = (channel.link or '').strip()
     if not ref:
         channel.stats_error = 'link missing'
-        channel.save(update_fields=['stats_error'])
+        channel.stats_updated_at = timezone.now()
+        channel.save(update_fields=['stats_error', 'stats_updated_at'])
         return {'ok': False, 'error': 'link missing'}
 
     reading = ly.collect_channel_stats(ref)
     if not reading.get('ok'):
         channel.stats_error = str(reading.get('error') or 'collect_failed')[:255]
-        channel.save(update_fields=['stats_error'])
+        channel.stats_updated_at = timezone.now()
+        channel.save(update_fields=['stats_error', 'stats_updated_at'])
         return reading
 
     summary = summarize_reading(reading.get('members'), reading.get('posts') or [])
@@ -95,7 +131,8 @@ def refresh_channel(channel) -> Dict[str, Any]:
     daily = summary['daily_reach'] if summary['daily_reach'] is not None else channel.daily_reach
     if not members and avg_views is None:
         channel.stats_error = str(reading.get('views_error') or reading.get('group_error') or 'empty')[:255]
-        channel.save(update_fields=['stats_error'])
+        channel.stats_updated_at = timezone.now()
+        channel.save(update_fields=['stats_error', 'stats_updated_at'])
         return {'ok': False, 'error': channel.stats_error}
 
     from channels_app.models import ChannelStatSnapshot
@@ -121,6 +158,8 @@ def refresh_channel(channel) -> Dict[str, Any]:
     err = summary['err_percent']
     if err is None and channel.members_count and channel.avg_views:
         err = round(channel.avg_views / channel.members_count * 100, 2)
+    if err is None:
+        err = channel.err_percent
     channel.err_percent = Decimal(str(err or 0))
     channel.stats_updated_at = now
     channel.stats_error = ''
@@ -138,16 +177,55 @@ def refresh_channel(channel) -> Dict[str, Any]:
     return {'ok': True, 'channel_id': channel.id, 'members': channel.members_count, 'avg_views': channel.avg_views}
 
 
-def refresh_due_channels(max_age: timedelta = _FRESH) -> Dict[str, int]:
+def recent_snapshots(channel_ids: List[int], limit: int = 6) -> Dict[int, List[Dict[str, Any]]]:
+    """آخرین برداشت‌های هر کانال، از قدیم به جدید، برای نمودار مینی‌اپ."""
+    if not channel_ids:
+        return {}
+    from channels_app.models import ChannelStatSnapshot
+
+    since = timezone.now() - timedelta(days=21)
+    buckets: Dict[int, List[Any]] = {}
+    rows = (
+        ChannelStatSnapshot.objects.filter(channel_id__in=channel_ids, taken_at__gte=since)
+        .order_by('channel_id', '-taken_at')
+        .values('channel_id', 'taken_at', 'members', 'avg_views', 'daily_reach', 'posts', 'forwards')
+    )
+    for row in rows:
+        bucket = buckets.setdefault(row['channel_id'], [])
+        if len(bucket) >= limit:
+            continue
+        bucket.append(row)
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for cid, items in buckets.items():
+        items.reverse()
+        out[cid] = [
+            {
+                'at': item['taken_at'].isoformat(),
+                'members': item['members'],
+                'views': item['avg_views'],
+                'daily_reach': item['daily_reach'],
+                'posts': item['posts'],
+                'forwards': item['forwards'],
+            }
+            for item in items
+        ]
+    return out
+
+
+def refresh_due_channels(max_age: timedelta = _FRESH, limit: int = 25) -> Dict[str, int]:
+    from django.db.models import F
+
     from channels_app.models import Channel
 
     cutoff = timezone.now() - max_age
-    due = Channel.objects.exclude(link='').filter(
-        models_q_due(cutoff),
+    due = (
+        Channel.objects.exclude(link='')
+        .filter(models_q_due(cutoff))
+        .order_by(F('stats_updated_at').asc(nulls_first=True), 'id')[: max(int(limit), 1)]
     )
     done = 0
     failed = 0
-    for channel in due.iterator():
+    for channel in due:
         try:
             result = refresh_channel(channel)
         except Exception:
