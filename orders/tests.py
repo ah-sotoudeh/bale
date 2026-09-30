@@ -198,3 +198,120 @@ class BaleInvoiceTests(TestCase):
             'currency': 'IRR',
         })
         mock_answer.assert_called_with('q2', True)
+
+
+class MarketplaceRulesTests(TestCase):
+    def setUp(self):
+        self.customer = User.objects.create_user(username='shopper', password='pass', bale_user_id='c9')
+        self.manager = User.objects.create_user(username='pub', password='pass', bale_user_id='m9')
+        self.channel = Channel.objects.create(
+            name='shop', link='@shop', manager=self.manager, members_count=10000, avg_views=2500
+        )
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='noon', duration_hours=24, price=20000, start_hour=10
+        )
+
+    def _pending_order(self):
+        start = timezone.now() + timedelta(days=6)
+        end = start + timedelta(hours=24)
+        order = Order.objects.create(
+            customer=self.customer,
+            status='waiting_managers',
+            managers_deadline=timezone.now() + timedelta(hours=12),
+        )
+        item = OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=end,
+            price=20000,
+            manager=self.manager,
+            manager_status='pending',
+            duration_hours=24,
+        )
+        return order, item
+
+    @patch('integrations.bale_client.create_payment_request', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message')
+    def test_one_rejection_keeps_the_other_item(self, _send, _pay):
+        from orders.services import process_manager_response
+
+        order, first = self._pending_order()
+        start = timezone.now() + timedelta(days=7)
+        second = OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=20000,
+            manager=self.manager,
+            manager_status='pending',
+            duration_hours=24,
+        )
+        rejected = process_manager_response(first.id, self.manager.bale_user_id, 'reject')
+        self.assertTrue(rejected.get('ok'), rejected)
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'waiting_managers')
+        approved = process_manager_response(second.id, self.manager.bale_user_id, 'approve')
+        self.assertTrue(approved.get('ok'), approved)
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'waiting_payment')
+        self.assertEqual(order.total_amount, 20000)
+
+    @patch('integrations.bale_client.send_message')
+    def test_cancel_unpaid_frees_the_day(self, _send):
+        from orders.cart import add_to_cart, cancel_customer_order
+
+        day = timezone.localdate() + timedelta(days=8)
+        order = Order.objects.create(customer=self.customer, status='waiting_payment', total_amount=20000)
+        start = timezone.now() + timedelta(days=8)
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=20000,
+            manager=self.manager,
+            manager_status='approved',
+            duration_hours=24,
+        )
+        blocked = add_to_cart(self.customer, self.tariff, day)
+        self.assertFalse(blocked['ok'])
+        result = cancel_customer_order(order)
+        self.assertTrue(result['ok'], result)
+        other = User.objects.create_user(username='next', password='pass', bale_user_id='c10')
+        opened = add_to_cart(other, self.tariff, day)
+        self.assertTrue(opened['ok'], opened)
+
+    @patch('integrations.bale_client.send_message')
+    def test_payment_deadline_frees_the_day(self, _send):
+        from orders.cart import add_to_cart, cancel_unpaid_orders
+
+        day = timezone.localdate() + timedelta(days=9)
+        start = timezone.now() + timedelta(days=9)
+        order = Order.objects.create(
+            customer=self.customer,
+            status='waiting_payment',
+            total_amount=20000,
+            managers_deadline=timezone.now() - timedelta(minutes=5),
+        )
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=20000,
+            manager=self.manager,
+            manager_status='approved',
+            duration_hours=24,
+        )
+        self.assertEqual(cancel_unpaid_orders(), 1)
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'cancelled')
+        other = User.objects.create_user(username='later', password='pass', bale_user_id='c11')
+        opened = add_to_cart(other, self.tariff, day)
+        self.assertTrue(opened['ok'], opened)
