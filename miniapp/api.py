@@ -47,7 +47,9 @@ def _can_switch_roles(bale_user_id: str) -> bool:
     uid = str(bale_user_id or '').strip()
     if not uid:
         return False
-    if ws.is_operator(uid):
+    from bot_flow.access import is_debug_user
+
+    if is_debug_user(uid) or ws.is_operator(uid):
         return True
     extra = os.environ.get('MINIAPP_ROLE_SWITCH_IDS', '')
     allowed = {part.strip() for part in extra.split(',') if part.strip()}
@@ -111,9 +113,12 @@ def api_me(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    from bot_flow.access import is_debug_user
+
     br = ws.balance_breakdown(user)
     ch_count = Channel.objects.filter(manager=user).count()
     is_op = ws.is_operator(user.bale_user_id or '')
+    debug_user = is_debug_user(user.bale_user_id or '')
     return JsonResponse({
         'ok': True,
         'user': {
@@ -125,6 +130,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
         'wallet': br,
         'is_operator': is_op,
         'can_switch_roles': _can_switch_roles(user.bale_user_id or ''),
+        'debug': debug_user,
         'channel_count': ch_count,
         'can_be_manager': True,
         'roles': {
@@ -188,7 +194,9 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
     bio = str(info.get('bio') or info.get('description') or '')
     owner = _can_switch_roles(user.bale_user_id or '')
-    proved = bool(user.bale_user_id) and str(user.bale_user_id) in bio
+    from bot_flow.access import id_in_text
+
+    proved = bool(user.bale_user_id) and id_in_text(str(user.bale_user_id), bio)
     if info.get('error') and not owner:
         return JsonResponse({'ok': False, 'error': 'کانال از بله خوانده نشد. پیوند را بررسی کنید.'}, status=400)
     if not proved and not owner:
@@ -279,7 +287,20 @@ def api_tariffs(request: HttpRequest) -> JsonResponse:
             'channel_id': t.channel_id,
             'group_id': t.group_id,
         })
-    return JsonResponse({'ok': True, 'tariffs': items})
+    from orders.availability import list_manual_busy_slots
+
+    busy = []
+    for t in qs:
+        for slot in list_manual_busy_slots(t):
+            start = slot.start
+            day = timezone.localtime(start).date() if timezone.is_aware(start) else start.date()
+            busy.append({
+                'id': slot.id,
+                'tariff_id': t.id,
+                'date': day.isoformat(),
+                'manual': True,
+            })
+    return JsonResponse({'ok': True, 'tariffs': items, 'busy': busy})
 
 
 @csrf_exempt
@@ -343,6 +364,11 @@ def api_orders(request: HttpRequest) -> JsonResponse:
             'tariff_name': it.tariff.name if it.tariff_id else '',
             'channel_id': it.channel_id,
             'date': timezone.localtime(start).date().isoformat() if start else '',
+            'proposed_date': (
+                timezone.localtime(it.manager_edited_start).date().isoformat()
+                if it.manager_status == 'edited' and it.manager_edited_start
+                else ''
+            ),
             'start_jalali': format_jalali(timezone.localtime(start).date()) if start else '',
             'published_link': it.published_link or '',
         })
@@ -390,10 +416,10 @@ def api_mark_busy(request: HttpRequest) -> JsonResponse:
             pass
     if day is None and body.get('jy'):
         try:
-            import jdatetime
+            from bot_flow.jalali import parse_jalali_date
 
-            day = jdatetime.date(int(body['jy']), int(body['jm']), int(body['jd'])).togregorian()
-        except Exception:
+            day = parse_jalali_date(int(body['jy']), int(body['jm']), int(body['jd']))
+        except (TypeError, ValueError):
             return JsonResponse({'ok': False, 'error': 'bad_date'}, status=400)
     if day is None:
         return JsonResponse({'ok': False, 'error': 'need_date'}, status=400)
