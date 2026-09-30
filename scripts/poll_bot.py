@@ -33,7 +33,7 @@ from bot_flow.dispatch import handle_update  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
-from orders.cart import expire_timed_out_items  # noqa: E402
+from orders.cart import cancel_unpaid_orders, expire_timed_out_items  # noqa: E402
 from orders.execution import (  # noqa: E402
     escalate_unconfirmed,
     send_publish_reminders,
@@ -109,6 +109,9 @@ def run_background_jobs() -> None:
         n = expire_timed_out_items()
         if n:
             log.info('expired manager timeouts: %s', n)
+        unpaid = cancel_unpaid_orders()
+        if unpaid:
+            log.info('cancelled unpaid orders: %s', unpaid)
 
         reminded = send_publish_reminders()
         if reminded:
