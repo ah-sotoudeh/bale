@@ -77,6 +77,7 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'language': getattr(ch, 'language', '') or '',
         'about': getattr(ch, 'about', '') or '',
         'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
+        'avatar_url': f'/miniapp/api/channels/{ch.id}/avatar',
         'history': history or [],
     }
 
@@ -776,3 +777,67 @@ def api_request_payout(request: HttpRequest) -> JsonResponse:
         return JsonResponse(_with_message(r), status=400)
     pr = r['payout']
     return JsonResponse({'ok': True, 'payout_id': pr.id, 'amount_toman': pr.amount_toman})
+
+
+def _avatar_type(data: bytes) -> str:
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if data.startswith(b'RIFF') and b'WEBP' in data[:16]:
+        return 'image/webp'
+    if data.startswith(b'GIF8'):
+        return 'image/gif'
+    return 'image/jpeg'
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_channel_avatar(request: HttpRequest, channel_id: int) -> HttpResponse:
+    """عکس پروفایل کانال برای کارت فهرست. برچسب img هدر احراز هویت نمی‌فرستد."""
+    import time
+    from pathlib import Path
+
+    from django.http import HttpResponse
+
+    from integrations.bale_client import download_file_bytes, get_channel_info, get_file
+
+    ch = Channel.objects.filter(id=channel_id).first()
+    if not ch or not (ch.link or '').strip():
+        return HttpResponse(status=404)
+    cache = Path('/tmp/lb-avatars')
+    cache.mkdir(parents=True, exist_ok=True)
+    blob = cache / f'{ch.id}.img'
+    kind = cache / f'{ch.id}.type'
+    miss = cache / f'{ch.id}.none'
+    fresh = 86400
+    now = time.time()
+    if blob.is_file() and now - blob.stat().st_mtime < fresh:
+        ctype = kind.read_text(encoding='utf-8') if kind.is_file() else 'image/jpeg'
+        resp = HttpResponse(blob.read_bytes(), content_type=ctype)
+        resp['Cache-Control'] = 'public, max-age=86400'
+        return resp
+    if miss.is_file() and now - miss.stat().st_mtime < fresh:
+        return HttpResponse(status=404)
+
+    def _miss() -> HttpResponse:
+        miss.write_bytes(b'')
+        return HttpResponse(status=404)
+
+    info = get_channel_info(ch.link)
+    photo = (info.get('raw') or {}).get('photo') or {}
+    file_id = photo.get('small_file_id') or photo.get('big_file_id') or ''
+    if not file_id:
+        return _miss()
+    meta = get_file(str(file_id))
+    file_path = str((meta.get('result') or {}).get('file_path') or '')
+    if not file_path:
+        return _miss()
+    data = download_file_bytes(file_path)
+    if not data:
+        return _miss()
+    ctype = _avatar_type(data)
+    blob.write_bytes(data)
+    kind.write_text(ctype, encoding='utf-8')
+    miss.unlink(missing_ok=True)
+    resp = HttpResponse(data, content_type=ctype)
+    resp['Cache-Control'] = 'public, max-age=86400'
+    return resp

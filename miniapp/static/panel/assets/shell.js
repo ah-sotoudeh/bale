@@ -26,6 +26,19 @@
   }
   window.lbHaptic = haptic;
 
+  var toastTimer = 0;
+  window.lbToast = function (text) {
+    var old = document.getElementById("lb-toast");
+    if (old) old.remove();
+    var el = document.createElement("div");
+    el.id = "lb-toast";
+    el.className = "lb-toast";
+    el.textContent = text;
+    document.body.appendChild(el);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.remove(); }, 2600);
+  };
+
   function themeLabel() {
     return root.dataset.theme === "dark" ? "حالت روشن" : "حالت تاریک";
   }

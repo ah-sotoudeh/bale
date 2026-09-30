@@ -234,6 +234,80 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+.lb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+
+.lb-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
+.lb-chip {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--lb-surface-2);
+  color: var(--lb-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.lb-chip.on {
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+}
+
+.lb-ava {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 40px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.lb-ava img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lb-toast {
+  position: fixed;
+  inset-inline: 16px;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  z-index: 60;
+  margin-inline: auto;
+  max-width: 528px;
+  border-radius: 14px;
+  background: #1f2a30;
+  color: #e7eef1;
+  text-align: center;
+  font-size: 14px;
+  padding: 12px 14px;
+}
+
+[data-theme="dark"] .lb-toast {
+  background: #e7eef1;
+  color: #0e1a22;
+}
+
 .tt {
   inline-size: 44px;
   block-size: 44px;

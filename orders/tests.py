@@ -848,6 +848,29 @@ class MiniappLiveActionTests(TestCase):
 
         return self.client.post(path, data=json.dumps(payload), content_type='application/json')
 
+    def test_catalog_points_at_a_channel_avatar(self):
+        from unittest.mock import patch
+
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        self.assertEqual(listed.status_code, 200, listed.content)
+        row = listed.json()['channels'][0]
+        self.assertEqual(row['avatar_url'], f'/miniapp/api/channels/{self.channel.id}/avatar')
+        from pathlib import Path
+
+        root = Path('/tmp/lb-avatars')
+        (root / f'{self.channel.id}.img').unlink(missing_ok=True)
+        (root / f'{self.channel.id}.none').unlink(missing_ok=True)
+        with patch('integrations.bale_client.get_channel_info', return_value={'raw': {}}):
+            missing = self.client.get(row['avatar_url'])
+        self.assertEqual(missing.status_code, 404)
+        self.assertTrue((root / f'{self.channel.id}.none').is_file())
+        with patch(
+            'integrations.bale_client.get_channel_info',
+            side_effect=AssertionError('cached miss should not call Bale'),
+        ):
+            again = self.client.get(row['avatar_url'])
+        self.assertEqual(again.status_code, 404)
+
     def test_confirm_rejects_the_wrong_stage_in_persian(self):
         item = self._item('paid')
         response = self._post(
@@ -970,6 +993,9 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('شرایط و قوانین', script)
         self.assertIn('isOperator:op', script)
         self.assertIn('پیوند کانال را بنویسید', script)
+        self.assertIn('lb-ava', script)
+        self.assertIn('نشان‌شده‌ها', script)
+        self.assertIn('toggleFavorite(cid,t.id)', script)
         rules = self.client.get('/miniapp/rules/')
         self.assertEqual(rules.status_code, 200)
         self.assertIn('قمار', rules.content.decode('utf-8'))

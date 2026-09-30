@@ -53,6 +53,7 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'language': ch.language or '',
             'about': ch.about or '',
             'stats_updated_at': ch.stats_updated_at.isoformat() if ch.stats_updated_at else '',
+            'avatar_url': f'/miniapp/api/channels/{ch.id}/avatar',
         }
 
     for t in qs:
