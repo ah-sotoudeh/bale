@@ -315,3 +315,66 @@ class MarketplaceRulesTests(TestCase):
         other = User.objects.create_user(username='later', password='pass', bale_user_id='c11')
         opened = add_to_cart(other, self.tariff, day)
         self.assertTrue(opened['ok'], opened)
+
+    @patch('integrations.bale_client.create_payment_request', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message')
+    def test_stranger_cannot_answer_a_channel(self, _send, _pay):
+        from orders.cart import process_manager_item
+
+        _order, item = self._pending_order()
+        stranger = User.objects.create_user(username='str', password='pass', bale_user_id='x9')
+        denied = process_manager_item(item.id, stranger.bale_user_id, 'approve')
+        self.assertEqual(denied.get('error'), 'not_item_manager')
+        item.manager = None
+        item.save(update_fields=['manager'])
+        still = process_manager_item(item.id, stranger.bale_user_id, 'approve')
+        self.assertEqual(still.get('error'), 'not_item_manager')
+        owned = process_manager_item(item.id, self.manager.bale_user_id, 'approve')
+        self.assertTrue(owned.get('ok'), owned)
+
+    @patch('integrations.bale_client.send_message')
+    def test_ignored_time_proposal_frees_the_day(self, _send):
+        from orders.cart import add_to_cart, expire_timed_out_items
+
+        order, item = self._pending_order()
+        item.manager_status = 'edited'
+        item.manager_edited_start = item.requested_start + timedelta(days=1)
+        item.save()
+        order.managers_deadline = timezone.now() - timedelta(minutes=1)
+        order.save(update_fields=['managers_deadline'])
+        proposed = timezone.localtime(item.manager_edited_start).date()
+        other = User.objects.create_user(username='free', password='pass', bale_user_id='c12')
+        blocked = add_to_cart(other, self.tariff, proposed)
+        self.assertFalse(blocked['ok'])
+        self.assertEqual(expire_timed_out_items(), 1)
+        item.refresh_from_db()
+        self.assertEqual(item.manager_status, 'expired')
+        opened = add_to_cart(other, self.tariff, proposed)
+        self.assertTrue(opened['ok'], opened)
+
+    @patch('integrations.bale_client.send_message')
+    def test_declining_one_time_returns_order_to_managers(self, _send):
+        from orders.cart import customer_confirm_edit
+
+        order, first = self._pending_order()
+        first.manager_status = 'edited'
+        first.manager_edited_start = first.requested_start
+        first.save()
+        order.status = 'waiting_customer_confirm'
+        order.save(update_fields=['status'])
+        start = timezone.now() + timedelta(days=11)
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=20000,
+            manager=self.manager,
+            manager_status='pending',
+            duration_hours=24,
+        )
+        result = customer_confirm_edit(first.id, self.customer.bale_user_id, False)
+        self.assertTrue(result.get('ok'), result)
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'waiting_managers')

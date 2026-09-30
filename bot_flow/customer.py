@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from bot_flow.banned_words import is_allowed
 from bot_flow.handlers import ensure_user, get_session, save_session
+from bot_flow.messages import user_error
 from channels_app.models import Tariff
 from integrations import bale_client as bc
 from orders.availability import free_days_for_tariff
@@ -74,19 +75,19 @@ def open_customer_home(chat_id: str, bale_user_id: str, username: str = '') -> N
     n_cart = draft.items.count() if draft else 0
     n_open = Order.objects.filter(
         customer=user,
-        status__in=('waiting_managers', 'waiting_payment', 'paid'),
+        status__in=('waiting_managers', 'waiting_customer_confirm', 'waiting_payment', 'paid'),
     ).count()
     from wallet import services as ws
 
     bal = ws.available_balance(user)
     text = (
-        '🛒 پنل مشتری\n\n'
-        f'آیدی: {user.bale_handle or user.bale_user_id}\n'
-        f'بنرهای فعال: {n_b}\n'
-        f'آیتم در سبد: {n_cart}\n'
-        f'سفارش در جریان: {n_open}\n'
-        f'موجودی کیف پول: {bal:,} تومان\n\n'
-        'از منو انتخاب کنید:'
+        'بخش مشتری\n\n'
+        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
+        f'بنر آماده: {n_b}\n'
+        f'در سبد: {n_cart}\n'
+        f'سفارش باز: {n_open}\n'
+        f'موجودی: {bal:,} تومان\n\n'
+        'یک گزینه را انتخاب کنید:'
     )
     bc.send_message(str(chat_id), text, reply_markup=customer_home_keyboard())
 
@@ -525,10 +526,12 @@ def show_my_orders(chat_id: str, bale_user_id: str) -> None:
             reply_markup=customer_home_keyboard(),
         )
         return
-    lines = ['📦 سفارش‌های اخیر:']
+    from bot_flow.messages import format_order_line_customer
+
+    lines = ['سفارش‌های اخیر:']
     for o in orders:
-        n = o.items.count()
-        lines.append(f'#{o.id} | {o.status} | {n} آیتم | {o.total_amount:,} ت')
+        n = o.items.exclude(manager_status='cart').count() or o.items.count()
+        lines.append(format_order_line_customer(o.id, o.status, n, o.total_amount))
     bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=customer_home_keyboard())
 
 
@@ -611,7 +614,7 @@ def handle_customer_callback(
         save_session(sess, STATE_CUST_RENAME, role='customer')
         sess.data = d
         sess.save(update_fields=['data'])
-        bc.send_message(str(chat_id), 'نام جدید بنر را بفرستید (حداکثر ۴۰ کاراکتر):')
+        bc.send_message(str(chat_id), 'نام تازهٔ بنر را بفرستید. حداکثر چهل نویسه.')
         return True
     if data.startswith('cu:editcap:'):
         bid = int(data.split(':')[2])
@@ -672,7 +675,7 @@ def handle_customer_callback(
         result = customer_confirm_edit(item_id, bale_user_id, data.startswith('custok:'))
         bc.send_message(
             str(chat_id),
-            'ثبت شد.' if result.get('ok') else f'خطا: {result.get("error")}',
+            'ثبت شد.' if result.get('ok') else user_error(result.get('error')),
         )
         return True
 
@@ -789,7 +792,7 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
             bc.send_message(str(chat_id), 'بنر پیدا نشد.')
             open_customer_home(chat_id, bale_user_id)
             return True
-        b.title = (norm or '')[:120]
+        b.title = (norm or '')[:40]
         b.save(update_fields=['title'])
         save_session(sess, STATE_CUST_HOME, role='customer')
         bc.send_message(str(chat_id), f'✅ نام بنر شد: «{b.display_title()}»')
@@ -805,7 +808,7 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
 
         r = edit_banner_caption(int(bid), bale_user_id, norm)
         if not r.get('ok'):
-            bc.send_message(str(chat_id), r.get('message') or f'خطا: {r.get("error")}')
+            bc.send_message(str(chat_id), r.get('message') or user_error(r.get('error')))
             return True
         save_session(sess, STATE_CUST_HOME, role='customer')
         bc.send_message(str(chat_id), '✅ متن بنر به‌روز شد.')

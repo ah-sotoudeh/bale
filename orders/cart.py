@@ -10,6 +10,7 @@ from django.db import OperationalError, transaction
 from django.utils import timezone
 
 from channels_app.models import Tariff
+from bot_flow.messages import fa_money, fa_num
 from integrations import bale_client as bc
 from orders.availability import has_slot_conflict
 from orders.models import CustomerDraft, ManagerResponse, Order, OrderItem
@@ -175,15 +176,32 @@ def _notify_manager(order: Order, item: OrderItem) -> None:
     ])
     bc.send_message(
         mid,
-        f'📢 درخواست تبلیغ\n'
-        f'هدف: {owner}\n'
-        f'تعرفه: {t.name}\n'
+        f'درخواست تبلیغ تازه\n'
+        f'کانال: {owner}\n'
+        f'طرح: {t.name}\n'
         f'زمان: {start}\n'
-        f'مبلغ: {item.price:,} تومان\n'
-        f'آیتم #{item.id} | سفارش #{order.id}\n'
-        f'مهلت پاسخ: {MANAGER_HOURS} ساعت',
+        f'مبلغ: {fa_money(item.price)}\n'
+        f'نوبت {fa_num(item.id)} از سفارش {fa_num(order.id)}\n'
+        f'تا {fa_num(MANAGER_HOURS)} ساعت برای پاسخ وقت دارید. '
+        f'قبول یا رد شما فقط همین کانال را عوض می‌کند.',
         reply_markup=kb,
     )
+
+
+def _manager_may_answer(manager: User, item: OrderItem) -> bool:
+    """فقط مدیر همان نوبت، یا صاحب کانال/مجموعه اگر مدیر نوبت خالی باشد."""
+    if item.manager_id:
+        return item.manager_id == manager.id
+    if item.channel_id and item.channel and item.channel.manager_id == manager.id:
+        return True
+    tariff = item.tariff
+    if tariff is None:
+        return False
+    if tariff.channel_id and tariff.channel and tariff.channel.manager_id == manager.id:
+        return True
+    if tariff.group_id and tariff.group and tariff.group.manager_id == manager.id:
+        return True
+    return False
 
 
 def process_manager_item(
@@ -195,7 +213,8 @@ def process_manager_item(
     action = (action or '').lower()
     try:
         item = OrderItem.objects.select_related(
-            'order', 'order__customer', 'channel', 'tariff', 'manager'
+            'order', 'order__customer', 'channel', 'tariff', 'tariff__channel',
+            'tariff__group', 'manager',
         ).get(id=item_id)
     except OrderItem.DoesNotExist:
         return {'ok': False, 'error': 'item_not_found'}
@@ -205,7 +224,7 @@ def process_manager_item(
     except User.DoesNotExist:
         return {'ok': False, 'error': 'manager_not_found'}
 
-    if item.manager_id and item.manager_id != manager.id:
+    if not _manager_may_answer(manager, item):
         return {'ok': False, 'error': 'not_item_manager'}
     if item.manager_status != 'pending':
         return {'ok': False, 'error': 'already_handled'}
@@ -269,9 +288,9 @@ def _ask_customer_confirm(order: Order, item: OrderItem) -> None:
     owner = t.group.name if t.group_id else (item.channel.name if item.channel else '?')
     bc.send_message(
         cust,
-        f'✏️ مدیر برای «{owner}» زمان جدید پیشنهاد داد:\n'
+        f'مدیر «{owner}» به‌جای زمان قبلی، این زمان را پیشنهاد کرده:\n'
         f'{start}\n'
-        f'آیتم #{item.id}',
+        f'نوبت {fa_num(item.id)}. قبول یا رد، فقط همین کانال را عوض می‌کند.',
         reply_markup=kb,
     )
     if order.status == 'waiting_managers':
@@ -312,7 +331,7 @@ def expire_timed_out_items() -> int:
     try:
         now = timezone.now()
         qs = OrderItem.objects.filter(
-            manager_status='pending',
+            manager_status__in=('pending', 'edited'),
             order__status__in=('waiting_managers', 'waiting_customer_confirm'),
             order__managers_deadline__lt=now,
         )
@@ -345,9 +364,17 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
         return {'ok': True, 'order_status': order.status, 'skipped': True}
 
     items = list(order.items.exclude(manager_status='cart'))
-    still = [i for i in items if i.manager_status in ('pending', 'edited')]
-    if still:
-        return {'ok': True, 'pending_left': len(still), 'order_status': order.status}
+    pending = [i for i in items if i.manager_status == 'pending']
+    edited = [i for i in items if i.manager_status == 'edited']
+    if pending or edited:
+        if not edited and order.status == 'waiting_customer_confirm':
+            order.status = 'waiting_managers'
+            order.save(update_fields=['status'])
+        return {
+            'ok': True,
+            'pending_left': len(pending) + len(edited),
+            'order_status': order.status,
+        }
 
     approved = [i for i in items if i.manager_status == 'approved']
     rejected = [
@@ -356,27 +383,27 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
         if i.manager_status in ('rejected', 'expired', 'customer_declined')
     ]
 
-    lines = [f'📋 نتیجه سفارش #{order.id}:']
+    lines = [f'نتیجه سفارش {fa_num(order.id)}:']
     for i in approved:
         t = i.tariff
-        owner = t.group.name if t.group_id else (i.channel.name if i.channel else '?')
-        lines.append(f'✅ {owner} — {t.name} — {i.price:,} ت')
+        owner = t.group.name if t.group_id else (i.channel.name if i.channel else 'کانال')
+        lines.append(f'قبول شد: {owner} — {t.name} — {fa_money(i.price)}')
     for i in rejected:
         t = i.tariff
-        owner = t.group.name if t.group_id else (i.channel.name if i.channel else '?')
+        owner = t.group.name if t.group_id else (i.channel.name if i.channel else 'کانال')
         st = {
-            'rejected': 'رد مدیر',
-            'expired': 'مهلت تمام',
-            'customer_declined': 'رد زمان',
-        }.get(i.manager_status, i.manager_status)
-        lines.append(f'❌ {owner} — {t.name} ({st})')
+            'rejected': 'مدیر نپذیرفت',
+            'expired': 'مهلت پاسخ تمام شد',
+            'customer_declined': 'زمان پیشنهادی را نپذیرفتید',
+        }.get(i.manager_status, 'انجام نشد')
+        lines.append(f'انجام نشد: {owner} — {t.name} ({st})')
 
     cust = order.customer.bale_user_id
     if not approved:
         order.status = 'rejected'
         order.total_amount = 0
         order.save()
-        lines.append('\nهیچ آیتمی تأیید نشد. سفارش بسته شد.')
+        lines.append('\nهیچ کانالی این سفارش را نپذیرفت و سفارش بسته شد. روزها آزاد شدند.')
         if cust:
             bc.send_message(cust, '\n'.join(lines))
         return {'ok': True, 'order_status': 'rejected'}
@@ -389,24 +416,31 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
 
     from bot_flow.access import is_debug_user
 
-    lines.append(f'\nمبلغ قابل پرداخت: {total:,} تومان')
-    lines.append(f'مهلت پرداخت: {PAYMENT_HOLD_HOURS} ساعت. بعد از آن روزها دوباره آزاد می‌شوند.')
+    lines.append(f'\nمبلغ قابل پرداخت: {fa_money(total)}')
+    lines.append(
+        f'تا {fa_num(PAYMENT_HOLD_HOURS)} ساعت برای پرداخت وقت دارید. '
+        'بعد از آن، روزها دوباره آزاد می‌شوند.'
+    )
     kb = None
-    if cust and is_debug_user(cust):
-        lines.append('حساب دیباگ: دکمهٔ زیر پرداخت را شبیه‌سازی می‌کند. کاربران دیگر فقط فاکتور کیف‌پول را می‌بینند.')
+    debug = bool(cust and is_debug_user(cust))
+    if debug:
+        lines.append('این حساب آزمایشی است. دکمهٔ زیر پرداخت را بدون فاکتور ثبت می‌کند.')
         kb = bc.payment_done_keyboard(order.id)
-    else:
-        lines.append('فاکتور کیف‌پول بله ارسال شد. بعد از پرداخت، سفارش خودش ثبت می‌شود.')
     if cust:
         bc.send_message(cust, '\n'.join(lines), reply_markup=kb)
         payment = bc.create_payment_request(
             chat_id=cust,
             amount=total,
-            title=f'پرداخت سفارش #{order.id}',
-            description=f'تبلیغ — سفارش #{order.id}',
+            title=f'پرداخت سفارش {order.id}',
+            description=f'تبلیغ، سفارش {order.id}',
             payload=f'order-{order.id}',
         )
-        if payment.get('payment_url'):
+        if payment.get('ok'):
+            bc.send_message(
+                cust,
+                'فاکتور کیف‌پول بله در پیام قبلی آمد. پس از پرداخت موفق، سفارش خودش ثبت می‌شود.',
+            )
+        elif payment.get('payment_url'):
             bc.send_message(cust, f'لینک پرداخت: {payment["payment_url"]}', reply_markup=kb)
 
     return {'ok': True, 'order_status': 'waiting_payment', 'total': total}
@@ -437,14 +471,20 @@ def cancel_customer_order(order: Order) -> Dict[str, Any]:
     CustomerDraft.objects.filter(order=order).delete()
     cust = order.customer.bale_user_id
     if cust:
-        bc.send_message(cust, f'سفارش #{order.id} لغو شد و روزهایش آزاد شد.')
+        bc.send_message(
+            cust,
+            f'سفارش {fa_num(order.id)} لغو شد و روزهایش برای دیگران آزاد شد.',
+        )
     told = set()
     for item in touched:
         mid = item.manager.bale_user_id if item.manager else ''
         if not mid or mid in told:
             continue
         told.add(mid)
-        bc.send_message(mid, f'مشتری سفارش #{order.id} را قبل از پرداخت لغو کرد.')
+        bc.send_message(
+            mid,
+            f'مشتری سفارش {fa_num(order.id)} را پیش از پرداخت لغو کرد. آن روز آزاد است.',
+        )
     return {'ok': True, 'order_status': 'cancelled', 'released': len(touched)}
 
 
@@ -466,7 +506,7 @@ def cancel_unpaid_orders() -> int:
         if cust:
             bc.send_message(
                 cust,
-                f'مهلت پرداخت سفارش #{order.id} تمام شد. روزها دوباره آزاد شدند.',
+                f'مهلت پرداخت سفارش {fa_num(order.id)} تمام شد و روزها دوباره آزاد شدند.',
             )
         n += 1
     return n

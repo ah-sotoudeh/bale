@@ -64,7 +64,7 @@ def user_facing_error(code: str) -> str:
         'banned': 'متن شامل عبارت غیرمجاز است.',
         'forbidden': 'اجازه این کار را ندارید.',
     }
-    return mapping.get(code, 'خطایی رخ داد. جزئیات در لاگ سرور است.')
+    return mapping.get(code, 'خطایی رخ داد. یک بار دیگر تلاش کنید.')
 
 
 def create_publish_request(
@@ -129,8 +129,9 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
             'message': user_facing_error('already_handled'),
         }
 
-    op = operator_chat_id()
-    if op and str(operator_bale_id) != str(op):
+    from wallet.services import is_operator
+
+    if not is_operator(operator_bale_id):
         return {
             'ok': False,
             'error': 'not_operator',

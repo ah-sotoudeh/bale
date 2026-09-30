@@ -55,13 +55,16 @@ def _answer(cq_id, text: str = 'OK') -> None:
 
 
 def run_mgr(action: str, bale_uid: str, item_id: int, new_start=None) -> str:
+    from bot_flow.messages import fa_num, label_order_status, user_error
+
     result = process_manager_item(item_id, bale_uid, action, new_start=new_start)
     log.info('%s item=%s → %s', action, item_id, result)
     if result.get('ok'):
         if result.get('pending_left'):
-            return f'✅ ثبت شد. هنوز {result["pending_left"]} آیتم در انتظار است.'
-        return f'✅ ثبت شد. وضعیت سفارش: {result.get("order_status")}'
-    return f'❌ {result.get("error") or result}'
+            return f'ثبت شد. هنوز {fa_num(result["pending_left"])} کانال جواب نداده.'
+        status = label_order_status(str(result.get('order_status') or ''))
+        return f'ثبت شد. وضعیت سفارش: {status}'
+    return user_error(result.get('error'))
 
 
 def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
@@ -70,12 +73,16 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         sid = _cmd_id(m)
         if sid:
             bc.send_message(chat_id, run_mgr('approve', bale_uid, int(sid)))
+        else:
+            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید، یا از دکمهٔ زیر همان سفارش استفاده کنید.')
         return True
     m = CMD_REJECT.match(text)
     if m:
         sid = _cmd_id(m)
         if sid:
             bc.send_message(chat_id, run_mgr('reject', bale_uid, int(sid)))
+        else:
+            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید، یا از دکمهٔ زیر همان سفارش استفاده کنید.')
         return True
     m = CMD_PAID.match(text)
     if m:
@@ -89,8 +96,10 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             r = process_payment_paid(int(sid))
             bc.send_message(
                 chat_id,
-                '💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
+                'سفارش آزمایشی پرداخت‌شده ثبت شد.' if r.get('ok') else 'این سفارش آمادهٔ پرداخت نیست.',
             )
+        else:
+            bc.send_message(chat_id, 'شماره سفارش را هم بفرستید.')
         return True
 
     if text in ('/miniapp', '/minapp', '/مینی', '/مینیاپ'):
@@ -112,9 +121,9 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             return True
         batch = r['batch']
         body = r['file_text'] or '(خالی)'
-        header = f'📁 Batch #{batch.id} — {r["count"]} درخواست\nمبالغ ریال:\n'
+        header = f'فایل تسویه {batch.id} — {r["count"]} درخواست\nمبلغ‌ها به ریال:\n'
         bc.send_message(chat_id, header + body[:3500])
-        bc.send_message(chat_id, f'پس از واریز بانک: /payout_paid_{batch.id}')
+        bc.send_message(chat_id, 'پس از واریز بانک، دکمهٔ «پرداخت انجام شد» را بزنید.')
         return True
 
     m = re.match(r'^/payout_paid_(\d+)$', text, re.I)
@@ -122,15 +131,16 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         r = mark_batch_paid(int(m.group(1)))
         bc.send_message(
             chat_id,
-            '✅ پرداخت batch ثبت شد' if r.get('ok') else f'❌ {r.get("error")}',
+            'پرداخت این دسته ثبت شد و به مدیران خبر داده شد.' if r.get('ok') else 'این دسته پیدا نشد یا قبلاً ثبت شده.',
         )
         return True
 
     if text in ('/wallet', '/کیف') or text.startswith('/wallet'):
-        mpanel.try_handle_text(chat_id, bale_uid, '/panel')
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if user:
             mpanel.show_wallet(chat_id, user)
+        else:
+            bc.send_message(chat_id, 'اول از منوی اصلی وارد شوید.')
         return True
 
     if text.startswith('/audit_admin') and is_operator(bale_uid):
@@ -203,7 +213,10 @@ def handle_callback_query(cq: dict) -> None:
         sess.state = 'mgr_edit_date'
         sess.data = d
         sess.save()
-        bc.send_message(chat_id, f'تاریخ جدید آیتم #{item_id}: 1405/05/20')
+        bc.send_message(
+            chat_id,
+            'تاریخ تازه را به شکل ۱۴۰۴/۰۶/۱۵ بفرستید. فقط همین کانال عوض می‌شود.',
+        )
         return
     if data.startswith('paid:'):
         from bot_flow.access import is_debug_user
@@ -258,7 +271,8 @@ def handle_callback_query(cq: dict) -> None:
 
 
 def _parse_manager_date(text: str):
-    text = text.strip().replace('/', '-')
+    text = text.strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789'))
+    text = text.replace('/', '-')
     parts = text.split('-')
     if len(parts) != 3:
         return None
@@ -291,6 +305,9 @@ def handle_update(update: dict) -> None:
             handle_pre_checkout(update['pre_checkout_query'])
         except Exception:
             log.exception('pre_checkout failed')
+            qid = (update.get('pre_checkout_query') or {}).get('id')
+            if qid:
+                bc.answer_pre_checkout_query(qid, False, 'خطای موقت. یک بار دیگر پرداخت کنید.')
         return
 
     if update.get('callback_query'):
@@ -333,7 +350,7 @@ def handle_update(update: dict) -> None:
             item_id = (sess.data or {}).get('edit_item_id')
             start = _parse_manager_date(norm)
             if not start or not item_id:
-                bc.send_message(chat_id, 'تاریخ نامعتبر.')
+                bc.send_message(chat_id, 'تاریخ نامعتبر است. نمونه: ۱۴۰۴/۰۶/۱۵')
                 return
             text_out = run_mgr('edit', bale_uid, int(item_id), new_start=start)
             sess.state = 'idle'
@@ -372,5 +389,5 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            '/start منوی اصلی\n/customer مشتری\n/panel مدیر\n/operator اپراتور\n/wallet کیف پول',
+            'این پیام را نشناختم.\nاز دکمه‌های منو استفاده کنید، یا «شروع» را بزنید.',
         )

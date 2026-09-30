@@ -480,10 +480,11 @@ def create_payment_request(
         inv_error = inv.get('error') or inv.get('description') or 'invoice_failed'
     else:
         inv_error = 'BALE_PROVIDER_TOKEN not configured'
+    logger.error('invoice was not sent: %s', inv_error)
     text = (
         f'{title}\n'
-        f'مبلغ قابل پرداخت: {int(amount):,} تومان\n'
-        f'توکن کیف‌پول بازو تنظیم نشده. پرداخت داخل مینی‌اپ پس از تنظیم BALE_PROVIDER_TOKEN فعال می‌شود.'
+        f'مبلغ: {int(amount):,} تومان\n'
+        'فاکتور کیف‌پول ساخته نشد. چند دقیقه دیگر از سفارش‌ها دوباره پرداخت کنید.'
     )
     msg = send_message(str(chat_id), text)
     return {

@@ -243,6 +243,7 @@ def _ask_publish_mode(chat_id: str, sess: BotSession, channel_ids: List[int], pa
         role='manager',
         pending_channel_ids=channel_ids,
         package_mode=package,
+        pmode_edit_only=False,
     )
     bc.send_message(str(chat_id), publish_mode_help_text(), reply_markup=publish_mode_keyboard())
 
@@ -291,7 +292,7 @@ def handle_publish_mode_callback(
         return
 
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        bc.send_message(str(chat_id), 'حالت نامعتبر.')
+        bc.send_message(str(chat_id), 'این روش ارسال شناخته نشد.')
         return
 
     manager = ensure_user(bale_user_id)
@@ -307,13 +308,21 @@ def handle_publish_mode_callback(
 
     hint = ''
     if mode == Channel.PUBLISH_BOT:
-        hint = '\nلطفاً @linkbank_bot را در کانال(ها) ادمین کنید.'
+        hint = '\nبازوی لینک‌ساز را در کانال مدیر کنید تا سر وقت خودش پست را بفرستد.'
     elif mode == Channel.PUBLISH_LINKYAR:
         from integrations import linkyar_client as ly
 
-        hint = f'\nلطفاً {ly.linkyar_username()} را در کانال(ها) ادمین کنید.'
+        hint = f'\nحساب {ly.linkyar_username()} را در کانال مدیر کنید. لینک‌یار بازو نیست.'
 
-    bc.send_message(str(chat_id), f'حالت انتشار: {label} ✅{hint}')
+    if sess.data.get('pmode_edit_only'):
+        save_session(sess, STATE_IDLE, role='manager', pmode_edit_only=False)
+        bc.send_message(str(chat_id), f'روش ارسال ذخیره شد: {label}.{hint}')
+        from bot_flow.manager_panel import open_panel
+
+        open_panel(chat_id, bale_user_id)
+        return
+
+    bc.send_message(str(chat_id), f'روش ارسال: {label}.{hint}')
 
     package_mode = bool(sess.data.get('package_mode')) and len(channels) > 1
     if package_mode:
@@ -584,7 +593,13 @@ def handle_pmode_channel_pick(
         bc.send_message(str(chat_id), 'کانال یافت نشد.')
         return
     sess = get_session(bale_user_id)
-    save_session(sess, STATE_AWAIT_PUBLISH_MODE, pending_channel_ids=[ch.id], package_mode=False)
+    save_session(
+        sess,
+        STATE_AWAIT_PUBLISH_MODE,
+        pending_channel_ids=[ch.id],
+        package_mode=False,
+        pmode_edit_only=True,
+    )
     bc.send_message(
         str(chat_id),
         format_publish_mode_screen(ch.name, ch.publish_mode),
