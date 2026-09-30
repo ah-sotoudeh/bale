@@ -10,6 +10,7 @@ urlpatterns = [
     path('', mini_app, name='miniapp_home'),
     path('manager/', manager_app, name='miniapp_manager'),
     path('api/me', api.api_me),
+    path('api/me/prefs', api.api_me_prefs),
     path('api/channels', api.api_channels),
     path('api/channels/refresh', api.api_refresh_channel_stats),
     path('api/channels/add', api.api_add_channel),

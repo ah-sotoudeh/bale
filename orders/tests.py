@@ -86,7 +86,7 @@ class OrdersWebhookFlowTests(TestCase):
         self.assertIn('ساعت', joined)
         self.assertNotIn('2026', joined)
         self.assertNotIn('+00', joined)
-        self.assertIn('لینک‌ساز خودکار', joined)
+        self.assertIn('بازوی لینک‌بان', joined)
         closed = self.client.post(reverse('webhook-payment'), {'order_id': self.order.id, 'status': 'paid'}, format='json')
         self.assertEqual(closed.status_code, 410)
 
@@ -593,7 +593,7 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(denied.status_code, 400)
         body = denied.json()
         self.assertEqual(body['error'], 'not_item_manager')
-        self.assertIn('مدیر', body['message'])
+        self.assertIn('کانال‌دار', body['message'])
         asset = self.client.get('/miniapp/assets/shop.css')
         self.assertEqual(asset.status_code, 200)
         self.assertIn('no-cache', asset['Cache-Control'])
@@ -708,7 +708,7 @@ class MarketplaceRulesTests(TestCase):
         self.assertEqual(owner.status_code, 200, owner.content)
         body = owner.json()
         self.assertEqual(body['failed'], 1)
-        self.assertIn('لینک‌یار', body['message'])
+        self.assertIn('حساب دستیار', body['message'])
         self.assertEqual(stranger.json()['done'], 0)
         self.assertEqual(refresh.call_count, 1)
 
@@ -960,8 +960,8 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('operator_banners', script)
         self.assertIn("owner:`customer`", script)
         self.assertIn('debug_bale_id', script)
-        self.assertIn('بیایید کانالتان را راه بیندازیم', script)
-        self.assertIn('سفارش تبلیغ، همین‌جا', script)
+        self.assertIn('کانالتان را اضافه کنید', script)
+        self.assertIn('چطور کار می‌کند', script)
         self.assertIn('نام کاربری خودتان را در «درباره» کانال بنویسید', script)
         self.assertIn('steps:C().manager.emptyChannelSteps', script)
         self.assertIn('queueMicrotask(()=>t().refreshChannelStats())', script)
@@ -1016,8 +1016,8 @@ class CustomerBannerFlowTests(TestCase):
         draft = Order.objects.get(customer=self.user, status='draft')
         self.assertEqual(draft.banner_message_id, '50')
         text = self._sent_text(send)
-        self.assertIn('بنر دریافت شد', text)
-        self.assertIn('کانال را انتخاب کنید', text)
+        self.assertIn('بنر رسید', text)
+        self.assertIn('کانال و روز را انتخاب کنید', text)
         markup = ''
         for call in send.call_args_list:
             raw = call.kwargs.get('reply_markup')
@@ -1065,7 +1065,7 @@ class CustomerBannerFlowTests(TestCase):
         })
         draft = Order.objects.get(customer=self.user, status='draft')
         self.assertEqual(draft.banner_message_id, '52')
-        self.assertIn('بنر دریافت شد', self._sent_text(send))
+        self.assertIn('بنر رسید', self._sent_text(send))
 
     @patch('integrations.bale_client.answer_callback_query', return_value={'ok': True})
     @patch('integrations.bale_client.send_message', return_value={'ok': True})
@@ -1098,7 +1098,7 @@ class CustomerBannerFlowTests(TestCase):
             'update_id': 5,
             'message': {'message_id': 2, 'chat': {'id': 900}, 'from': {'id': 'cust-1'}, 'text': '/menu'},
         })
-        self.assertIn('لینک‌ساز', self._sent_text(send))
+        self.assertIn('لینک‌بان', self._sent_text(send))
 
     def test_every_user_can_switch_customer_and_manager(self):
         import os
@@ -1292,3 +1292,35 @@ class CriticalMoneyTests(TestCase):
         self.assertEqual(first['sent'], 1)
         self.assertEqual(second['sent'], 0)
         self.assertEqual(create.call_count, 1)
+
+
+class MiniappPrefsTests(TestCase):
+    def test_theme_and_onboarding_round_trip(self):
+        import json
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        saved = self.client.patch(
+            '/miniapp/api/me/prefs',
+            data=json.dumps({
+                'debug_bale_id': 'prefs-1',
+                'theme': 'dark',
+                'onboarded': {'customer': True},
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(saved.status_code, 200, saved.content)
+        self.assertEqual(saved.json()['prefs']['theme'], 'dark')
+        self.assertTrue(saved.json()['prefs']['onboarded']['customer'])
+        again = self.client.get('/miniapp/api/me/prefs', {'debug_bale_id': 'prefs-1'})
+        self.assertEqual(again.json()['prefs']['theme'], 'dark')
+        me = self.client.get('/miniapp/api/me', {'debug_bale_id': 'prefs-1'})
+        self.assertEqual(me.json()['prefs']['theme'], 'dark')
+        cleared = self.client.patch(
+            '/miniapp/api/me/prefs',
+            data=json.dumps({'debug_bale_id': 'prefs-1', 'theme': ''}),
+            content_type='application/json',
+        )
+        self.assertIsNone(cleared.json()['prefs']['theme'])
+        self.assertTrue(cleared.json()['prefs']['onboarded']['customer'])

@@ -284,7 +284,7 @@ def _banner_rules() -> str:
     lb = linkbank_username()
     return (
         f'بنر یکی از این‌هاست:\n'
-        f'• بازارسال از کانال مرجع ({lb})\n'
+        f'• بازارسال از کانال بنرها ({lb})\n'
         f'• عکس یا ویدیو، ترجیحاً با متن زیرش (حداکثر ۸۰۰ نویسه)\n'
         f'• متن تبلیغ، حداقل یک جمله'
     )
@@ -298,14 +298,15 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
     if not preview:
         preview = 'بدون متن'
     if from_reference:
-        note = 'این بنر از کانال مرجع است و برای سفارش آماده است.'
+        note = 'بنر از کانال بنرها رسید و آمادهٔ سفارش است.'
     else:
         note = (
-            'بنر ذخیره شد و می‌توانید کانال را انتخاب کنید. '
-            'چون از کانال مرجع نیامده، برای پشتیبانی هم فرستاده شد تا آنجا منتشر شود.'
+            'بنر ثبت شد و برای بررسی رفت. '
+            'همین حالا می‌توانید کانال و روز را انتخاب کنید؛ '
+            'سفارش بعد از تأیید بنر برای کانال فرستاده می‌شود.'
         )
     rows = [
-        [{'text': 'تأیید و ادامه به انتخاب کانال', 'callback_data': 'cu:catalog'}],
+        [{'text': 'تأیید و انتخاب کانال', 'callback_data': 'cu:catalog'}],
         [{'text': 'ویرایش', 'callback_data': f'cu:editcap:{banner.id}'}],
     ]
     slot = (sess.data or {}).get('pending_slot') or {}
@@ -316,7 +317,7 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
         }])
     bc.send_message(
         str(chat_id),
-        f'بنر دریافت شد.\n{banner.display_title()}\n{preview}\n\n{note}',
+        f'بنر رسید. پیش‌نمایشش را ببینید:\n{banner.display_title()}\n{preview}\n\n{note}',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -650,11 +651,9 @@ def handle_customer_callback(
         lb = linkbank_username()
         bc.send_message(
             str(chat_id),
-            f'بنر را بفرستید.\n'
-            f'• بازارسال از کانال مرجع ({lb})؛ یعنی پستی که قبلاً آنجا منتشر شده.\n'
-            f'• یا یک عکس یا ویدیو، با متن زیرش. متن حداکثر ۸۰۰ نویسه.\n'
-            f'• یا فقط متن، اگر حداقل یک جمله است و لینک یا توضیح تبلیغ را دارد.\n\n'
-            'همان لحظه می‌گویم بنر رسید و می‌توانید کانال را انتخاب کنید.',
+            f'عکس یا ویدیوی بنر را بفرستید و متنش را زیر همان عکس بنویسید.\n'
+            f'اگر بنر از قبل در کانال بنرها ({lb}) هست، همان پست را بازارسال کنید.\n'
+            'متن حداکثر ۸۰۰ نویسه است.',
             reply_markup=bc.inline_keyboard([[{'text': 'انصراف', 'callback_data': 'cu:banners'}]]),
         )
         return True

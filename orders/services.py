@@ -169,9 +169,9 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
             if mode_code == 'manual':
                 follow = 'در زمان نوبت یادآوری می‌آید تا خودتان منتشر کنید.'
             elif mode_code == 'linkyar':
-                follow = 'سر ساعت، لینک‌یار خودکار منتشر می‌کند.'
+                follow = 'سر ساعت، حساب دستیار منتشر می‌کند.'
             else:
-                follow = 'سر ساعت، لینک‌ساز خودکار منتشر می‌کند.'
+                follow = 'سر ساعت، بازوی لینک‌بان منتشر می‌کند.'
             when = format_slot(timezone.localtime(item.effective_start))
             from bot_flow.messages import fa_money, fa_num
 

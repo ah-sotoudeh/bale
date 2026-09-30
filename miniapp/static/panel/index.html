@@ -1,44 +1,39 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl" data-bale="dark">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-    <title>لینک‌ساز</title>
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
+    <title>لینک‌بان</title>
     <script>
       window.__MEDIA_BASE = "/miniapp/media";
       window.__LIVE_API = "/miniapp/api";
-      function paintBale() {
-        var w = window.Bale && window.Bale.WebApp;
-        if (!w || w.__linkbankReady) return !!w;
-        w.__linkbankReady = true;
-        try {
-          w.ready();
-        } catch (e) {}
-        function paint() {
-          var scheme = w.colorScheme === "light" ? "light" : "dark";
-          document.documentElement.setAttribute("data-bale", scheme);
-        }
-        paint();
-        try {
-          w.onEvent("themeChanged", paint);
-        } catch (e) {}
-        try {
-          w.onEvent("settingsButtonClicked", function () {
-            location.assign("/miniapp/rules/");
-          });
-          if (w.SettingsButton && w.SettingsButton.show) w.SettingsButton.show();
-        } catch (e) {}
-        return true;
-      }
-      document.addEventListener("DOMContentLoaded", paintBale);
-      window.addEventListener("load", paintBale);
     </script>
-    <script src="https://tapi.bale.ai/miniapp.js?3" defer></script>
+    <script src="https://tapi.bale.ai/miniapp.js?3"></script>
+    <script>
+      (function () {
+        var r = document.documentElement, s = null;
+        try { s = localStorage.getItem("lb.theme"); } catch (e) {}
+        var w = window.Bale && Bale.WebApp, b = (w && w.colorScheme) || "light";
+        var bg = w && w.themeParams && w.themeParams.bg_color;
+        if (bg && /^#([0-9a-f]{6})$/i.test(bg)) {
+          var n = parseInt(bg.slice(1), 16);
+          var l = (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+          b = l < 0.4 ? "dark" : "light";
+        }
+        var t = s === "light" || s === "dark" ? s : b;
+        r.dataset.theme = t;
+        r.dataset.bale = t;
+        r.dataset.themeSource = s ? "user" : "bale";
+        r.style.colorScheme = t;
+      })();
+    </script>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preload" as="style" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" />
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
     <script type="module" crossorigin src="/miniapp/assets/index-Ce1t18yS.js"></script>
     <link rel="stylesheet" crossorigin href="/miniapp/assets/index-gYqu5hvF.css">
     <link rel="stylesheet" href="/miniapp/assets/shop.css">
+    <script src="/miniapp/assets/shell.js" defer></script>
   </head>
   <body>
     <div id="root"></div>

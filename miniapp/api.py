@@ -145,8 +145,67 @@ def api_me(request: HttpRequest) -> JsonResponse:
             'operator': is_op,
         },
         'pending_orders': OrderItem.objects.filter(manager=user, manager_status='pending').count(),
+        'prefs': _read_prefs(user),
         **_operator_queues(is_op),
     })
+
+
+def _read_prefs(user: User) -> Dict[str, Any]:
+    from users.models import get_bot_session
+
+    empty = {'theme': None, 'onboarded': {}}
+    if not user.bale_user_id:
+        return empty
+    sess = get_bot_session(str(user.bale_user_id))
+    raw = (sess.data or {}).get('prefs') or {}
+    theme = raw.get('theme')
+    if theme not in ('light', 'dark'):
+        theme = None
+    onboarded = raw.get('onboarded') if isinstance(raw.get('onboarded'), dict) else {}
+    clean = {
+        role: True
+        for role in ('customer', 'manager', 'operator')
+        if onboarded.get(role) is True
+    }
+    return {'theme': theme, 'onboarded': clean}
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST', 'PATCH'])
+def api_me_prefs(request: HttpRequest) -> JsonResponse:
+    """تم و دیده شدن معرفی نقش. ستون تازه نمی‌سازد."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    from users.models import get_bot_session
+
+    if not user.bale_user_id:
+        return JsonResponse({'ok': False, 'error': 'no_user'}, status=400)
+    sess = get_bot_session(str(user.bale_user_id))
+    data = dict(sess.data or {})
+    prefs = dict(data.get('prefs') or {})
+    if request.method != 'GET':
+        body = _json_body(request)
+        if 'theme' in body:
+            theme = body.get('theme')
+            if theme in ('light', 'dark'):
+                prefs['theme'] = theme
+            elif theme in ('', None, 'bale'):
+                prefs.pop('theme', None)
+            else:
+                return JsonResponse({'ok': False, 'error': 'bad_theme'}, status=400)
+        onboarded_in = body.get('onboarded')
+        if isinstance(onboarded_in, dict):
+            onboarded = dict(prefs.get('onboarded') or {})
+            for role in ('customer', 'manager', 'operator'):
+                if onboarded_in.get(role) is True:
+                    onboarded[role] = True
+            prefs['onboarded'] = onboarded
+        data['prefs'] = prefs
+        sess.data = data
+        sess.save(update_fields=['data', 'updated_at'])
+    return JsonResponse({'ok': True, 'prefs': _read_prefs(user)})
 
 
 @csrf_exempt

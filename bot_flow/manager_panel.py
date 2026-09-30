@@ -470,7 +470,7 @@ def confirm_payout(chat_id: str, user: User, bank_id: int) -> None:
 
 def operator_payout_file(chat_id: str, user: User) -> None:
     if not ws.is_operator(user.bale_user_id or ''):
-        bc.send_message(str(chat_id), 'فقط اپراتور.')
+        bc.send_message(str(chat_id), 'فقط پشتیبانی.')
         return
     r = ws.build_payout_batch(user)
     if not r.get('ok'):
@@ -610,7 +610,7 @@ def try_handle_callback(
         return True
     if data.startswith('mgr:op_paid:'):
         if not ws.is_operator(bale_user_id):
-            bc.send_message(str(chat_id), 'فقط اپراتور.')
+            bc.send_message(str(chat_id), 'فقط پشتیبانی.')
             return True
         r = ws.mark_batch_paid(int(data.split(':')[2]))
         bc.send_message(str(chat_id), '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')

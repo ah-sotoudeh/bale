@@ -307,11 +307,11 @@ def handle_publish_mode_callback(
 
     hint = ''
     if mode == Channel.PUBLISH_BOT:
-        hint = '\nبازوی لینک‌ساز را در کانال مدیر کنید تا سر وقت خودش پست را بفرستد.'
+        hint = '\nبازوی لینک‌بان را در کانال مدیر کنید تا سر وقت خودش پست را بفرستد.'
     elif mode == Channel.PUBLISH_LINKYAR:
         from integrations import linkyar_client as ly
 
-        hint = f'\nحساب {ly.linkyar_username()} را در کانال مدیر کنید. لینک‌یار بازو نیست.'
+        hint = f'\nحساب دستیار {ly.linkyar_username()} را در کانال مدیر کنید. این حساب بازو نیست.'
 
     if sess.data.get('pmode_edit_only'):
         save_session(sess, STATE_IDLE, role='manager', pmode_edit_only=False)
