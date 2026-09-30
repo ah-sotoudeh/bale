@@ -246,6 +246,10 @@ a {
   height: 0;
 }
 
+.lb-on {
+  background: var(--lb-primary-soft);
+}
+
 .lb-chip {
   flex: 0 0 auto;
   height: 28px;
