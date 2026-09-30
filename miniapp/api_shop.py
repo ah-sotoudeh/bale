@@ -392,6 +392,49 @@ def api_checkout(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['POST'])
+def api_suggest_time(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not user.bale_user_id:
+        return _err('forbidden', 403)
+    body = _json_body(request)
+    day = _parse_day(body)
+    if not day:
+        return _err('bad_date')
+    item = OrderItem.objects.select_related('tariff').filter(id=body.get('item_id'), manager=user).first()
+    if not item:
+        return _err('not_found', 404)
+    start, _end = cart_svc.slot_for_day(item.tariff, day)
+    result = cart_svc.process_manager_item(item.id, str(user.bale_user_id), 'edit', new_start=start)
+    if not result.get('ok'):
+        return _err(result.get('error') or 'slot_conflict')
+    return JsonResponse({'ok': True, 'item_id': item.id, 'date': day.isoformat()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_answer_time(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not user.bale_user_id:
+        return _err('forbidden', 403)
+    body = _json_body(request)
+    try:
+        item_id = int(body.get('item_id') or 0)
+    except (TypeError, ValueError):
+        return _err('not_found', 404)
+    result = cart_svc.customer_confirm_edit(item_id, str(user.bale_user_id), bool(body.get('accept')))
+    if not result.get('ok'):
+        return _err(result.get('error') or 'not_pending')
+    return JsonResponse({'ok': True, 'order_status': result.get('order_status')})
+
+
+@csrf_exempt
 @require_http_methods(['GET'])
 def api_my_orders(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
@@ -459,13 +502,27 @@ def api_operator_paid(request: HttpRequest) -> JsonResponse:
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
         return _err('forbidden', 403)
-    built = ws.build_payout_batch(user)
-    if not built.get('ok'):
-        return JsonResponse({'ok': False, 'error': built.get('error'), 'message': 'درخواست بازی نیست.'}, status=400)
-    marked = ws.mark_batch_paid(built['batch'].id)
+    body = _json_body(request)
+    if not body.get('confirm'):
+        built = ws.build_payout_batch(user)
+        if not built.get('ok'):
+            return JsonResponse({'ok': False, 'error': built.get('error'), 'message': 'درخواست بازی نیست.'}, status=400)
+        return JsonResponse({
+            'ok': True,
+            'file_text': built.get('file_text') or '',
+            'count': built.get('count') or 0,
+            'batch_id': built['batch'].id,
+            'marked_paid': False,
+        })
+    try:
+        batch_id = int(body.get('batch_id') or 0)
+    except (TypeError, ValueError):
+        return _err('bad_fields')
+    marked = ws.mark_batch_paid(batch_id)
+    if not marked.get('ok'):
+        return JsonResponse(marked, status=400)
     return JsonResponse({
         'ok': True,
-        'file_text': built.get('file_text') or '',
-        'count': built.get('count') or 0,
+        'marked_paid': True,
         'notified': len(marked.get('notified') or []),
     })
