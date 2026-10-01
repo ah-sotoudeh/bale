@@ -614,6 +614,42 @@ main {
   }
 }
 
+.lb-warn {
+  color: var(--lb-warning) !important;
+}
+
+.grid-cols-7 > button.lb-full,
+.grid-cols-7 > div.lb-full {
+  background: var(--lb-danger-bg) !important;
+  border-color: color-mix(in srgb, var(--lb-danger) 55%, var(--lb-border)) !important;
+}
+
+.grid-cols-7 > button.lb-pick,
+.grid-cols-7 > div.lb-pick {
+  background: var(--lb-primary-soft) !important;
+  border-color: var(--lb-primary) !important;
+}
+
+.grid-cols-7 > button.lb-past,
+.grid-cols-7 > div.lb-past {
+  background: var(--lb-surface-2) !important;
+  color: var(--lb-text-3);
+}
+
+.grid-cols-7 > button.lb-banner,
+.grid-cols-7 > div.lb-banner {
+  background: var(--lb-warning-bg) !important;
+}
+
+.grid-cols-7 > .lb-free .lb-w {
+  color: var(--lb-success);
+}
+
+.grid-cols-7 .lb-w {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 @media (min-width: 600px) {
   .lb-sheet {
     bottom: 24px;

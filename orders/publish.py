@@ -353,10 +353,16 @@ def publish_due_items() -> Dict[str, int]:
             if item.manager:
                 credit_manager_for_execution(item.manager, item.price, item.id)
             published += 1
+            from orders.execution import settle_paid_order
+
+            settle_paid_order(item.order_id)
         elif not any_manual:
             item.execution_status = 'failed_publish'
             item.save(update_fields=['execution_status'])
             _refund_failed_item(item)
+            from orders.execution import settle_paid_order
+
+            settle_paid_order(item.order_id)
 
     return {'published': published, 'failed_channels': failed, 'manual_reminded': manual_reminded}
 
@@ -402,6 +408,9 @@ def verify_manager_published(
         ])
         if item.manager:
             credit_manager_for_execution(item.manager, item.price, item.id)
+        from orders.execution import settle_paid_order
+
+        settle_paid_order(item.order_id)
         return {'ok': True, 'permalinks': [p.get('permalink') for p in posts]}
     return {'ok': False, 'error': 'not_found_in_history'}
 

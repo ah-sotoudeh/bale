@@ -45,20 +45,21 @@ def _hour_label(tariff: Tariff) -> str:
 
 def calendar_text_for_tariff(tariff: Tariff, days: int = 14) -> str:
     statuses = day_status_map(tariff, days=days)
-    free_n = sum(1 for _, free in statuses if free)
-    busy_n = len(statuses) - free_n
+    free_n = sum(1 for _, status in statuses if status == 'free')
+    busy_n = sum(1 for _, status in statuses if status == 'full')
+    past_n = sum(1 for _, status in statuses if status == 'past')
     lines = [
         '📅 تقویم نوبت‌ها',
         f'هدف: {_owner_label(tariff)}',
         f'تعرفه: {tariff.name}',
         f'نوبت: {_hour_label(tariff)} | {fa_num(tariff.duration_hours)}س | {fa_money(tariff.price)}',
         '',
-        f'✅ خالی: {fa_num(free_n)} | ❌ پر: {fa_num(busy_n)}',
+        f'✅ خالی: {fa_num(free_n)} | ❌ پر: {fa_num(busy_n)} | گذشته: {fa_num(past_n)}',
         '',
     ]
-    for d, is_free in statuses:
-        mark = '✅' if is_free else '❌'
-        lines.append(f'{mark} {format_day(d)}')
+    marks = {'free': '✅', 'full': '❌', 'past': '·'}
+    for d, status in statuses:
+        lines.append(f'{marks.get(status, "·")} {format_day(d)}')
     return '\n'.join(lines)
 
 
@@ -90,8 +91,8 @@ def ask_mark_busy_day(chat_id: str, tariff: Tariff) -> None:
     statuses = day_status_map(tariff, days=14)
     rows = []
     row = []
-    for d, is_free in statuses:
-        mark = '✅' if is_free else '❌'
+    for d, status in statuses:
+        mark = '✅' if status == 'free' else ('·' if status == 'past' else '❌')
         row.append({
             'text': f'{mark} {_short_day(d)}',
             'callback_data': f'free:busy_day:{tariff.id}:{d.isoformat()}',

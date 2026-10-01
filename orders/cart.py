@@ -12,7 +12,7 @@ from django.utils import timezone
 from channels_app.models import Tariff
 from bot_flow.messages import fa_money, fa_num
 from integrations import bale_client as bc
-from orders.availability import has_slot_conflict
+from orders.availability import has_slot_conflict, is_past_slot
 from orders.models import CustomerDraft, ManagerResponse, Order, OrderItem
 from orders.slots import SlotConflict
 from users.models import User
@@ -21,11 +21,13 @@ logger = logging.getLogger(__name__)
 
 MANAGER_HOURS = int(os.environ.get('MANAGER_RESPONSE_HOURS', '12'))
 PAYMENT_HOLD_HOURS = int(os.environ.get('PAYMENT_HOLD_HOURS', '24'))
+CART_HOLD_MINUTES = int(os.environ.get('CART_HOLD_MINUTES', '120'))
 
 
 @transaction.atomic
 def get_or_create_draft(customer: User) -> Order:
     User.objects.select_for_update().get(pk=customer.pk)
+    release_abandoned_carts(customer)
     lock = CustomerDraft.objects.select_related('order').filter(customer=customer).first()
     if lock:
         if lock.order.status == 'draft':
@@ -43,10 +45,32 @@ def clear_draft(customer: User) -> None:
 
 
 def slot_for_day(tariff: Tariff, day) -> tuple:
-    hour = tariff.start_hour if tariff.start_hour is not None else 0
-    start = timezone.make_aware(datetime.combine(day, dtime(hour=hour)))
-    end = start + timedelta(hours=tariff.duration_hours)
-    return start, end
+    from orders.availability import slot_bounds
+
+    return slot_bounds(tariff, day)
+
+
+def cart_hold_until(now=None):
+    now = now or timezone.now()
+    return now + timedelta(minutes=CART_HOLD_MINUTES)
+
+
+def release_abandoned_carts(customer: Optional[User] = None) -> int:
+    """پیش‌نویس‌هایی که مهلتشان در managers_deadline گذشته، روز را آزاد می‌کنند."""
+    now = timezone.now()
+    qs = Order.objects.filter(
+        status='draft',
+        managers_deadline__isnull=False,
+        managers_deadline__lt=now,
+    )
+    if customer is not None:
+        qs = qs.filter(customer=customer)
+    n = 0
+    for order in list(qs):
+        CustomerDraft.objects.filter(order=order).delete()
+        order.delete()
+        n += 1
+    return n
 
 
 def add_to_cart(
@@ -56,6 +80,9 @@ def add_to_cart(
 ) -> Dict[str, Any]:
     if not tariff.is_active:
         return {'ok': False, 'error': 'inactive_tariff'}
+    release_abandoned_carts(customer)
+    if is_past_slot(tariff, day):
+        return {'ok': False, 'error': 'past'}
     start, end = slot_for_day(tariff, day)
     channel = tariff.channel
     if tariff.group_id:
@@ -88,6 +115,8 @@ def add_to_cart(
     except SlotConflict:
         return {'ok': False, 'error': 'slot_conflict'}
     order.recompute_total()
+    order.managers_deadline = cart_hold_until()
+    order.save(update_fields=['managers_deadline'])
     return {'ok': True, 'order': order, 'item': item}
 
 

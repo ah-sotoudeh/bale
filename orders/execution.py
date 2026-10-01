@@ -119,6 +119,33 @@ def customer_confirm_execution(item_id: int, customer_bale_id: str, ok: bool) ->
     return {'ok': True, 'status': 'awaiting_operator'}
 
 
+def settle_paid_order(order_id: int) -> str:
+    """وقتی همهٔ نوبت‌ها تمام شدند سفارش تمام است؛ اگر همه ناموفق بودند، لغو."""
+    from orders.models import Order, SlotReservation
+
+    order = Order.objects.prefetch_related('items').filter(pk=order_id, status='paid').first()
+    if order is None:
+        return ''
+    items = [
+        it
+        for it in order.items.all()
+        if it.manager_status not in ('rejected', 'expired', 'customer_declined')
+        and it.execution_status != 'cancelled'
+    ]
+    if not items:
+        return order.status
+    if any(it.execution_status not in ('executed', 'failed_publish') for it in items):
+        return order.status
+    if all(it.execution_status == 'failed_publish' for it in items):
+        order.status = 'cancelled'
+        order.save(update_fields=['status'])
+        SlotReservation.objects.filter(order_item_id__in=[it.id for it in items]).delete()
+        return order.status
+    order.status = 'completed'
+    order.save(update_fields=['status'])
+    return order.status
+
+
 def _finalize_executed(it: OrderItem) -> Dict[str, Any]:
     it.execution_status = 'executed'
     it.executed_at = timezone.now()
@@ -136,6 +163,7 @@ def _finalize_executed(it: OrderItem) -> Dict[str, Any]:
             it.manager.bale_user_id,
             f'✅ آیتم #{it.id} اجرا شد. اعتبار کیف: {net:,} ت (پس از کارمزد).',
         )
+    settle_paid_order(it.order_id)
     return {'ok': True, 'status': 'executed'}
 
 
@@ -206,6 +234,7 @@ def operator_resolve(item_id: int, operator_bale_id: str, executed: bool) -> Dic
             it.manager.bale_user_id,
             f'آیتم #{it.id} منتشر نشده ثبت شد. جریمه {pen:,} تومان.',
         )
+    settle_paid_order(it.order_id)
     return {'ok': True, 'status': 'failed_publish'}
 
 

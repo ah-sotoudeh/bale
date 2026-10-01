@@ -12,6 +12,7 @@ from orders.models import OrderItem
 
 ACTIVE_ORDER_STATUSES = (
     'draft',
+    'waiting_banner',
     'waiting_managers',
     'waiting_customer_confirm',
     'waiting_payment',
@@ -35,6 +36,88 @@ def effective_window(item: OrderItem) -> Tuple[datetime, datetime]:
 
 def ranges_overlap(start_a, end_a, start_b, end_b) -> bool:
     return start_a < end_b and start_b < end_a
+
+
+def slot_bounds(tariff: Tariff, day: date) -> Tuple[datetime, datetime]:
+    hour = tariff.start_hour if tariff.start_hour is not None else 0
+    start = timezone.make_aware(datetime.combine(day, dtime(hour=hour)))
+    return start, start + timedelta(hours=int(tariff.duration_hours or 0))
+
+
+def is_past_slot(tariff: Tariff, day: date, now: Optional[datetime] = None) -> bool:
+    """ساعت شروع این روز گذشته است؛ دیگر فروخته نمی‌شود."""
+    now = now or timezone.now()
+    start, _end = slot_bounds(tariff, day)
+    return start <= now
+
+
+def _channel_ids_for(tariff: Tariff, channel: Optional[Channel] = None) -> List[int]:
+    if tariff.group_id:
+        return list(tariff.group.channels.values_list('id', flat=True))
+    if channel is not None:
+        return [channel.id]
+    if tariff.channel_id:
+        return [tariff.channel_id]
+    return []
+
+
+def item_channel_ids(item: OrderItem) -> set:
+    ids = set()
+    raw = item.booked_channel_ids or []
+    if isinstance(raw, list):
+        for value in raw:
+            try:
+                ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+    if ids:
+        return ids
+    if item.channel_id:
+        ids.add(item.channel_id)
+    tariff = getattr(item, 'tariff', None)
+    if tariff is not None and tariff.group_id:
+        ids.update(tariff.group.channels.values_list('id', flat=True))
+    elif tariff is not None and tariff.channel_id:
+        ids.add(tariff.channel_id)
+    return ids
+
+
+def channel_window_conflict(
+    tariff: Tariff,
+    start: datetime,
+    end: datetime,
+    exclude_item_id: Optional[int] = None,
+    channel: Optional[Channel] = None,
+) -> bool:
+    """تعرفهٔ دیگرِ همان کانال، اگر بازه‌اش روی این ساعت بیفتد، روز را می‌بندد."""
+    ch_ids = _channel_ids_for(tariff, channel)
+    if not ch_ids:
+        return False
+    qs = (
+        OrderItem.objects.select_related('tariff', 'tariff__group', 'order', 'channel')
+        .filter(
+            manager_status__in=ACTIVE_ITEM_STATUSES,
+            order__status__in=ACTIVE_ORDER_STATUSES,
+        )
+        .filter(
+            Q(channel_id__in=ch_ids)
+            | Q(tariff__channel_id__in=ch_ids)
+            | Q(tariff__group__channels__id__in=ch_ids)
+        )
+        .distinct()
+    )
+    if exclude_item_id is not None:
+        qs = qs.exclude(id=exclude_item_id)
+    wanted = set(ch_ids)
+    for item in qs:
+        if item.tariff_id == tariff.id:
+            continue
+        if not (item_channel_ids(item) & wanted):
+            continue
+        other_start, other_end = effective_window(item)
+        if ranges_overlap(start, end, other_start, other_end):
+            return True
+    return False
 
 
 def same_local_day(a: datetime, b: datetime) -> bool:
@@ -67,6 +150,11 @@ def has_slot_conflict(
                 return True
         elif ranges_overlap(start, end, other_start, other_end):
             return True
+
+    if channel_window_conflict(
+        tariff, start, end, exclude_item_id=exclude_item_id, channel=channel
+    ):
+        return True
 
     if tariff.group_id:
         blocked_qs = AvailabilitySlot.objects.filter(is_available=False).filter(
@@ -123,26 +211,35 @@ def free_days_for_tariff(tariff: Tariff, from_date, to_date, channel: Optional[C
     if isinstance(to_date, datetime):
         to_date = timezone.localtime(to_date).date() if timezone.is_aware(to_date) else to_date.date()
 
-    hour = tariff.start_hour if tariff.start_hour is not None else 0
-    duration = tariff.duration_hours
     day = from_date
     while day <= to_date:
-        start = timezone.make_aware(datetime.combine(day, dtime(hour=hour)))
-        end = start + timedelta(hours=duration)
+        if is_past_slot(tariff, day):
+            day = day + timedelta(days=1)
+            continue
+        start, end = slot_bounds(tariff, day)
         if not has_slot_conflict(tariff, start, end, channel=channel or tariff.channel):
             yield day
         day = day + timedelta(days=1)
 
 
-def day_status_map(tariff: Tariff, days: int = 14) -> List[Tuple[date, bool]]:
-    """List of (day, is_free) for the next `days` calendar days."""
+def classify_day(tariff: Tariff, day: date, now: Optional[datetime] = None) -> str:
+    """free، full، یا past. بنر فقط روی کلاینت است."""
+    if is_past_slot(tariff, day, now=now):
+        return 'past'
+    start, end = slot_bounds(tariff, day)
+    if has_slot_conflict(tariff, start, end, channel=tariff.channel):
+        return 'full'
+    return 'free'
+
+
+def day_status_map(tariff: Tariff, days: int = 14) -> List[Tuple[date, str]]:
+    """List of (day, status) for the next `days` calendar days. status is free/full/past."""
     today = timezone.localdate()
     until = today + timedelta(days=max(1, days) - 1)
-    free_set = set(free_days_for_tariff(tariff, today, until))
-    out: List[Tuple[date, bool]] = []
+    out: List[Tuple[date, str]] = []
     d = today
     while d <= until:
-        out.append((d, d in free_set))
+        out.append((d, classify_day(tariff, d)))
         d += timedelta(days=1)
     return out
 

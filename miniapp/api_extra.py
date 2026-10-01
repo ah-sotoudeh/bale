@@ -15,12 +15,6 @@ from wallet.models import PayoutRequest
 @csrf_exempt
 @require_http_methods(['GET'])
 def api_catalog(request: HttpRequest) -> JsonResponse:
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    from orders.models import SlotReservation
-
     user, err = _auth_user(request)
     if err:
         return err
@@ -33,7 +27,6 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     items = []
     channels: dict = {}
     groups: dict = {}
-    owned = set()
 
     def _public_channel(ch):
         return {
@@ -57,11 +50,6 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
         }
 
     for t in qs:
-        if user and (
-            (t.channel_id and t.channel.manager_id == user.id)
-            or (t.group_id and t.group.manager_id == user.id)
-        ):
-            owned.add(t.id)
         if t.channel_id and t.channel_id not in channels:
             channels[t.channel_id] = _public_channel(t.channel)
         if t.group_id and t.group_id not in groups:
@@ -86,19 +74,18 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'members_count': (t.channel.members_count if t.channel_id else 0) or 0,
             'avg_views': (t.channel.avg_views if t.channel_id else 0) or 0,
         })
-    today = timezone.localdate()
-    until = today + timedelta(days=13)
-    other_ids = [t.id for t in qs if t.id not in owned]
+    from orders.availability import day_status_map
+
     busy = []
-    if other_ids:
-        for rid, tid, day in SlotReservation.objects.filter(
-            tariff_id__in=other_ids,
-            slot_date__gte=today,
-            slot_date__lte=until,
-        ).values_list('id', 'tariff_id', 'slot_date'):
+    seq = 0
+    for t in qs:
+        for day, status in day_status_map(t, 14):
+            if status != 'full':
+                continue
+            seq += 1
             busy.append({
-                'id': rid,
-                'tariff_id': tid,
+                'id': -(t.id * 100 + seq),
+                'tariff_id': t.id,
                 'date': day.isoformat(),
                 'manual': False,
             })

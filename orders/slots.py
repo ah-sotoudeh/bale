@@ -21,7 +21,8 @@ def item_day(item):
 
 
 def sync_item_lock(item) -> bool:
-    from channels_app.models import Tariff
+    from channels_app.models import Channel, Tariff
+    from orders.availability import channel_window_conflict, effective_window, item_channel_ids
     from orders.models import SlotReservation
 
     if not item.pk:
@@ -34,7 +35,15 @@ def sync_item_lock(item) -> bool:
         return True
     try:
         with transaction.atomic():
+            ch_ids = sorted(item_channel_ids(item))
+            if ch_ids:
+                list(Channel.objects.select_for_update().filter(pk__in=ch_ids).order_by('id'))
             Tariff.objects.select_for_update().get(pk=item.tariff_id)
+            start, end = effective_window(item)
+            if channel_window_conflict(
+                item.tariff, start, end, exclude_item_id=item.pk, channel=item.channel
+            ):
+                return False
             clash = (
                 SlotReservation.objects.filter(tariff_id=item.tariff_id, slot_date=day)
                 .exclude(order_item_id=item.pk)

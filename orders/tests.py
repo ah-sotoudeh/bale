@@ -1031,10 +1031,17 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('lb-tar', script)
         days_at = script.find('days:WA(),model:')
         self.assertGreater(days_at, 0)
-        days_model = script[days_at:days_at + 700]
+        days_model = script[days_at:days_at + 1600]
         self.assertIn('removeCart', days_model)
         self.assertIn('C().toast.removedCart', days_model)
         self.assertIn('C().toast.addedCart', days_model)
+        self.assertIn('`past`', days_model)
+        self.assertIn('`banner`', days_model)
+        self.assertIn('C().day.past', script)
+        self.assertIn('function lbHoldText(', script)
+        self.assertIn('مهلت تمام', script)
+        self.assertIn('holdUntil:String(l.hold_until', script)
+        self.assertIn('o.canDispute', script)
         self.assertNotIn('n.go({name:`cart`})', script)
         self.assertIn('title:C().screen.orders,hint:C().customer.mineHint,onClick:()=>n.go({name:`mine`})', script)
         self.assertIn('روزهای انتخاب‌شده', script)
@@ -1400,3 +1407,154 @@ class MiniappPrefsTests(TestCase):
         )
         self.assertIsNone(cleared.json()['prefs']['theme'])
         self.assertTrue(cleared.json()['prefs']['onboarded']['customer'])
+
+
+class CalendarHoldTests(TestCase):
+    def setUp(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.customer = User.objects.create_user(username='hold-c', password='pass', bale_user_id='hold-c')
+        self.other = User.objects.create_user(username='hold-o', password='pass', bale_user_id='hold-o')
+        self.manager = User.objects.create_user(username='hold-m', password='pass', bale_user_id='hold-m')
+        self.channel = Channel.objects.create(name='hold', link='@hold', manager=self.manager)
+        self.day = timezone.localdate() + timedelta(days=5)
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='۲۴ ساعته', duration_hours=24, price=1000, start_hour=11
+        )
+        self.night = Tariff.objects.create(
+            channel=self.channel, name='شبانه', duration_hours=10, price=800, start_hour=22
+        )
+
+    def test_waiting_banner_day_is_full(self):
+        from orders.availability import classify_day
+
+        start, end = __import__('orders.cart', fromlist=['slot_for_day']).slot_for_day(self.tariff, self.day)
+        order = Order.objects.create(customer=self.customer, status='waiting_banner')
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=end,
+            price=1000,
+            manager=self.manager,
+            manager_status='pending',
+            duration_hours=24,
+        )
+        self.assertEqual(classify_day(self.tariff, self.day), 'full')
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'hold-o'})
+        self.assertEqual(listed.status_code, 200, listed.content)
+        dates = [row['date'] for row in listed.json()['busy'] if row['tariff_id'] == self.tariff.id]
+        self.assertIn(self.day.isoformat(), dates)
+        calendar = self.client.get(
+            '/miniapp/api/calendar',
+            {'tariff_id': self.tariff.id, 'for': 'customer', 'debug_bale_id': 'hold-o'},
+        )
+        self.assertEqual(calendar.status_code, 200, calendar.content)
+        row = next(d for d in calendar.json()['days'] if d['date'] == self.day.isoformat())
+        self.assertEqual(row['status'], 'full')
+        self.assertFalse(row['free'])
+        blocked = add_to_cart(self.other, self.tariff, self.day)
+        self.assertEqual(blocked.get('error'), 'slot_conflict')
+
+    def test_overlapping_tariffs_lock_the_channel(self):
+        early = Tariff.objects.create(
+            channel=self.channel, name='صبح', duration_hours=2, price=400, start_hour=8
+        )
+        later_day = self.day + timedelta(days=2)
+        morning = Tariff.objects.create(
+            channel=self.channel, name='پیش از ظهر', duration_hours=4, price=400, start_hour=8
+        )
+        evening = Tariff.objects.create(
+            channel=self.channel, name='عصر', duration_hours=4, price=400, start_hour=18
+        )
+        first = add_to_cart(self.customer, self.tariff, self.day)
+        self.assertTrue(first['ok'], first)
+        overlap = add_to_cart(self.other, self.night, self.day)
+        self.assertFalse(overlap['ok'])
+        self.assertEqual(overlap['error'], 'slot_conflict')
+        before = add_to_cart(self.other, early, self.day)
+        self.assertTrue(before['ok'], before)
+        opened = add_to_cart(self.other, morning, later_day)
+        self.assertTrue(opened['ok'], opened)
+        beside = add_to_cart(self.customer, evening, later_day)
+        self.assertTrue(beside['ok'], beside)
+
+    def test_abandoned_cart_releases_after_the_hold(self):
+        from orders.cart import CART_HOLD_MINUTES, release_abandoned_carts
+
+        added = add_to_cart(self.customer, self.tariff, self.day)
+        self.assertTrue(added['ok'], added)
+        order = added['order']
+        order.refresh_from_db()
+        self.assertIsNotNone(order.managers_deadline)
+        self.assertGreater(
+            order.managers_deadline,
+            timezone.now() + timedelta(minutes=CART_HOLD_MINUTES - 5),
+        )
+        listed = self.client.get('/miniapp/api/cart', {'debug_bale_id': 'hold-c'})
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertTrue(listed.json()['hold_until'])
+        order.managers_deadline = timezone.now() - timedelta(minutes=1)
+        order.save(update_fields=['managers_deadline'])
+        self.assertEqual(release_abandoned_carts(), 1)
+        self.assertFalse(Order.objects.filter(pk=order.pk).exists())
+        again = add_to_cart(self.other, self.tariff, self.day)
+        self.assertTrue(again['ok'], again)
+
+    def test_a_passed_start_hour_is_past(self):
+        from orders.availability import classify_day
+
+        today = timezone.localdate()
+        early = Tariff.objects.create(
+            channel=self.channel, name='نیمه‌شب', duration_hours=2, price=100, start_hour=0
+        )
+        self.assertEqual(classify_day(early, today), 'past')
+        blocked = add_to_cart(self.customer, early, today)
+        self.assertEqual(blocked.get('error'), 'past')
+        calendar = self.client.get(
+            '/miniapp/api/calendar',
+            {'tariff_id': early.id, 'for': 'customer', 'debug_bale_id': 'hold-c'},
+        )
+        row = next(d for d in calendar.json()['days'] if d['date'] == today.isoformat())
+        self.assertEqual(row['status'], 'past')
+        self.assertIn(row['status'], ('free', 'full', 'past'))
+
+    def test_paid_order_closes_when_every_slot_finishes(self):
+        from orders.execution import settle_paid_order
+        from orders.models import SlotReservation
+
+        start = timezone.now() + timedelta(days=6)
+        order = Order.objects.create(customer=self.customer, status='paid', total_amount=1000)
+        item = OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=24),
+            price=1000,
+            manager=self.manager,
+            manager_status='approved',
+            execution_status='executed',
+            duration_hours=24,
+        )
+        self.assertEqual(settle_paid_order(order.id), 'completed')
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'completed')
+        item.execution_status = 'failed_publish'
+        item.save(update_fields=['execution_status'])
+        order.status = 'paid'
+        order.save(update_fields=['status'])
+        self.assertTrue(SlotReservation.objects.filter(order_item=item).exists())
+        self.assertEqual(settle_paid_order(order.id), 'cancelled')
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'cancelled')
+        self.assertFalse(SlotReservation.objects.filter(order_item=item).exists())
+
+    def test_cancel_phrase_stays_inside_the_window(self):
+        from bot_flow.messages import user_error
+
+        self.assertNotIn('لغو نمی‌شود', user_error('not_cancellable'))
+        self.assertIn('لغو نمی‌شود', user_error('too_late'))

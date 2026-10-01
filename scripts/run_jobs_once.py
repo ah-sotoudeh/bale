@@ -18,7 +18,7 @@ django.setup()
 
 from django.utils import timezone  # noqa: E402
 
-from orders.cart import expire_timed_out_items  # noqa: E402
+from orders.cart import expire_timed_out_items, release_abandoned_carts  # noqa: E402
 from orders.execution import escalate_unconfirmed, send_publish_reminders  # noqa: E402
 from orders.publish import (  # noqa: E402
     daily_admin_audit,
@@ -31,6 +31,7 @@ from integrations.channel_stats import refresh_due_channels  # noqa: E402
 
 def main() -> None:
     print('expire', expire_timed_out_items())
+    print('abandoned', release_abandoned_carts())
     print('remind', send_publish_reminders())
     print('publish', publish_due_items())
     if ly.user_token():

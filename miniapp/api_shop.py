@@ -41,8 +41,9 @@ ERR_FA = {
     'need_holder_name': 'نام صاحب حساب لازم است.',
     'not_pending': 'این سفارش دیگر در انتظار نیست.',
     'inactive': 'این تعرفه فعال نیست.',
-    'not_cancellable': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
+    'not_cancellable': 'این سفارش در این وضعیت بسته نمی‌شود.',
     'too_late': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
+    'past': 'این ساعت گذشته است و دیگر نمی‌شود این روز را برداشت.',
     'not_paid': 'این سفارش پرداخت نشده است.',
     'already_refunded': 'مبلغ این سفارش قبلاً برگشته است.',
     'inactive_tariff': 'این تعرفه خاموش است و روزش فروخته نمی‌شود.',
@@ -150,11 +151,12 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
     elif t is False:
         return _err('forbidden', 403)
     days = []
-    for d, free in day_status_map(t, 14):
+    for d, status in day_status_map(t, 14):
         days.append({
             'date': d.isoformat(),
             'jalali': format_jalali(d),
-            'free': free,
+            'free': status == 'free',
+            'status': status,
         })
     busy_slots = []
     if not customer:
@@ -321,6 +323,7 @@ def api_cart(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    cart_svc.release_abandoned_carts(user)
     order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
     items = []
     total = 0
@@ -341,6 +344,9 @@ def api_cart(request: HttpRequest) -> JsonResponse:
     if order and order.customer_banner_id:
         cb = order.customer_banner
         banner = {'id': cb.id, 'title': cb.display_title()}
+    hold_until = None
+    if order and order.managers_deadline:
+        hold_until = timezone.localtime(order.managers_deadline).isoformat()
     return JsonResponse({
         'ok': True,
         'order_id': order.id if order else None,
@@ -348,6 +354,7 @@ def api_cart(request: HttpRequest) -> JsonResponse:
         'total': total,
         'banner': banner,
         'has_banner': bool(order and order.banner_message_id),
+        'hold_until': hold_until,
     })
 
 
@@ -421,6 +428,7 @@ def api_checkout(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    cart_svc.release_abandoned_carts(user)
     order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
     if not order:
         return _err('empty_cart')
