@@ -44,7 +44,7 @@ def _nav_row() -> List[Dict[str, str]]:
     return [
         {'text': '🏠 خانه', 'callback_data': 'cu:home'},
         {'text': '🖼 بنرها', 'callback_data': 'cu:banners'},
-        {'text': '🛒 سبد', 'callback_data': 'cu:cart'},
+        {'text': '🛒 انتخاب‌ها', 'callback_data': 'cu:cart'},
     ]
 
 
@@ -56,7 +56,7 @@ def customer_home_keyboard() -> Dict:
         ],
         [
             {'text': '📋 فهرست تعرفه‌ها', 'callback_data': 'cu:catalog'},
-            {'text': '🛒 سبد خرید', 'callback_data': 'cu:cart'},
+            {'text': '🛒 انتخاب‌ها', 'callback_data': 'cu:cart'},
         ],
         [
             {'text': '📦 سفارش‌های من', 'callback_data': 'cu:orders'},
@@ -95,7 +95,7 @@ def open_customer_home(chat_id: str, bale_user_id: str, username: str = '') -> N
         f'شناسه: {user.bale_handle or user.bale_user_id}\n'
         f'بنر آماده: {n_b}\n'
         f'در انتظار بررسی: {n_pending}\n'
-        f'در سبد: {n_cart}\n'
+        f'روز انتخاب‌شده: {n_cart}\n'
         f'سفارش باز: {n_open}\n'
         f'اعتبار: {bal["credit"]:,} تومان\n'
         f'در امانت: {bal["escrow"]:,} تومان\n\n'
@@ -511,8 +511,8 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     if nav:
         rows.append(nav)
     rows.append([
-        {'text': '🛒 سبد', 'callback_data': 'cu:cart'},
-        {'text': '✅ نهایی‌سازی', 'callback_data': 'cu:check'},
+        {'text': '🛒 انتخاب‌ها', 'callback_data': 'cu:cart'},
+        {'text': '✅ ثبت سفارش', 'callback_data': 'cu:check'},
     ])
     rows.append(_nav_row())
     bc.send_message(
@@ -525,7 +525,7 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
 def show_days_for_tariff(chat_id: str, bale_user_id: str, tariff_id: int) -> None:
     t = Tariff.objects.select_related('channel', 'group').filter(id=tariff_id, is_active=True).first()
     if not t:
-        bc.send_message(str(chat_id), 'تعرفه نامعتبر.')
+        bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
         return
     sess = get_session(bale_user_id)
     save_session(sess, STATE_CUST_PICK_DAY, cart_tariff_id=tariff_id)
@@ -561,7 +561,7 @@ def show_days_for_tariff(chat_id: str, bale_user_id: str, tariff_id: int) -> Non
         rows.append(row)
     rows.append([
         {'text': 'فهرست', 'callback_data': 'cu:catalog'},
-        {'text': 'سبد', 'callback_data': 'cu:cart'},
+        {'text': 'انتخاب‌ها', 'callback_data': 'cu:cart'},
     ])
     bc.send_message(
         str(chat_id),
@@ -778,7 +778,7 @@ def handle_customer_callback(
         kb = bc.inline_keyboard([
             [
                 {'text': 'ادامه خرید', 'callback_data': 'cu:catalog'},
-                {'text': '✅ نهایی‌سازی', 'callback_data': 'cu:check'},
+                {'text': '✅ ثبت سفارش', 'callback_data': 'cu:check'},
             ],
             _nav_row(),
         ])
@@ -788,22 +788,21 @@ def handle_customer_callback(
     if data == 'cu:check':
         order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
         if not order:
-            bc.send_message(str(chat_id), 'سبد خالی است.', reply_markup=customer_home_keyboard())
+            bc.send_message(str(chat_id), 'هنوز روزی انتخاب نکرده‌اید.', reply_markup=customer_home_keyboard())
             return True
         result = checkout(order)
         if not result.get('ok'):
             err = result.get('error')
             msg = {
-                'empty_cart': 'سبد خالی است.',
+                'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
                 'no_banner': 'اول یک بنر انتخاب کنید.',
-                'slot_conflict': 'یکی از نوبت‌ها پر شد؛ سبد را بررسی کنید.',
+                'slot_conflict': 'یکی از روزها پر شد. انتخاب‌ها را دوباره ببینید.',
             }.get(err, str(err))
             bc.send_message(str(chat_id), msg)
             return True
         bc.send_message(
             str(chat_id),
-            f'✅ سفارش #{order.id} با {result["count"]} آیتم ثبت شد.\n'
-            'در انتظار تأیید مدیران کانال.',
+            f'سفارش ثبت شد. {result["count"]} کانال باید جواب بدهد.',
             reply_markup=customer_home_keyboard(),
         )
         sess = get_session(bale_user_id)
@@ -822,7 +821,7 @@ def handle_customer_callback(
         day = date.fromisoformat(parts[3])
         t = Tariff.objects.filter(id=tariff_id, is_active=True).first()
         if not t:
-            bc.send_message(str(chat_id), 'تعرفه نامعتبر.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         order = get_or_create_draft(user)
         if not order.banner_message_id:
@@ -856,9 +855,9 @@ def handle_customer_callback(
         kb = bc.inline_keyboard([
             [
                 {'text': 'تعرفه دیگر', 'callback_data': 'cu:catalog'},
-                {'text': 'سبد', 'callback_data': 'cu:cart'},
+                {'text': 'انتخاب‌ها', 'callback_data': 'cu:cart'},
             ],
-            [{'text': '✅ نهایی‌سازی', 'callback_data': 'cu:check'}],
+            [{'text': '✅ ثبت سفارش', 'callback_data': 'cu:check'}],
         ])
         bc.send_message(
             str(chat_id),
@@ -937,7 +936,7 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
             return True
 
     if sess.state in (STATE_CUST_BROWSE, STATE_CUST_PICK_DAY):
-        if norm in ('/cart', 'سبد'):
+        if norm in ('/cart', 'سبد', 'انتخاب‌ها', 'انتخاب'):
             handle_customer_callback(chat_id, bale_user_id, 'cu:cart')
             return True
         if norm in ('/catalog', 'فهرست'):

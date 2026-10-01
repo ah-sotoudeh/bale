@@ -1000,6 +1000,18 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('C().operator.linkyarPending', script)
         self.assertIn('حساب دستیار هنوز بررسی نشده', script)
         self.assertNotIn('n.linkyar.connected?C().operator.linkyarOn', script)
+        self.assertIn('برداشتن این روز', script)
+        self.assertIn('روزی انتخاب نشده', script)
+        self.assertIn('وضعیت انتشار: {status}', script)
+        self.assertIn('این روز را قبلاً انتخاب کرده‌اید', script)
+        self.assertNotIn('حذف از سبد', script)
+        self.assertNotIn('افزودن به سبد بسته است', script)
+        self.assertNotIn('به سبد اضافه شد', script)
+        from bot_flow.messages import user_error
+
+        self.assertNotIn('سبد', user_error('empty_cart'))
+        self.assertIn('هنوز روزی انتخاب نکرده‌اید', user_error('empty_cart'))
+        self.assertIn('نمی‌توانید روزی را انتخاب کنید', user_error('no_banner'))
         self.assertIn('چطور کار می‌کند', script)
         self.assertIn('نام کاربری خودتان را در «درباره» کانال بنویسید', script)
         self.assertIn('steps:C().manager.emptyChannelSteps', script)

@@ -149,7 +149,7 @@ def _notify_operator_review(it: OrderItem) -> None:
     )
     kb = bc.inline_keyboard([
         [
-            {'text': '✅ اجرا شده', 'callback_data': f'opok:{it.id}'},
+            {'text': '✅ منتشر شد', 'callback_data': f'opok:{it.id}'},
             {'text': '❌ اجرا نشده', 'callback_data': f'opno:{it.id}'},
         ]
     ])

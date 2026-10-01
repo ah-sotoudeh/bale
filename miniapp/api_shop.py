@@ -29,8 +29,8 @@ ERR_FA = {
     'forbidden': 'این طرح مال کانال شما نیست، برای همین روزش را نمی‌توانید پر یا خالی کنید.',
     'bad_fields': 'نام، ساعت، مدت و قیمت را کامل بنویسید.',
     'bad_date': 'این تاریخ معتبر نیست.',
-    'empty_cart': 'سبد خالی است. اول یک روز خالی بردارید.',
-    'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، افزودن به سبد بسته است.',
+    'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
+    'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، نمی‌توانید روزی را انتخاب کنید.',
     'slot_conflict': 'این روز پر است. روز دیگری را انتخاب کنید.',
     'no_channel': 'کانالی برای این تعرفه نیست.',
     'already_pending': 'یک درخواست تسویه باز دارید.',
@@ -111,7 +111,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
         return _err('not_found', 404)
     mode = body.get('publish_mode')
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'حالت ارسال نامعتبر است.'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'این روش انتشار را نمی‌شناسم.'}, status=400)
     ch.publish_mode = mode
     fields = ['publish_mode']
     hours = body.get('remind_hours')

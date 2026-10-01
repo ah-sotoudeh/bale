@@ -196,7 +196,7 @@ def handle_role_callback(
         )
         return
 
-    bc.send_message(str(chat_id), 'نقش نامعتبر. /start')
+    bc.send_message(str(chat_id), 'این نقش را نمی‌شناسم. /start را بزنید تا از نو شروع کنیم.')
 
 
 def _verify_and_register_channels(
@@ -287,7 +287,7 @@ def handle_publish_mode_callback(
 
     sess = get_session(bale_user_id)
     if sess.state != STATE_AWAIT_PUBLISH_MODE:
-        bc.send_message(str(chat_id), 'الان انتخاب حالت انتشار لازم نیست. /start')
+        bc.send_message(str(chat_id), 'الان لازم نیست روش انتشار را عوض کنید. اگر منو گم شد، /start را بزنید.')
         return
 
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
@@ -370,7 +370,7 @@ def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     ids = list(sess.data.get('pending_channel_ids') or [])
     channels = list(Channel.objects.filter(id__in=ids, manager=manager))
     if len(channels) < 2:
-        bc.send_message(str(chat_id), 'کانال‌ها ناقص. /start')
+        bc.send_message(str(chat_id), 'کانال‌های این مجموعه کامل نیست. /start را بزنید و پیوندها را دوباره بفرستید.')
         save_session(sess, STATE_AWAIT_LINKS)
         return True
 
@@ -490,7 +490,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     rows = parse_tariff_lines(text)
     if not rows:
-        bc.send_message(str(chat_id), f'فرمت نامعتبر.\n{TARIFF_HELP}')
+        bc.send_message(str(chat_id), f'این را به‌صورت تعرفه نفهمیدم.\n{TARIFF_HELP}')
         return True
 
     package_mode = bool(sess.data.get('package_mode'))
@@ -502,7 +502,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         try:
             group = ChannelGroup.objects.get(id=group_id)
         except ChannelGroup.DoesNotExist:
-            bc.send_message(str(chat_id), 'مجموعه نیست. /start')
+            bc.send_message(str(chat_id), 'این مجموعه را پیدا نکردم. /start را بزنید و کانال را دوباره وصل کنید.')
             return True
         with transaction.atomic():
             for name, start_hour, hours, price in rows:
@@ -523,7 +523,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         try:
             channel = Channel.objects.get(id=ch_id)
         except Channel.DoesNotExist:
-            bc.send_message(str(chat_id), 'کانال نیست. /start')
+            bc.send_message(str(chat_id), 'این کانال را پیدا نکردم. /start را بزنید و دوباره وصل کنید.')
             return True
         with transaction.atomic():
             for name, start_hour, hours, price in rows:
@@ -550,7 +550,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     bc.send_message(str(chat_id), f'ذخیره شد:\n{summary}')
 
     if pub.get('error') and pub.get('error') != 'no_tariffs':
-        bc.send_message(str(chat_id), f'انتشار ناموفق: {pub.get("error")}')
+        bc.send_message(str(chat_id), 'نتوانستم این تعرفه را روی کانال بنرها بگذارم. کمی بعد دوباره تلاش کنید، یا به پشتیبانی بگویید.')
     elif not pub.get('error'):
         bc.send_message(str(chat_id), f'✅ «{label}» در {reference_channel()}')
 
@@ -572,12 +572,12 @@ def handle_pmode_edit_start(chat_id: str, bale_user_id: str, cq_id: Optional[str
     rows = []
     for ch in channels:
         rows.append([{
-            'text': f'{ch.name} ({ch.publish_mode})',
+            'text': f'{ch.name} ({label_publish_mode(ch.publish_mode)})',
             'callback_data': f'pmode_ch:{ch.id}',
         }])
     bc.send_message(
         str(chat_id),
-        'کانال را برای تغییر حالت انتشار انتخاب کنید:',
+        'کانال را انتخاب کنید تا بگویید تبلیغ چطور منتشر شود:',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -626,11 +626,11 @@ def try_handle_callback(
             bc.answer_callback_query(str(cq_id))
         bc.send_message(
             str(chat_id),
-            'راهنما:\n'
-            '• مشتری: بنر → فهرست → سبد → پرداخت\n'
-            '• مدیر: کانال/تعرفه/تقویم/مالی\n'
-            '• اپراتور: تسویه و تأیید بنر\n\n'
-            '/start منوی اصلی\n/customer پنل مشتری\n/panel پنل مدیر',
+            'چطور کار می‌کند:\n'
+            'اگر مشتری هستید، بنر را بفرستید، کانال و روز را بردارید و بعد از قبول کانال با کیف پول بله بپردازید.\n'
+            'اگر کانال‌دار هستید، کانال و تعرفه را ثبت کنید و سفارش‌ها را جواب دهید.\n'
+            'پشتیبانی بنرها را می‌خواند و واریز پایا را ثبت می‌کند.\n\n'
+            'با /start به خانه برمی‌گردید.',
         )
         return True
     if data.startswith('role:'):

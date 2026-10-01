@@ -98,15 +98,15 @@ def cart_summary(order: Order) -> str:
         )
     )
     if not items:
-        return 'سبد خرید خالی است.'
-    lines = ['🛒 سبد خرید:']
+        return 'هنوز روزی انتخاب نکرده‌اید.'
+    lines = ['روزهای انتخاب‌شده:']
     for i, it in enumerate(items, 1):
         t = it.tariff
         owner = t.group.name if t.group_id else (it.channel.name if it.channel else '?')
         day = timezone.localtime(it.requested_start).strftime('%Y-%m-%d')
         lines.append(f'{i}. {owner} | {t.name} | {day} | {it.price:,} ت')
     lines.append(f'\nجمع: {order.total_amount:,} تومان')
-    lines.append(f'{len(items)} آیتم')
+    lines.append(f'{len(items)} روز')
     return '\n'.join(lines)
 
 

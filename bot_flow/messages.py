@@ -49,7 +49,7 @@ ORDER_STATUS_FA = {
 }
 
 MANAGER_STATUS_FA = {
-    'cart': 'در سبد',
+    'cart': 'انتخاب شده',
     'pending': 'در انتظار تأیید',
     'approved': 'تأیید شده',
     'rejected': 'رد شده',
@@ -65,8 +65,8 @@ EXEC_STATUS_FA = {
     'awaiting_manager_publish': 'در انتظار انتشار',
     'awaiting_customer_confirm': 'در انتظار تأیید مشتری',
     'awaiting_operator': 'در بررسی پشتیبانی',
-    'executed': 'اجرا شده',
-    'failed_publish': 'انتشار ناموفق',
+    'executed': 'منتشر شد',
+    'failed_publish': 'منتشر نشد',
     'cancelled': 'لغو شده',
 }
 
@@ -98,7 +98,7 @@ def user_error(code: Optional[str]) -> str:
         'not_found': 'مورد پیدا نشد.',
         'item_not_found': 'این نوبت پیدا نشد.',
         'order_not_found': 'این سفارش پیدا نشد.',
-        'forbidden': 'دسترسی مجاز نیست.',
+        'forbidden': 'این کار برای شما نیست.',
         'bad_status': 'این کار الان ممکن نیست.',
         'not_customer': 'این سفارش برای شما نیست.',
         'not_manager': 'شما کانال‌دار این کانال نیستید.',
@@ -107,12 +107,12 @@ def user_error(code: Optional[str]) -> str:
         'already_handled': 'به این نوبت قبلاً جواب داده شده.',
         'slot_conflict': 'این روز پر است. روز دیگری پیشنهاد کنید.',
         'need_new_start': 'تاریخ تازه را بفرستید.',
-        'invalid_action': 'این عمل شناخته نشد.',
+        'invalid_action': 'این دکمه را نمی‌شناسم.',
         'not_awaiting': 'زمانی برای تأیید باقی نمانده.',
         'not_operator': 'فقط پشتیبانی می‌تواند این کار را انجام دهد.',
         'bad_fields': 'نام، مدت و قیمت را درست بنویسید.',
         'bad_date': 'این تاریخ معتبر نیست.',
-        'bad_mode': 'حالت ارسال نامعتبر است.',
+        'bad_mode': 'این روش انتشار را نمی‌شناسم.',
         'need_date': 'تاریخ را انتخاب کنید.',
         'target_required': 'کانال یا مجموعه را انتخاب کنید.',
         'channel_not_found': 'کانال پیدا نشد.',
@@ -120,8 +120,8 @@ def user_error(code: Optional[str]) -> str:
         'invalid_iban': 'شماره شبا معتبر نیست.',
         'need_holder_name': 'نام صاحب حساب لازم است.',
         'inactive_tariff': 'این تعرفه خاموش است و روزش فروخته نمی‌شود.',
-        'empty_cart': 'سبد خالی است. اول یک روز خالی بردارید.',
-        'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، افزودن به سبد بسته است.',
+        'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
+        'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، نمی‌توانید روزی را انتخاب کنید.',
         'not_cancellable': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
         'too_late': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
         'not_pending': 'این سفارش دیگر در انتظار نیست.',
@@ -175,7 +175,7 @@ BTN_SWITCH_ROLE = '🔄 تغییر نقش'
 BTN_MY_BANNERS = '🖼 بنرهای من'
 BTN_NEW_BANNER = '➕ بنر جدید'
 BTN_TARIFF_LIST = '📋 فهرست تعرفه‌ها'
-BTN_CART = '🛒 سبد خرید'
+BTN_CART = '🛒 انتخاب‌ها'
 BTN_MY_ORDERS = '📦 سفارش‌های من'
 BTN_WALLET = '💰 کیف پول'
 BTN_ADD_BANNER = '➕ افزودن بنر'
@@ -211,7 +211,7 @@ BTN_BANNER_REQUESTS = '🆕 درخواست بنر'
 BTN_OPEN_ORDERS = '📋 سفارش‌های باز'
 BTN_ADMIN_CHECK = '🔎 بررسی ادمین کانال‌ها'
 BTN_MARK_PAID = '✅ پرداخت انجام شد'
-BTN_EXEC_OK = '✅ اجرا شده'
+BTN_EXEC_OK = '✅ منتشر شد'
 BTN_EXEC_NO = '❌ اجرا نشده'
 
 BTN_MODE_BOT = 'انتشار خودکار با بازوی لینک‌بان'
@@ -254,7 +254,7 @@ MSG_TARIFF_HELP = (
 MSG_TARIFF_SAVED = '✅ تعرفه ذخیره شد: {name} — ساعت {hour} | {duration} ساعت | {price}'
 MSG_TARIFF_DELETED = '🗑 تعرفه «{name}» حذف شد.'
 MSG_TARIFF_UPDATED = '✅ تعرفه «{name}» به‌روز شد.'
-MSG_TARIFF_INVALID = 'فرمت تعرفه درست نیست.\n\n{help}'
+MSG_TARIFF_INVALID = 'این خط شبیه تعرفه نیست.\n\n{help}'
 MSG_BUSY_MARKED = '🔒 روز {date} برای «{target}» پر ثبت شد.'
 MSG_BUSY_CLEARED = '✅ نوبت دستی روز {date} برای «{target}» برداشته شد.'
 MSG_NO_ORDERS = 'سفارشی برای نمایش نیست.'
@@ -264,7 +264,7 @@ MSG_CUSTOMER_HOME = (
     'بخش مشتری\n\n'
     'شناسه: {handle}\n'
     'بنر آماده: {banners}\n'
-    'در سبد: {cart}\n'
+    'روز انتخاب‌شده: {cart}\n'
     'سفارش باز: {open_orders}\n'
     'موجودی: {balance}\n\n'
     'یک گزینه را انتخاب کنید:'
@@ -304,7 +304,7 @@ MSG_BANNER_FEE_NOTE = 'هزینه بنر بعدی در کانال مرجع (اع
 MSG_CATALOG_HEADER = '📋 فهرست تعرفه‌ها — صفحه {page}'
 MSG_NO_FREE_DAYS = 'برای «{owner} — {tariff}» در این بازه نوبت خالی نیست.'
 MSG_PICK_DAY_HEADER = '📅 روزهای خالی\n{owner} — {tariff} — {price}'
-MSG_CART_ADDED = '➕ به سبد اضافه شد.\n\n{summary}'
+MSG_CART_ADDED = 'این روز انتخاب شد.\n\n{summary}'
 MSG_CHECKOUT_OK = 'سفارش {order_id} با {count} کانال ثبت شد و برای مدیران فرستاده شد.'
 MSG_ORDER_LINE = 'سفارش {id} | {status} | {count} کانال | {amount}'
 
@@ -357,7 +357,7 @@ MSG_PAYOUT_AFTER_BANK = 'پس از واریز بانک، دکمهٔ «پرداخ
 MSG_PAYOUT_MARKED = '✅ پرداخت این دسته ثبت شد و به مدیران اطلاع داده شد.'
 MSG_PAYOUT_PAID_USER = '✅ مبلغ {amount} به‌صورت پایا به حساب شما واریز شد.'
 MSG_WALLET_CREDITED = 'مبلغ {amount} بابت سفارش شماره {item_id} به کیف پول شما برگشت.'
-MSG_EXEC_DONE_CUSTOMER = '✅ تبلیغ شما اجرا شد.\n{link}'
+MSG_EXEC_DONE_CUSTOMER = '✅ تبلیغ شما منتشر شد.\n{link}'
 MSG_EXEC_DONE_MANAGER = 'سفارش {item_id} منتشر شد. مبلغ خالص، پس از کارمزد: {net}.'
 MSG_EXEC_FAILED_MANAGER = 'سفارش شماره {item_id} منتشر نشده ثبت شد. جریمه: {penalty}'
 MSG_OPERATOR_REVIEW = (
@@ -397,7 +397,7 @@ def format_manager_order_line(
     return (
         f'شماره {fa_num(item_id)} | سفارش {fa_num(order_id)} | {owner}\n'
         f'  وضعیت مدیر: {label_manager_status(manager_status)} | '
-        f'اجرا: {label_exec_status(exec_status)}\n'
+        f'انتشار: {label_exec_status(exec_status)}\n'
         f'  {date_fa} | {fa_money(price)}'
     )
 
