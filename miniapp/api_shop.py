@@ -76,6 +76,29 @@ def _parse_day(body) -> object | None:
         return None
 
 
+def _align_submitted_order(order: Order) -> None:
+    """مبلغ ذخیره‌شده را با قلم‌ها یکی می‌کند. بنر آماده از انتظار بنر خارج می‌شود."""
+    from orders.banner_publish import banner_stage
+
+    if order.status in ('draft', 'cancelled', 'rejected'):
+        return
+    total = sum(
+        int(price or 0)
+        for price in order.items.exclude(
+            manager_status__in=('rejected', 'expired', 'customer_declined')
+        ).values_list('price', flat=True)
+    )
+    if total and int(order.total_amount or 0) != total:
+        order.total_amount = total
+        order.save(update_fields=['total_amount'])
+    banner = order.customer_banner
+    if order.status == 'waiting_banner' and banner is not None and banner_stage(banner) == 'ready':
+        from orders.cart import release_orders_waiting_on_banner
+
+        release_orders_waiting_on_banner(banner)
+        order.refresh_from_db()
+
+
 def _order_deadline_hint(order: Order) -> str:
     """مهلت مرحلهٔ جاری، از همان managers_deadline، بدون ستون تازه."""
     if order.status not in ('waiting_payment', 'waiting_managers', 'waiting_customer_confirm'):
@@ -529,6 +552,7 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
         .select_related('customer_banner')
         .order_by('-id')[:40]
     ):
+        _align_submitted_order(o)
         can_pay = o.status == 'waiting_payment'
         can_cancel = o.status in (
             'waiting_banner',

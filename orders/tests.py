@@ -1741,6 +1741,77 @@ class CalendarHoldTests(TestCase):
         self.assertEqual(ready_cart.json()['why'], '')
 
 
+class SubmittedOrderTotalTests(TestCase):
+    def setUp(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.customer = User.objects.create_user(username='tot-c', password='pass', bale_user_id='tot-c')
+        self.manager = User.objects.create_user(username='tot-m', password='pass', bale_user_id='tot-m')
+        self.channel = Channel.objects.create(name='total', link='@total', manager=self.manager)
+        self.tariff = Tariff.objects.create(
+            channel=self.channel, name='۶ ساعته', duration_hours=6, price=700, start_hour=11
+        )
+
+    def _waiting_order(self, *, ready: bool) -> Order:
+        from orders.models import CustomerBanner
+
+        banner = CustomerBanner.objects.create(
+            customer=self.customer,
+            title='بنر آزمایش',
+            storage_chat_id='1',
+            storage_message_id='2',
+            from_linkbank=ready,
+            is_active=True,
+        )
+        start = timezone.now() + timedelta(days=3)
+        order = Order.objects.create(
+            customer=self.customer,
+            status='waiting_banner',
+            total_amount=0,
+            customer_banner=banner,
+            banner_from_chat_id='1',
+            banner_message_id='2',
+        )
+        OrderItem.objects.create(
+            order=order,
+            channel=self.channel,
+            tariff=self.tariff,
+            requested_start=start,
+            requested_end=start + timedelta(hours=6),
+            price=700,
+            manager=self.manager,
+            manager_status='pending',
+            duration_hours=6,
+        )
+        return order
+
+    @patch('orders.cart.bc.forward_message', return_value={'ok': True})
+    @patch('orders.cart.bc.send_message', return_value={'ok': True})
+    def test_ready_banner_order_reports_the_item_price(self, _send, _forward):
+        order = self._waiting_order(ready=True)
+        response = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'tot-c'})
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()['orders'][0]
+        self.assertEqual(row['total'], 700)
+        self.assertEqual(row['status'], 'waiting_managers')
+        order.refresh_from_db()
+        self.assertEqual(order.total_amount, 700)
+        self.assertEqual(order.status, 'waiting_managers')
+
+    def test_pending_banner_keeps_waiting_and_reports_the_item_price(self):
+        order = self._waiting_order(ready=False)
+        response = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'tot-c'})
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()['orders'][0]
+        self.assertEqual(row['total'], 700)
+        self.assertEqual(row['status'], 'waiting_banner')
+        order.refresh_from_db()
+        self.assertEqual(order.total_amount, 700)
+        self.assertEqual(order.status, 'waiting_banner')
+
+
 class MiniappErrorMessageTests(TestCase):
     """پیام JSON همان متنی است که مینی‌اپ نشان می‌دهد، نه کد انگلیسی."""
 
