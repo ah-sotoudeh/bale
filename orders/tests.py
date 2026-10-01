@@ -1046,6 +1046,8 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('C().toast.addedCart', days_model)
         self.assertIn('`past`', days_model)
         self.assertIn('`banner`', days_model)
+        self.assertIn('picked?`cart`:full?`busy`', days_model)
+        self.assertNotIn('full?`busy`:picked?`cart`', days_model)
         self.assertIn('C().day.past', script)
         self.assertIn('function lbHoldText(', script)
         self.assertIn('مهلت تمام', script)
