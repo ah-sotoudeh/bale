@@ -1644,6 +1644,24 @@ class CalendarHoldTests(TestCase):
         self.assertEqual(row['status'], 'past')
         self.assertIn(row['status'], ('free', 'full', 'past'))
 
+    def test_empty_start_hour_is_past_today(self):
+        from orders.availability import classify_day
+
+        today = timezone.localdate()
+        unset = Tariff.objects.create(
+            channel=self.channel, name='بدون ساعت', duration_hours=6, price=700, start_hour=None
+        )
+        self.assertEqual(classify_day(unset, today), 'past')
+        blocked = add_to_cart(self.customer, unset, today)
+        self.assertEqual(blocked.get('error'), 'past')
+        calendar = self.client.get(
+            '/miniapp/api/calendar',
+            {'tariff_id': unset.id, 'for': 'customer', 'debug_bale_id': 'hold-c'},
+        )
+        row = next(d for d in calendar.json()['days'] if d['date'] == today.isoformat())
+        self.assertEqual(row['status'], 'past')
+        self.assertFalse(row['free'])
+
     def test_paid_order_closes_when_every_slot_finishes(self):
         from orders.execution import settle_paid_order
         from orders.models import SlotReservation
