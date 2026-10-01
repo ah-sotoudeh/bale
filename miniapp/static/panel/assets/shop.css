@@ -414,6 +414,13 @@ a:focus-visible {
   color: var(--lb-on-primary);
 }
 
+.lb-chip.lb-mini {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 24px;
+}
+
 .lb-ava {
   width: 40px;
   height: 40px;
@@ -437,6 +444,10 @@ a:focus-visible {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.lb-price {
+  font-variant-numeric: tabular-nums;
 }
 
 .lb-toast {

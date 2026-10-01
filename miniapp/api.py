@@ -76,6 +76,7 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'err_percent': str(getattr(ch, 'err_percent', '') or ''),
         'language': getattr(ch, 'language', '') or '',
         'about': getattr(ch, 'about', '') or '',
+        'description': (getattr(ch, 'description', '') or '')[:500],
         'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
         'avatar_url': f'/miniapp/api/channels/{ch.id}/avatar',
         'history': history or [],

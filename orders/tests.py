@@ -855,6 +855,7 @@ class MiniappLiveActionTests(TestCase):
         self.assertEqual(listed.status_code, 200, listed.content)
         row = listed.json()['channels'][0]
         self.assertEqual(row['avatar_url'], f'/miniapp/api/channels/{self.channel.id}/avatar')
+        self.assertIn('description', row)
         from pathlib import Path
 
         root = Path('/tmp/lb-avatars')
@@ -991,7 +992,8 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('برآورد تعامل', script)
         self.assertIn('تعامل ثبت نشده', script)
         self.assertIn('unknown:`نامشخص`', script)
-        self.assertIn('n.growth!=null', script)
+        self.assertIn('عضو · بازدید ${Y(g.views)}', script)
+        self.assertNotIn('n.growth!=null', script)
         self.assertIn('errPack.known', script)
         self.assertIn('lb-pill', script)
         self.assertIn('{id:`customer`,label:C().role.customer},{id:`manager`,label:C().role.managerShort}', script)
@@ -1025,6 +1027,11 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('isOperator:op', script)
         self.assertIn('پیوند کانال را بنویسید', script)
         self.assertIn('lb-ava', script)
+        self.assertIn('lb-price', script)
+        self.assertIn('function lbCartLine(', script)
+        self.assertIn('ch.about||``} ${ch.description||``} ${ch.link||``}', script)
+        self.assertNotIn('[`err`,`تعامل`]', script)
+        self.assertNotIn('از ${X(t.price)}', script)
         self.assertIn('نشان‌شده‌ها', script)
         self.assertIn('toggleFavorite(cid,t.id)', script)
         self.assertIn('setLbTar', script)
@@ -1056,6 +1063,120 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('شرایط و قوانین', b''.join(shell.streaming_content).decode('utf-8'))
         shop = self.client.get('/miniapp/assets/shop.css')
         self.assertIn('button.lb-pill', b''.join(shop.streaming_content).decode('utf-8'))
+
+    def _extra_channel(self, name, **kwargs):
+        link = kwargs.pop('link', '@' + name)
+        channel = Channel.objects.create(name=name, link=link, manager=self.manager, **kwargs)
+        Tariff.objects.create(
+            channel=channel, name='day', duration_hours=24, price=1500, start_hour=11
+        )
+        return channel
+
+    def test_catalog_search_matches_about_and_description(self):
+        self.channel.about = 'زعفران کوهی'
+        self.channel.description = ''
+        self.channel.save(update_fields=['about', 'description'])
+        other = self._extra_channel(name='بی‌ربط', about='چای', description='معمولی')
+        about_hit = self.client.get(
+            '/miniapp/api/catalog', {'debug_bale_id': 'c-live', 'q': 'زعفران'}
+        )
+        self.assertEqual(about_hit.status_code, 200, about_hit.content)
+        self.assertEqual([row['name'] for row in about_hit.json()['channels']], ['live'])
+        self.channel.about = ''
+        self.channel.description = 'توضیح مخصوص کاتالوگ'
+        self.channel.save(update_fields=['about', 'description'])
+        desc_hit = self.client.get(
+            '/miniapp/api/catalog', {'debug_bale_id': 'c-live', 'q': 'مخصوص'}
+        )
+        names = [row['name'] for row in desc_hit.json()['channels']]
+        self.assertEqual(names, ['live'])
+        self.assertNotIn(other.name, names)
+        name_hit = self.client.get(
+            '/miniapp/api/catalog', {'debug_bale_id': 'c-live', 'q': 'بی‌ربط'}
+        )
+        self.assertEqual([row['name'] for row in name_hit.json()['channels']], [other.name])
+
+    def test_catalog_language_chip_counts(self):
+        self.channel.language = 'fa'
+        self.channel.save(update_fields=['language'])
+        self._extra_channel(name='en-one', language='en')
+        self._extra_channel(name='fa-two', language='fa')
+        self._extra_channel(name='blank-lang', language='')
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        self.assertEqual(
+            listed.json()['languages'],
+            [{'language': 'fa', 'count': 2}, {'language': 'en', 'count': 1}],
+        )
+
+    def test_catalog_payload_includes_citation_index(self):
+        from decimal import Decimal
+
+        self.channel.citation_index = Decimal('4.250')
+        self.channel.daily_reach = 3200
+        self.channel.save(update_fields=['citation_index', 'daily_reach'])
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        row = listed.json()['channels'][0]
+        self.assertIn('citation_index', row)
+        self.assertAlmostEqual(row['citation_index'], 4.25)
+        self.assertEqual(row['daily_reach'], 3200)
+
+    def test_catalog_ready_to_publish_filter(self):
+        self.channel.publish_mode = 'bot'
+        self.channel.bot_is_admin = True
+        self.channel.linkyar_is_admin = False
+        self.channel.save(update_fields=['publish_mode', 'bot_is_admin', 'linkyar_is_admin'])
+        self._extra_channel(
+            name='linkyar-ready',
+            publish_mode='linkyar',
+            linkyar_is_admin=True,
+            bot_is_admin=False,
+        )
+        self._extra_channel(
+            name='bot-off',
+            publish_mode='bot',
+            bot_is_admin=False,
+            linkyar_is_admin=True,
+        )
+        self._extra_channel(
+            name='manual-ch',
+            publish_mode='manual',
+            bot_is_admin=True,
+            linkyar_is_admin=True,
+        )
+        listed = self.client.get(
+            '/miniapp/api/catalog', {'debug_bale_id': 'c-live', 'ready': '1'}
+        )
+        body = listed.json()
+        names = sorted(row['name'] for row in body['channels'])
+        self.assertEqual(names, ['linkyar-ready', 'live'])
+        self.assertTrue(all(row['ready_publish'] for row in body['channels']))
+        self.assertTrue(all(row['ready_publish'] is True for row in body['channels']))
+
+    def test_week_growth_hidden_without_weekly_history(self):
+        from channels_app.models import ChannelStatSnapshot
+
+        bare = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        self.assertIsNone(bare.json()['channels'][0]['week_growth'])
+        now = timezone.now()
+        ChannelStatSnapshot.objects.create(
+            channel=self.channel,
+            taken_at=now - timedelta(hours=5),
+            members=100,
+            avg_views=10,
+        )
+        ChannelStatSnapshot.objects.create(
+            channel=self.channel, taken_at=now, members=180, avg_views=12
+        )
+        close = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        self.assertIsNone(close.json()['channels'][0]['week_growth'])
+        ChannelStatSnapshot.objects.create(
+            channel=self.channel,
+            taken_at=now - timedelta(days=7),
+            members=100,
+            avg_views=8,
+        )
+        spanned = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'c-live'})
+        self.assertEqual(spanned.json()['channels'][0]['week_growth'], 80.0)
 
 
 class CustomerBannerFlowTests(TestCase):

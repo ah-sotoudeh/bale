@@ -1,7 +1,10 @@
 """Extra mini-app endpoints (catalog, order actions, operator payouts)."""
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.http import HttpRequest, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -12,12 +15,88 @@ from wallet import services as ws
 from wallet.models import PayoutRequest
 
 
+def _ready_publish(ch) -> bool:
+    """Bot or linkyar mode, and the admin flag that matches that mode."""
+    if ch.publish_mode == 'bot':
+        return bool(ch.bot_is_admin)
+    if ch.publish_mode == 'linkyar':
+        return bool(ch.linkyar_is_admin)
+    return False
+
+
+def _weekly_member_changes(channel_ids):
+    """Member change versus a snapshot about seven days earlier.
+
+    None when that history does not exist, so the catalog can hide the line.
+    """
+    from channels_app.models import ChannelStatSnapshot
+
+    out = {cid: None for cid in channel_ids}
+    if not channel_ids:
+        return out
+    now = timezone.now()
+    rows = (
+        ChannelStatSnapshot.objects.filter(
+            channel_id__in=list(channel_ids),
+            taken_at__gte=now - timedelta(days=21),
+        )
+        .order_by('taken_at')
+        .values_list('channel_id', 'taken_at', 'members')
+    )
+    buckets: dict = {}
+    for cid, taken, members in rows:
+        buckets.setdefault(cid, []).append((taken, int(members or 0)))
+    week = timedelta(days=7)
+    min_span = timedelta(days=6)
+    max_span = timedelta(days=10)
+    for cid, points in buckets.items():
+        if len(points) < 2:
+            continue
+        latest_at, latest_members = points[-1]
+        best = None
+        best_dist = None
+        for taken, members in points[:-1]:
+            delta = latest_at - taken
+            if delta < min_span or delta > max_span or members <= 0:
+                continue
+            dist = abs((delta - week).total_seconds())
+            if best_dist is None or dist < best_dist:
+                best = members
+                best_dist = dist
+        if best is None:
+            continue
+        out[cid] = round((latest_members - best) / best * 100, 1)
+    return out
+
+
 @csrf_exempt
 @require_http_methods(['GET'])
 def api_catalog(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
         return err
+    needle = (request.GET.get('q') or '').strip().casefold()
+    ready_only = (request.GET.get('ready') or '').strip() in ('1', 'true', 'yes')
+
+    def _text_match(ch) -> bool:
+        if not needle:
+            return True
+        hay = f'{ch.name or ""}\n{ch.about or ""}\n{ch.description or ""}'.casefold()
+        return needle in hay
+
+    def _tariff_ok(t) -> bool:
+        if t.channel_id:
+            chans = [t.channel]
+        elif t.group_id:
+            chans = list(t.group.channels.all())
+        else:
+            chans = []
+        if needle and not any(_text_match(ch) for ch in chans):
+            return False
+        if ready_only and (not chans or any(not _ready_publish(ch) for ch in chans)):
+            return False
+        return True
+
     qs = list(
         Tariff.objects.filter(is_active=True)
         .select_related('channel', 'group')
@@ -45,11 +124,15 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'err_percent': str(ch.err_percent or ''),
             'language': ch.language or '',
             'about': ch.about or '',
+            'description': (ch.description or '')[:500],
+            'citation_index': float(ch.citation_index or 0),
+            'ready_publish': _ready_publish(ch),
             'stats_updated_at': ch.stats_updated_at.isoformat() if ch.stats_updated_at else '',
             'avatar_url': f'/miniapp/api/channels/{ch.id}/avatar',
         }
 
-    for t in qs:
+    visible = [t for t in qs if _tariff_ok(t)]
+    for t in visible:
         if t.channel_id and t.channel_id not in channels:
             channels[t.channel_id] = _public_channel(t.channel)
         if t.group_id and t.group_id not in groups:
@@ -86,7 +169,7 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     )
     busy = []
     seq = 0
-    for t in qs:
+    for t in visible:
         for day, status in day_status_map(t, 14):
             if status != 'full':
                 continue
@@ -108,14 +191,26 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     from integrations.channel_stats import recent_snapshots
 
     history = recent_snapshots(list(channels.keys()))
+    growth = _weekly_member_changes(list(channels.keys()))
     for cid, payload in channels.items():
         payload['history'] = history.get(cid) or []
+        payload['week_growth'] = growth.get(cid)
+    languages: dict = {}
+    for payload in channels.values():
+        lang = (payload.get('language') or '').strip()
+        if lang:
+            languages[lang] = languages.get(lang, 0) + 1
+    language_rows = [
+        {'language': lang, 'count': count}
+        for lang, count in sorted(languages.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
     return JsonResponse({
         'ok': True,
         'tariffs': items,
         'busy': busy,
         'channels': list(channels.values()),
         'groups': list(groups.values()),
+        'languages': language_rows,
     })
 
 
