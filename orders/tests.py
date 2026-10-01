@@ -1687,7 +1687,7 @@ class CalendarHoldTests(TestCase):
         long_dates = [row['date'] for row in busy if row['tariff_id'] == self.tariff.id]
         short_dates = [row['date'] for row in busy if row['tariff_id'] == short.id]
         self.assertIn(self.day.isoformat(), long_dates)
-        self.assertIn(next_day.isoformat(), short_dates)
+        self.assertNotIn(next_day.isoformat(), short_dates)
 
     def test_own_cart_overlap_is_busy_on_the_other_tariffs(self):
         from datetime import date
@@ -1719,7 +1719,7 @@ class CalendarHoldTests(TestCase):
         self.assertIn(next_day.isoformat(), dates_for(at_eleven.id))
         self.assertIn(day.isoformat(), dates_for(half_day.id))
         self.assertNotIn(next_day.isoformat(), dates_for(half_day.id))
-        self.assertIn(day.isoformat(), dates_for(at_noon.id))
+        self.assertNotIn(day.isoformat(), dates_for(at_noon.id))
         self.assertNotIn(next_day.isoformat(), dates_for(at_noon.id))
         self.assertNotIn(day.isoformat(), dates_for(morning.id))
         self.assertIn(next_day.isoformat(), dates_for(morning.id))
