@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from django.http import HttpRequest, JsonResponse
+from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -302,9 +302,12 @@ def api_banners(request: HttpRequest) -> JsonResponse:
     assert user is not None
     from orders.banner_publish import banner_stage
 
+    from orders.banner_media import public_media_url
+
     rows = []
     for b in CustomerBanner.objects.filter(customer=user, is_active=True)[:40]:
         stage = banner_stage(b)
+        media_url = public_media_url(b)
         rows.append({
             'id': b.id,
             'title': b.display_title(),
@@ -312,8 +315,25 @@ def api_banners(request: HttpRequest) -> JsonResponse:
             'from_linkbank': stage == 'ready',
             'stage': stage,
             'media_kind': b.media_kind,
+            'media_url': media_url,
+            'poster_url': '' if b.media_kind in ('video', 'animation') else media_url,
         })
     return JsonResponse({'ok': True, 'banners': rows})
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_banner_media(request: HttpRequest, banner_id: int) -> HttpResponse:
+    """فایل بنر برای تگ img. احراز هویت در هدر تصویر نمی‌آید."""
+    from orders.banner_media import file_for_request
+
+    found = file_for_request(banner_id)
+    if not found:
+        return HttpResponse(status=404)
+    path, content_type = found
+    resp = FileResponse(path.open('rb'), content_type=content_type)
+    resp['Cache-Control'] = 'private, max-age=86400'
+    return resp
 
 
 @csrf_exempt

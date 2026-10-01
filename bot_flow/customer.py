@@ -375,6 +375,12 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         media_kind=_media_kind(message),
         title=(caption or '').strip().split('\n')[0][:120],
     )
+    try:
+        from orders.banner_media import save_banner_from_message
+
+        save_banner_from_message(banner.id, message)
+    except Exception:
+        logger.exception('banner file')
     d = dict(sess.data or {})
     d['pending_banner'] = {'banner_id': banner.id}
     sess.data = d

@@ -1933,3 +1933,156 @@ class MiniappErrorMessageTests(TestCase):
             body['message'],
             'درخواست تسویه را در گفتگو با لینک‌بان بسازید. اینجا فقط بعد از واریز بانک تأیید می‌شود.',
         )
+
+
+class BannerMediaTests(TestCase):
+    def setUp(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        self.user = User.objects.create_user(
+            username='media-buyer', password='pass', bale_user_id='media-1'
+        )
+        self.client = APIClient()
+
+    def _banner(self, **kwargs):
+        from orders.models import CustomerBanner
+
+        defaults = dict(
+            customer=self.user,
+            title='کفش',
+            caption='تبلیغ کفش زمستانی برای تست تصویر',
+            storage_chat_id='900',
+            storage_message_id='77',
+            media_kind='photo',
+            from_linkbank=True,
+            is_active=True,
+        )
+        defaults.update(kwargs)
+        return CustomerBanner.objects.create(**defaults)
+
+    def _cleanup(self, banner_id):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        root = Path(settings.BASE_DIR) / 'media' / 'banners'
+        if not root.is_dir():
+            return
+        for path in root.glob(f'{banner_id}.*'):
+            path.unlink(missing_ok=True)
+
+    def _sample(self) -> bytes:
+        from pathlib import Path
+
+        from django.conf import settings
+
+        return (Path(settings.BASE_DIR) / 'miniapp/static/media/banners/coat.jpg').read_bytes()
+
+    def test_api_has_no_url_when_the_file_is_missing(self):
+        banner = self._banner()
+        self.addCleanup(self._cleanup, banner.id)
+        response = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        self.assertEqual(response.status_code, 200)
+        row = response.json()['banners'][0]
+        self.assertEqual(row['media_url'], '')
+        self.assertEqual(row['poster_url'], '')
+        missing = self.client.get(f'/miniapp/api/banners/{banner.id}/media')
+        self.assertEqual(missing.status_code, 404)
+
+    def test_api_returns_the_file_when_it_is_on_disk(self):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        banner = self._banner()
+        self.addCleanup(self._cleanup, banner.id)
+        data = self._sample()
+        dest = Path(settings.BASE_DIR) / 'media' / 'banners' / f'{banner.id}.jpg'
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        response = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        row = response.json()['banners'][0]
+        self.assertEqual(row['media_url'], f'/miniapp/api/banners/{banner.id}/media')
+        self.assertEqual(row['poster_url'], row['media_url'])
+        body = self.client.get(row['media_url'])
+        self.assertEqual(body.status_code, 200)
+        self.assertTrue(body['Content-Type'].startswith('image/'))
+        payload = b''.join(body.streaming_content)
+        self.assertEqual(payload[:3], data[:3])
+
+    def test_text_banner_does_not_invent_a_url(self):
+        banner = self._banner(media_kind='text')
+        self.addCleanup(self._cleanup, banner.id)
+        with patch('integrations.bale_client._token', return_value='tok'), patch(
+            'integrations.bale_client.forward_message'
+        ) as forward:
+            response = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        self.assertEqual(response.json()['banners'][0]['media_url'], '')
+        forward.assert_not_called()
+
+    @patch('integrations.bale_client._token', return_value='tok')
+    @patch('integrations.bale_client.delete_message', return_value={'ok': True})
+    @patch('integrations.bale_client.download_file_bytes')
+    @patch(
+        'integrations.bale_client.get_file',
+        return_value={'ok': True, 'result': {'file_path': 'photos/a.jpg'}},
+    )
+    @patch('integrations.bale_client.forward_message')
+    def test_a_stored_message_is_saved_once_and_the_copy_is_removed(
+        self, forward, _get_file, download, delete, _token
+    ):
+        download.return_value = self._sample()
+        forward.return_value = {
+            'ok': True,
+            'result': {'message_id': 501, 'photo': [{'file_id': 'ph-big'}]},
+        }
+        banner = self._banner()
+        self.addCleanup(self._cleanup, banner.id)
+        response = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        self.assertEqual(
+            response.json()['banners'][0]['media_url'],
+            f'/miniapp/api/banners/{banner.id}/media',
+        )
+        forward.assert_called_once_with('900', '900', 77)
+        delete.assert_called_once_with('900', 501)
+        again = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        self.assertEqual(again.json()['banners'][0]['media_url'], response.json()['banners'][0]['media_url'])
+        forward.assert_called_once()
+
+    @patch('integrations.bale_client.answer_callback_query', return_value={'ok': True})
+    @patch('integrations.bale_client.forward_message', return_value={'ok': True})
+    @patch('integrations.bale_client.send_message', return_value={'ok': True})
+    @patch('integrations.bale_client._token', return_value='tok')
+    @patch('integrations.bale_client.download_file_bytes')
+    @patch(
+        'integrations.bale_client.get_file',
+        return_value={'ok': True, 'result': {'file_path': 'photos/a.jpg'}},
+    )
+    def test_incoming_photo_is_kept_for_the_detail_frame(
+        self, _get_file, download, _token, _send, _forward, _answer
+    ):
+        from bot_flow.customer import handle_customer_callback
+        from bot_flow.dispatch import handle_update
+        from orders.models import CustomerBanner
+
+        download.return_value = self._sample()
+        handle_customer_callback('900', 'media-1', 'cu:new', cq_id='c-media')
+        handle_update({
+            'update_id': 90,
+            'message': {
+                'message_id': 50,
+                'chat': {'id': 900},
+                'from': {'id': 'media-1'},
+                'photo': [{'file_id': 'ph'}],
+                'caption': 'خرید دمپایی تابستانی از این فروشگاه',
+            },
+        })
+        banner = CustomerBanner.objects.get(customer=self.user)
+        self.addCleanup(self._cleanup, banner.id)
+        response = self.client.get('/miniapp/api/banners', {'debug_bale_id': 'media-1'})
+        self.assertEqual(
+            response.json()['banners'][0]['media_url'],
+            f'/miniapp/api/banners/{banner.id}/media',
+        )
