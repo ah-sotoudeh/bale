@@ -713,6 +713,36 @@ main.overflow-y-auto {
   }
 }
 
+/* «ابتدا شبا ثبت کنید» کنار فیلد شبا باشد، نه بالای عنوان کارت. */
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) {
+  display: flex;
+  flex-direction: column;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > * {
+  flex-shrink: 0;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > p.mb-2.px-1.text-xs.text-muted + h2 {
+  order: 1;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > p.mb-2.px-1.text-xs.text-muted {
+  order: 2;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden {
+  order: 3;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > div.mb-3.overflow-hidden.rounded-2xl.bg-surface + h2 {
+  order: 4;
+}
+
+main.overflow-y-auto:has(> p.mb-2.px-1.text-xs.text-muted + h2 + div.mb-3.overflow-hidden) > .empty-note {
+  order: 5;
+}
+
 .stage-title {
   position: sticky;
   top: 0;
