@@ -2139,3 +2139,64 @@ class BannerMediaTests(TestCase):
             response.json()['banners'][0]['media_url'],
             f'/miniapp/api/banners/{banner.id}/media',
         )
+
+
+class PartialRefundThenExecutionTests(TestCase):
+    """بازگشت بخشی نباید سهم کامل مدیر را از جیب پلتفرم بدهد."""
+
+    def setUp(self):
+        self.customer = User.objects.create_user(username='pr_c', password='p', bale_user_id='pr1')
+        self.manager = User.objects.create_user(username='pr_m', password='p', bale_user_id='pr2')
+        self.ch = Channel.objects.create(name='prch', link='@prch', manager=self.manager)
+        self.t = Tariff.objects.create(
+            channel=self.ch, name='noon', duration_hours=24, price=1000, start_hour=12
+        )
+        self.order = Order.objects.create(customer=self.customer, status='paid', total_amount=1000)
+        start = timezone.now() + timedelta(days=3)
+        self.item = OrderItem.objects.create(
+            order=self.order, channel=self.ch, tariff=self.t,
+            requested_start=start, requested_end=start + timedelta(hours=24),
+            price=1000, manager=self.manager, manager_status='approved',
+            execution_status='paid', duration_hours=24,
+        )
+
+    def _earned(self):
+        from wallet.models import WalletLedger
+
+        return sum(
+            WalletLedger.objects.filter(user=self.manager, entry_type='earn').values_list('amount', flat=True)
+        )
+
+    @patch('orders.cart.bc.send_message')
+    def test_manager_earns_only_on_what_the_customer_still_paid(self, _send):
+        from orders.cart import refund_paid_order
+
+        res = refund_paid_order(self.order, 400, reason='x')
+        self.assertTrue(res['ok'])
+        self.assertFalse(res['full'])
+        credit_manager_for_execution(self.manager, self.item.price, self.item.id)
+        # مشتری ۶۰۰ از ۱۰۰۰ را نگه داشته؛ سهم مدیر ۸۶٪ از ۶۰۰ است.
+        self.assertEqual(self._earned(), 516)
+
+    def test_full_price_still_pays_the_usual_share(self):
+        credit_manager_for_execution(self.manager, self.item.price, self.item.id)
+        self.assertEqual(self._earned(), 860)
+
+
+class IbanChecksumTests(TestCase):
+    VALID = 'IR110170000000123456789001'
+
+    def test_valid_iban_passes(self):
+        from wallet.services import validate_iban
+
+        self.assertTrue(validate_iban(self.VALID))
+        self.assertTrue(validate_iban(self.VALID.lower()))
+        self.assertTrue(validate_iban(' '.join([self.VALID[i:i + 4] for i in range(0, 26, 4)])))
+
+    def test_one_wrong_digit_fails(self):
+        from wallet.services import validate_iban
+
+        wrong = self.VALID[:-1] + str((int(self.VALID[-1]) + 1) % 10)
+        self.assertFalse(validate_iban(wrong))
+        self.assertFalse(validate_iban('IR00'))
+        self.assertFalse(validate_iban(''))

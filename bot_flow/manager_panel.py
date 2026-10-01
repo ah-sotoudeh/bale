@@ -386,7 +386,7 @@ def start_bank_add(chat_id: str, user: User) -> None:
     _save(sess, STATE_MGR_BANK_IBAN)
     bc.send_message(
         str(chat_id),
-        'شماره شبا را بفرستید.\nبا IR و ۲۴ رقم، مثل IR120170000000123456789001',
+        'شماره شبا را بفرستید.\nبا IR و ۲۴ رقم، مثل IR110170000000123456789001',
     )
 
 

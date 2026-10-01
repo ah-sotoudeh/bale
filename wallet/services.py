@@ -156,8 +156,24 @@ def credit(
         raise
 
 
-def credit_manager_for_execution(manager: User, price_toman: int, order_item_id: int) -> WalletLedger:
-    net = net_manager_earn(price_toman)
+def refunded_toman_for_item(order_item_id: int) -> int:
+    """جمع آنچه از این آیتم به مشتری برگشته (کامل یا بخشی)."""
+    return int(
+        WalletLedger.objects.filter(ref=f'item:{order_item_id}', entry_type='refund').aggregate(
+            s=Sum('amount')
+        )['s']
+        or 0
+    )
+
+
+def credit_manager_for_execution(
+    manager: User, price_toman: int, order_item_id: int
+) -> Optional[WalletLedger]:
+    """سهم مدیر از آنچه مشتری واقعاً نگه داشته؛ بازگشت بخشی از پایه کم می‌شود."""
+    base = max(0, int(price_toman) - refunded_toman_for_item(order_item_id))
+    net = net_manager_earn(base)
+    if net <= 0:
+        return None
     return credit(
         manager,
         net,
@@ -196,7 +212,12 @@ def apply_manager_penalty(manager: User, price_toman: int, order_item_id: int) -
 
 
 def validate_iban(iban: str) -> bool:
-    return bool(IBAN_RE.match((iban or '').replace(' ', '').upper()))
+    """شکل IR + ۲۴ رقم و رقم کنترل ۹۷ (ISO 13616)؛ اشتباه تایپی نباید پول را به حساب غلط بفرستد."""
+    value = (iban or '').replace(' ', '').upper()
+    if not IBAN_RE.match(value):
+        return False
+    rearranged = value[4:] + value[:4]
+    return int(''.join(str(int(ch, 36)) for ch in rearranged)) % 97 == 1
 
 
 def save_bank_account(
