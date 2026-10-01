@@ -260,9 +260,9 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     parts: List[str] = []
     if notes:
-        parts.append('✅ تأییدشده:\n' + '\n'.join(f'• {n}' for n in notes))
+        parts.append('این کانال‌ها وصل شد:\n' + '\n'.join(f'• {n}' for n in notes))
     if fail:
-        parts.append('⚠️ اصلاح:\n' + '\n'.join(fail))
+        parts.append('این‌ها را درست کنید:\n' + '\n'.join(fail))
 
     if not ok:
         parts.append('نام کاربری‌تان را در بخش «درباره» کانال بنویسید و پیوند را دوباره بفرستید.')

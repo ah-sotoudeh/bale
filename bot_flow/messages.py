@@ -210,7 +210,7 @@ BTN_PUBLISHED = '✅ منتشر شد'
 BTN_PAYOUT_FILE = '📁 فایل تسویه'
 BTN_BANNER_REQUESTS = '🆕 درخواست بنر'
 BTN_OPEN_ORDERS = '📋 سفارش‌های باز'
-BTN_ADMIN_CHECK = '🔎 بررسی ادمین کانال‌ها'
+BTN_ADMIN_CHECK = '🔎 بررسی کانال‌ها'
 BTN_MARK_PAID = '✅ پرداخت انجام شد'
 BTN_EXEC_OK = '✅ منتشر شد'
 BTN_EXEC_NO = '❌ اجرا نشده'
@@ -296,9 +296,9 @@ MSG_BANNER_NOT_FROM_REF = (
 )
 MSG_BANNER_REVIEW_SENT = (
     '📨 درخواست بررسی بنر ثبت شد.\n'
-    'هزینه اعلامی انتشار در کانال مرجع: {fee}'
+    'هزینهٔ اعلام‌شده برای انتشار در کانال بنرها: {fee}'
 )
-MSG_BANNER_FEE_NOTE = 'هزینه بنر بعدی در کانال مرجع (اعلامی): {fee}'
+MSG_BANNER_FEE_NOTE = 'هزینهٔ بنر بعدی در کانال بنرها: {fee}'
 
 MSG_CATALOG_HEADER = '📋 فهرست تعرفه‌ها — صفحه {page}'
 MSG_NO_FREE_DAYS = 'برای «{owner} — {tariff}» در این بازه نوبت خالی نیست.'
@@ -323,7 +323,7 @@ MSG_PUBLISH_MODE_CURRENT = 'روش فعلی: {label}'
 MSG_PUBLISH_MODE_HELP = (
     'چطور می‌خواهید تبلیغ در این کانال منتشر شود؟ یکی را انتخاب کنید.\n\n'
     '۱) انتشار خودکار با بازوی لینک‌بان (پیشنهادی)\n'
-    'بازوی لینک‌بان را مدیر کانال کنید. سر وقت، بنر خودش منتشر می‌شود و در پایان مدت حذف می‌شود.\n\n'
+    'بازوی لینک‌بان را مدیر این کانال کنید. سر وقت، بنر خودش منتشر می‌شود و در پایان مدت حذف می‌شود.\n\n'
     '۲) انتشار خودکار با حساب دستیار\n'
     'اگر جای مدیر بازو پر است، حساب دستیار لینک‌بان را مدیر کنید. این حساب بازو نیست.\n\n'
     '۳) انتشار دستی توسط شما\n'
@@ -351,12 +351,12 @@ MSG_REMIND_PUBLISH = (
 
 MSG_PAYOUT_BATCH_HEADER = '📁 فایل تسویه شماره {id} — {count} درخواست\nمبالغ به ریال:'
 MSG_PAYOUT_AFTER_BANK = 'پس از واریز بانک، دکمهٔ «پرداخت انجام شد» را بزنید.'
-MSG_PAYOUT_MARKED = '✅ پرداخت این دسته ثبت شد و به مدیران اطلاع داده شد.'
+MSG_PAYOUT_MARKED = '✅ پرداخت این دسته ثبت شد و به کانال‌دارها خبر داده شد.'
 MSG_PAYOUT_PAID_USER = '✅ مبلغ {amount} به‌صورت پایا به حساب شما واریز شد.'
 MSG_WALLET_CREDITED = 'مبلغ {amount} بابت سفارش شماره {item_id} به اعتبار شما برگشت.'
 MSG_EXEC_DONE_CUSTOMER = '✅ تبلیغ شما منتشر شد.\n{link}'
 MSG_EXEC_DONE_MANAGER = 'سفارش {item_id} منتشر شد. مبلغ خالص، پس از کارمزد: {net}.'
-MSG_EXEC_FAILED_MANAGER = 'سفارش شماره {item_id} منتشر نشده ثبت شد. جریمه: {penalty}'
+MSG_EXEC_FAILED_MANAGER = 'سفارش شماره {item_id} منتشر نشد. جریمه این نوبت: {penalty}'
 MSG_OPERATOR_REVIEW = (
     '🔎 بررسی انتشار\n'
     'نوبت {item_id} از سفارش {order_id}\n'
@@ -393,7 +393,7 @@ def format_manager_order_line(
 ) -> str:
     return (
         f'شماره {fa_num(item_id)} | سفارش {fa_num(order_id)} | {owner}\n'
-        f'  وضعیت مدیر: {label_manager_status(manager_status)} | '
+        f'  پاسخ شما: {label_manager_status(manager_status)} | '
         f'انتشار: {label_exec_status(exec_status)}\n'
         f'  {date_fa} | {fa_money(price)}'
     )

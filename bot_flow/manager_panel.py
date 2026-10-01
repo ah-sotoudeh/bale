@@ -114,7 +114,7 @@ def show_channels(chat_id: str, user: User) -> None:
         mode = label_publish_mode(ch.publish_mode)
         lines.append(
             f'• {ch.name} ({ch.link or "—"})\n'
-            f'  حالت: {mode} | تعرفه: {fa_num(ch.tariffs.count())}'
+            f'  انتشار: {mode} | تعرفه: {fa_num(ch.tariffs.count())}'
         )
     if groups:
         lines.append('\n📦 مجموعه‌ها:')
@@ -175,8 +175,8 @@ def show_tariff_detail(chat_id: str, user: User, tariff_id: int) -> None:
     owner = tar.group.name if tar.group_id else (tar.channel.name if tar.channel_id else '?')
     hour = f'{tar.start_hour:02d}:00' if tar.start_hour is not None else '—'
     lines = [
-        f'💳 تعرفه #{fa_num(tar.id)}',
-        f'هدف: {owner}',
+        f'💳 تعرفه شماره {fa_num(tar.id)}',
+        f'برای: {owner}',
         f'نام: {tar.name}',
         f'ساعت ارسال: {fa_num(hour)}',
         f'مدت: {fa_num(tar.duration_hours)} ساعت',
@@ -192,7 +192,7 @@ def show_tariff_detail(chat_id: str, user: User, tariff_id: int) -> None:
             },
             {'text': '🗑 حذف', 'callback_data': f'mgr:tdel:{tar.id}'},
         ],
-        [{'text': '⬅️ لیست تعرفه‌ها', 'callback_data': 'mgr:tariffs'}],
+        [{'text': '⬅️ فهرست تعرفه‌ها', 'callback_data': 'mgr:tariffs'}],
     ]
     bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=bc.inline_keyboard(rows))
 
@@ -255,7 +255,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         tar.start_hour = start_hour
         tar.duration_hours = int(dur)
         if int(price) > 1_000_000_000 or int(dur) > 720:
-            bc.send_message(str(chat_id), 'قیمت یا مدت خارج از حد مجاز است. قیمت را به تومان و بدون شمارهٔ اضافه بنویسید.')
+            bc.send_message(str(chat_id), 'قیمت را به تومان بنویسید و مدت را تا ۷۲۰ ساعت.')
             return True
         tar.price = int(price)
         tar.save()
@@ -271,7 +271,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         return True
 
     if int(price) > 1_000_000_000 or int(dur) <= 0 or int(dur) > 720:
-        bc.send_message(str(chat_id), 'قیمت یا مدت خارج از حد مجاز است. قیمت را به تومان و بدون شمارهٔ اضافه بنویسید.')
+        bc.send_message(str(chat_id), 'قیمت را به تومان بنویسید و مدت را تا ۷۲۰ ساعت.')
         return True
 
     if not ch:
@@ -291,7 +291,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
     hour_s = f'{t.start_hour:02d}:00' if t.start_hour is not None else '—'
     bc.send_message(
         str(chat_id),
-        f'✅ تعرفه #{fa_num(t.id)}: {t.name}\n'
+        f'✅ تعرفه شماره {fa_num(t.id)}: {t.name}\n'
         f'ارسال {fa_num(hour_s)} | {fa_num(t.duration_hours)} ساعت | {fa_money(t.price)}',
         reply_markup=main_keyboard(),
     )
@@ -411,7 +411,9 @@ def handle_bank_holder(chat_id: str, user: User, text: str) -> bool:
     try:
         acc = ws.save_bank_account(user, iban, holder, make_default=True)
     except ValueError as e:
-        bc.send_message(str(chat_id), f'خطا: {e}')
+        from bot_flow.messages import user_error
+
+        bc.send_message(str(chat_id), user_error(str(e)))
         return True
     _save(sess, 'idle')
     bc.send_message(
@@ -427,9 +429,9 @@ def start_payout(chat_id: str, user: User) -> None:
     if not ok:
         msg = {
             'already_pending': 'یک درخواست تسویه باز دارید.',
-            'weekly_limit': 'سقف هفتگی: حداقل ۷ روز از تسویه قبلی.',
-            'below_minimum': f'موجودی کمتر از حداقل ({fa_money(ws.MIN_PAYOUT_TOMAN)}).',
-            'no_bank': 'ابتدا شبا ثبت کنید.',
+            'weekly_limit': 'از تسویهٔ قبلی هنوز یک هفته نگذشته.',
+            'below_minimum': f'موجودی از حداقل تسویه کمتر است ({fa_money(ws.MIN_PAYOUT_TOMAN)}).',
+            'no_bank': 'اول شبا را ثبت کنید.',
         }.get(reason, reason)
         bc.send_message(str(chat_id), f'❌ {msg}')
         return
@@ -457,12 +459,14 @@ def confirm_payout(chat_id: str, user: User, bank_id: int) -> None:
         return
     r = ws.request_payout(user, bank)
     if not r.get('ok'):
-        bc.send_message(str(chat_id), f'❌ {r.get("error")}')
+        from bot_flow.messages import user_error
+
+        bc.send_message(str(chat_id), user_error(r.get('error')))
         return
     pr = r['payout']
     bc.send_message(
         str(chat_id),
-        f'✅ درخواست تسویه #{fa_num(pr.id)} ثبت شد.\n'
+        f'✅ درخواست تسویه {fa_num(pr.id)} ثبت شد.\n'
         f'{fa_money(pr.amount_toman)} → {pr.holder_name}',
         reply_markup=main_keyboard(),
     )
@@ -474,13 +478,15 @@ def operator_payout_file(chat_id: str, user: User) -> None:
         return
     r = ws.build_payout_batch(user)
     if not r.get('ok'):
-        bc.send_message(str(chat_id), f'❌ {r.get("error")}')
+        from bot_flow.messages import user_error
+
+        bc.send_message(str(chat_id), user_error(r.get('error')))
         return
     batch = r['batch']
     body = r['file_text'] or ''
     bc.send_message(
         str(chat_id),
-        f'📁 دسته #{fa_num(batch.id)} — {fa_num(r["count"])} درخواست\nمبالغ به ریال:\n{body[:3500]}',
+        f'📁 دسته {fa_num(batch.id)} — {fa_num(r["count"])} درخواست\nمبالغ به ریال:\n{body[:3500]}',
     )
     bc.send_message(
         str(chat_id),
@@ -612,7 +618,9 @@ def try_handle_callback(
             bc.send_message(str(chat_id), 'این کار فقط برای پشتیبانی است.')
             return True
         r = ws.mark_batch_paid(int(data.split(':')[2]))
-        bc.send_message(str(chat_id), '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')
+        from bot_flow.messages import user_error
+
+        bc.send_message(str(chat_id), 'ثبت شد.' if r.get('ok') else user_error(r.get('error')))
         return True
     return False
 

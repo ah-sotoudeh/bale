@@ -753,10 +753,10 @@ def handle_customer_callback(
         d.pop('pending_banner', None)
         sess.data = d
         sess.save(update_fields=['data'])
-        fee_txt = 'رایگان' if fee == 0 else f'{fee:,} تومان (اعلامی)'
+        fee_txt = 'رایگان' if fee == 0 else fa_money(fee)
         bc.send_message(
             str(chat_id),
-            f'📨 درخواست برای پشتیبانی ثبت شد.\nهزینه اعلامی: {fee_txt}',
+            f'📨 درخواست برای پشتیبانی ثبت شد.\nهزینهٔ اعلام‌شده: {fee_txt}',
             reply_markup=customer_home_keyboard(),
         )
         return True

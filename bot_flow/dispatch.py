@@ -52,7 +52,7 @@ def _cmd_id(m: re.Match) -> str | None:
     return m.group(1) or m.group(2)
 
 
-def _answer(cq_id, text: str = 'OK') -> None:
+def _answer(cq_id, text: str = '') -> None:
     if cq_id:
         bc.answer_callback_query(str(cq_id), text=text)
 
@@ -64,9 +64,9 @@ def run_mgr(action: str, bale_uid: str, item_id: int, new_start=None) -> str:
     log.info('%s item=%s → %s', action, item_id, result)
     if result.get('ok'):
         if result.get('pending_left'):
-            return f'ثبت شد. هنوز {fa_num(result["pending_left"])} کانال جواب نداده.'
+            return f'ثبت شد. هنوز {fa_num(result["pending_left"])} کانال‌دار جواب نداده.'
         status = label_order_status(str(result.get('order_status') or ''))
-        return f'ثبت شد. وضعیت سفارش: {status}'
+        return f'ثبت شد. سفارش الان {status} است.'
     return user_error(result.get('error'))
 
 
@@ -120,11 +120,15 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
             return True
         r = build_payout_batch(user)
         if not r.get('ok'):
-            bc.send_message(chat_id, f'خطا: {r.get("error")}')
+            from bot_flow.messages import user_error
+
+            bc.send_message(chat_id, user_error(r.get('error')))
             return True
+        from bot_flow.messages import fa_num
+
         batch = r['batch']
-        body = r['file_text'] or '(خالی)'
-        header = f'فایل تسویه {batch.id} — {r["count"]} درخواست\nمبلغ‌ها به ریال:\n'
+        body = r['file_text'] or 'چیزی در این فهرست نیست.'
+        header = f'فایل تسویه {fa_num(batch.id)} — {fa_num(r["count"])} درخواست\nمبلغ‌ها به ریال:\n'
         bc.send_message(chat_id, header + body[:3500])
         bc.send_message(chat_id, 'پس از واریز بانک، دکمهٔ «پرداخت انجام شد» را بزنید.')
         return True
@@ -134,7 +138,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         r = mark_batch_paid(int(m.group(1)))
         bc.send_message(
             chat_id,
-            'پرداخت این دسته ثبت شد و به مدیران خبر داده شد.' if r.get('ok') else 'این دسته پیدا نشد یا قبلاً ثبت شده.',
+            'پرداخت این دسته ثبت شد و به کانال‌دارها خبر داده شد.' if r.get('ok') else 'این دسته را پیدا نکردم، یا قبلاً ثبت شده.',
         )
         return True
 
@@ -187,9 +191,9 @@ def handle_callback_query(cq: dict) -> None:
 
         req_id = int(data.split(':')[1])
         r = operator_decide(req_id, bale_uid, approve=data.startswith('bappr:'))
-        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
+        _answer(cq_id, '')
         msg_out = r.get('message') or (
-            '✅ انجام شد.' if r.get('ok') else '❌ انجام نشد. جزئیات در لاگ سرور.'
+            'انجام شد.' if r.get('ok') else 'انجام نشد. یک بار دیگر بزنید.'
         )
         bc.send_message(chat_id, msg_out)
         return
@@ -226,7 +230,7 @@ def handle_callback_query(cq: dict) -> None:
         return
     if data.startswith('editask:'):
         item_id = int(data.split(':')[1])
-        _answer(cq_id, 'date')
+        _answer(cq_id, '')
         sess = get_bot_session(bale_uid)
         d = dict(sess.data or {})
         d['edit_item_id'] = item_id
@@ -242,14 +246,16 @@ def handle_callback_query(cq: dict) -> None:
         from bot_flow.access import is_debug_user
 
         if not is_debug_user(bale_uid):
-            _answer(cq_id, 'فاکتور')
+            _answer(cq_id, '')
             bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف پول بله ثبت می‌شود.')
             return
         r = process_payment_paid(int(data.split(':')[1]))
         _answer(cq_id)
+        from bot_flow.messages import user_error
+
         bc.send_message(
             chat_id,
-            '💳 سفارش پرداخت شد' if r.get('ok') else f'❌ {r.get("error")}',
+            'سفارش پرداخت شد.' if r.get('ok') else user_error(r.get('error')),
         )
         return
 
@@ -258,7 +264,7 @@ def handle_callback_query(cq: dict) -> None:
         item_id = int(parts[1])
         channel_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
         r = verify_manager_published(item_id, bale_uid, channel_id=channel_id)
-        _answer(cq_id, 'OK' if r.get('ok') else 'NO')
+        _answer(cq_id, '')
         if r.get('ok'):
             links = r.get('permalinks') or []
             bc.send_message(
@@ -273,14 +279,14 @@ def handle_callback_query(cq: dict) -> None:
         item_id = int(data.split(':')[1])
         ok = data.startswith('execok:')
         r = customer_confirm_execution(item_id, bale_uid, ok)
-        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
+        _answer(cq_id, '')
         bc.send_message(chat_id, 'ثبت شد.' if r.get('ok') else 'ثبت نشد. یک بار دیگر تلاش کنید.')
         return
 
     if data.startswith('opok:') or data.startswith('opno:'):
         item_id = int(data.split(':')[1])
         r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
-        _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
+        _answer(cq_id, '')
         if r.get('ok'):
             bc.send_message(chat_id, 'ثبت شد.')
         else:
@@ -289,7 +295,7 @@ def handle_callback_query(cq: dict) -> None:
             bc.send_message(chat_id, user_error(r.get('error')))
         return
 
-    _answer(cq_id, 'OK')
+    _answer(cq_id, '')
 
 
 def _parse_manager_date(text: str):
@@ -376,9 +382,9 @@ def handle_update(update: dict) -> None:
         bc.send_message(
             chat_id,
             'شرایط و قوانین لینک‌بان را از دکمهٔ «شرایط و قوانین» بخوانید.\n'
-            'خلاصه: تبلیغ قمار، رمزارز، محتوای مستهجن، فیشینگ و ادعای «تضمینی» پذیرفته نمی‌شود. '
+            'خلاصه: تبلیغ قمار، رمزارز، محتوای مستهجن، فریب برای گرفتن اطلاعات و ادعای «تضمینی» پذیرفته نمی‌شود. '
             'پول تا پایان مدت انتشار امانی می‌ماند و اگر کانال منتشر نکند برمی‌گردد. '
-            'معامله خارج از سامانه ممنوع است. حذف خودکار پست فقط تا ۴۸ ساعت بعد از ارسال ممکن است.',
+            'معامله بیرون از لینک‌بان قبول نمی‌شود. حذف خودکار پست فقط تا ۴۸ ساعت بعد از ارسال ممکن است.',
             reply_markup=flow.role_keyboard(is_operator=is_operator(bale_uid)),
         )
         return
