@@ -188,6 +188,34 @@ header button.rounded-full:active {
   background: var(--lb-primary-pressed) !important;
 }
 
+main button.lb-pill {
+  min-height: 28px !important;
+  width: auto;
+  flex: 0 0 auto;
+  padding: 2px 12px !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: none !important;
+}
+
+main button.lb-pill.bg-link {
+  background: var(--lb-primary) !important;
+  color: var(--lb-on-primary) !important;
+}
+
+main button.lb-pill:not(.bg-link) {
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+}
+
+main button.lb-pill.bg-link:active,
+main button.lb-pill:active {
+  min-height: 28px !important;
+  transform: none;
+}
+
 .rounded-2xl.bg-surface,
 .empty-note {
   background: var(--lb-surface) !important;
