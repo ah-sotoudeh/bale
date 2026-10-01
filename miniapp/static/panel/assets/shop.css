@@ -113,7 +113,7 @@ body,
 
 .app,
 .max-w-md {
-  max-width: 560px !important;
+  max-width: 480px !important;
 }
 
 header.sticky {
@@ -679,4 +679,36 @@ main.overflow-y-auto {
   padding-top: 24px;
   padding-bottom: calc(88px + env(safe-area-inset-bottom));
   scroll-padding-top: 24px;
+}
+
+/* lb-phone-column */
+/* وب‌ویو پهن‌تر از قاب گوشی: ستون حدود ۴۸۰ وسط صفحه. در ۳۹۰ این قانون خاموش است تا حاشیهٔ دوم و اسکرول افقی ساخته نشود. */
+@media (min-width: 481px) {
+  html {
+    background: color-mix(in srgb, var(--lb-text) 8%, var(--lb-bg));
+  }
+
+  body {
+    width: 100%;
+    max-width: 480px;
+    margin-inline: auto;
+    min-height: 100dvh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  #root,
+  #root > .h-full,
+  #root > .h-full > .flex {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  .lb-toast,
+  .lb-sheet,
+  nav.fixed,
+  nav.bg-header {
+    max-width: 480px;
+  }
 }

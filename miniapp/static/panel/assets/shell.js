@@ -202,7 +202,7 @@
       var w = window.Bale && Bale.WebApp;
       if (!w || w.__lbReady) return;
       w.__lbReady = true;
-      if (w.expand) w.expand();
+      /* expand() قالب باریک خود بله را تمام‌صفحه می‌کند. ستون ۴۸۰ را shop.css نگه می‌دارد. */
       if (w.ready) w.ready();
       if (w.SettingsButton && w.SettingsButton.show) w.SettingsButton.show();
       if (w.onEvent) {
