@@ -1686,7 +1686,48 @@ class CalendarHoldTests(TestCase):
         long_dates = [row['date'] for row in busy if row['tariff_id'] == self.tariff.id]
         short_dates = [row['date'] for row in busy if row['tariff_id'] == short.id]
         self.assertIn(self.day.isoformat(), long_dates)
-        self.assertNotIn(next_day.isoformat(), short_dates)
+        self.assertIn(next_day.isoformat(), short_dates)
+
+    def test_own_cart_overlap_is_busy_on_the_other_tariffs(self):
+        from datetime import date
+
+        day = date(2026, 10, 7)
+        next_day = date(2026, 10, 8)
+        at_eleven = Tariff.objects.create(
+            channel=self.channel, name='۲۴ از ۱۱', duration_hours=24, price=1000, start_hour=11
+        )
+        at_noon = Tariff.objects.create(
+            channel=self.channel, name='۲۴ از ۱۲', duration_hours=24, price=1000, start_hour=12
+        )
+        half_day = Tariff.objects.create(
+            channel=self.channel, name='۱۲ از ۱۲', duration_hours=12, price=800, start_hour=12
+        )
+        morning = Tariff.objects.create(
+            channel=self.channel, name='صبح', duration_hours=6, price=400, start_hour=0
+        )
+        added = add_to_cart(self.customer, at_noon, day)
+        self.assertTrue(added['ok'], added)
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'hold-c'})
+        self.assertEqual(listed.status_code, 200, listed.content)
+        busy = listed.json()['busy']
+
+        def dates_for(tariff_id):
+            return [row['date'] for row in busy if row['tariff_id'] == tariff_id]
+
+        self.assertIn(day.isoformat(), dates_for(at_eleven.id))
+        self.assertIn(next_day.isoformat(), dates_for(at_eleven.id))
+        self.assertIn(day.isoformat(), dates_for(half_day.id))
+        self.assertNotIn(next_day.isoformat(), dates_for(half_day.id))
+        self.assertIn(day.isoformat(), dates_for(at_noon.id))
+        self.assertNotIn(next_day.isoformat(), dates_for(at_noon.id))
+        self.assertNotIn(day.isoformat(), dates_for(morning.id))
+        self.assertIn(next_day.isoformat(), dates_for(morning.id))
+        blocked = add_to_cart(self.other, at_eleven, day)
+        self.assertEqual(blocked.get('error'), 'slot_conflict')
+        open_morning = add_to_cart(self.other, morning, day)
+        self.assertTrue(open_morning['ok'], open_morning)
+        open_half = add_to_cart(self.other, half_day, next_day)
+        self.assertTrue(open_half['ok'], open_half)
 
     def test_paid_order_closes_when_every_slot_finishes(self):
         from orders.execution import settle_paid_order
