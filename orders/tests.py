@@ -1720,3 +1720,84 @@ class CalendarHoldTests(TestCase):
         ready_cart = self.client.get('/miniapp/api/cart', {'debug_bale_id': 'hold-c'})
         self.assertEqual(ready_cart.json()['status'], 'free')
         self.assertEqual(ready_cart.json()['why'], '')
+
+
+class MiniappErrorMessageTests(TestCase):
+    """پیام JSON همان متنی است که مینی‌اپ نشان می‌دهد، نه کد انگلیسی."""
+
+    def setUp(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+
+    def _post(self, path, payload):
+        import json
+
+        return self.client.post(path, data=json.dumps(payload), content_type='application/json')
+
+    def test_no_user_json_is_persian(self):
+        with patch('miniapp.api.validate_init_data', return_value=(True, {'user': {}})):
+            response = self.client.get('/miniapp/api/me', HTTP_X_BALE_INIT_DATA='session')
+        body = response.json()
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertEqual(body['error'], 'no_user')
+        self.assertEqual(body['message'], 'حساب بله‌تان را نشناختم.')
+
+    def test_invalid_iban_json_is_persian(self):
+        response = self._post('/miniapp/api/bank', {
+            'debug_bale_id': 'iban-1',
+            'iban': 'IR00',
+            'holder_name': 'علی رضوی',
+        })
+        body = response.json()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(body['error'], 'invalid_iban')
+        self.assertEqual(body['message'], 'شماره شبا درست نیست. یک بار دیگر بفرستید.')
+
+    def test_not_cancellable_json_is_persian(self):
+        user = User.objects.create_user(username='nc-user', password='pass', bale_user_id='nc-1')
+        order = Order.objects.create(customer=user, status='completed', total_amount=1000)
+        response = self._post('/miniapp/api/orders/cancel', {
+            'debug_bale_id': 'nc-1',
+            'order_id': order.id,
+        })
+        body = response.json()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(body['error'], 'not_cancellable')
+        self.assertEqual(body['message'], 'این سفارش الان بسته نمی‌شود. اگر منتشر شده، اعتراض ثبت کنید.')
+
+    def test_not_paid_json_is_persian(self):
+        customer = User.objects.create_user(username='np-user', password='pass', bale_user_id='np-1')
+        order = Order.objects.create(customer=customer, status='waiting_payment', total_amount=1000)
+        with patch('wallet.services.is_operator', return_value=True):
+            response = self._post('/miniapp/api/operator/refund', {
+                'debug_bale_id': 'op-msg',
+                'order_id': order.id,
+            })
+        body = response.json()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(body['error'], 'not_paid')
+        self.assertEqual(body['message'], 'این سفارش هنوز پرداخت نشده. فقط سفارش پرداخت‌شده به اعتبار برمی‌گردد.')
+
+    def test_use_bot_json_is_persian(self):
+        import json
+
+        from django.test import RequestFactory
+
+        from miniapp.api_extra import api_operator_mark_paid
+
+        request = RequestFactory().post(
+            '/miniapp/api/operator/mark-paid',
+            data=json.dumps({'debug_bale_id': 'op-msg'}),
+            content_type='application/json',
+        )
+        with patch('wallet.services.is_operator', return_value=True):
+            response = api_operator_mark_paid(request)
+        body = json.loads(response.content)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(body['error'], 'use_bot')
+        self.assertEqual(
+            body['message'],
+            'درخواست تسویه را در گفتگو با لینک‌بان بسازید. اینجا فقط بعد از واریز بانک تأیید می‌شود.',
+        )
