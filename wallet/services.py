@@ -186,7 +186,17 @@ def credit_manager_for_execution(
 
 def credit_customer_refund(
     customer: User, amount: int, order_item_id: int, reason: str
-) -> WalletLedger:
+) -> Optional[WalletLedger]:
+    """بازگشت به مشتری؛ هرگز بیشتر از آنچه برای این آیتم پرداخته و هنوز برنگشته."""
+    from orders.models import OrderItem
+
+    item_price = (
+        OrderItem.objects.filter(pk=order_item_id).values_list('price', flat=True).first()
+    )
+    if item_price is not None:
+        amount = min(int(amount), int(item_price) - refunded_toman_for_item(order_item_id))
+    if amount <= 0:
+        return None
     return credit(
         customer,
         amount,

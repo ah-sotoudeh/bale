@@ -2200,3 +2200,25 @@ class IbanChecksumTests(TestCase):
         self.assertFalse(validate_iban(wrong))
         self.assertFalse(validate_iban('IR00'))
         self.assertFalse(validate_iban(''))
+
+
+class FailedPublishAfterPartialRefundTests(PartialRefundThenExecutionTests):
+    """عدم انتشار بعد از بازگشت بخشی نباید بیشتر از قیمت آیتم به مشتری بدهد."""
+
+    @patch('orders.cart.bc.send_message')
+    def test_customer_never_gets_back_more_than_the_price(self, _send):
+        from orders.cart import refund_paid_order
+        from wallet.models import WalletLedger
+        from wallet.services import credit_customer_refund
+
+        refund_paid_order(self.order, 400, reason='x')
+        credit_customer_refund(self.customer, self.item.price, self.item.id, 'عدم انتشار')
+        total = sum(
+            WalletLedger.objects.filter(user=self.customer, entry_type='refund').values_list('amount', flat=True)
+        )
+        self.assertEqual(total, 1000)
+        credit_customer_refund(self.customer, self.item.price, self.item.id, 'تکرار')
+        total2 = sum(
+            WalletLedger.objects.filter(user=self.customer, entry_type='refund').values_list('amount', flat=True)
+        )
+        self.assertEqual(total2, 1000)
