@@ -560,6 +560,9 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'waiting_customer_confirm',
             'waiting_payment',
         ) or (o.status == 'paid' and cart_svc.refund_window_open(o))
+        managers_deadline = None
+        if o.status == 'waiting_managers' and o.managers_deadline:
+            managers_deadline = timezone.localtime(o.managers_deadline).isoformat()
         rows.append({
             'id': o.id,
             'status': o.status,
@@ -567,6 +570,7 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
             'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
             'pay_hint': _order_deadline_hint(o),
+            'managers_deadline': managers_deadline,
             'can_pay': can_pay,
             'can_cancel': can_cancel,
             'can_dispute': o.status == 'paid' and not can_cancel,

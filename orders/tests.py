@@ -1811,6 +1811,23 @@ class SubmittedOrderTotalTests(TestCase):
         self.assertEqual(order.total_amount, 700)
         self.assertEqual(order.status, 'waiting_banner')
 
+    def test_my_orders_includes_the_stored_managers_deadline(self):
+        from django.utils.dateparse import parse_datetime
+
+        order = self._waiting_order(ready=False)
+        deadline = timezone.now() + timedelta(hours=11)
+        order.status = 'waiting_managers'
+        order.total_amount = 700
+        order.managers_deadline = deadline
+        order.save(update_fields=['status', 'total_amount', 'managers_deadline'])
+        response = self.client.get('/miniapp/api/my-orders', {'debug_bale_id': 'tot-c'})
+        self.assertEqual(response.status_code, 200, response.content)
+        row = response.json()['orders'][0]
+        order.refresh_from_db()
+        self.assertEqual(row['total'], 700)
+        self.assertEqual(row['status'], 'waiting_managers')
+        self.assertEqual(parse_datetime(row['managers_deadline']), order.managers_deadline)
+
 
 class MiniappErrorMessageTests(TestCase):
     """پیام JSON همان متنی است که مینی‌اپ نشان می‌دهد، نه کد انگلیسی."""
