@@ -107,7 +107,7 @@ def prepare_polling() -> None:
         {'command': 'menu', 'description': 'منوی اصلی'},
         {'command': 'help', 'description': 'راهنما'},
         {'command': 'customer', 'description': 'بخش مشتری'},
-        {'command': 'panel', 'description': 'بخش مدیر کانال'},
+        {'command': 'panel', 'description': 'بخش کانال‌دار'},
         {'command': 'rules', 'description': 'شرایط و قوانین'},
     ])
 

@@ -77,7 +77,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         if sid:
             bc.send_message(chat_id, run_mgr('approve', bale_uid, int(sid)))
         else:
-            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید، یا از دکمهٔ زیر همان سفارش استفاده کنید.')
+            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید.')
         return True
     m = CMD_REJECT.match(text)
     if m:
@@ -85,7 +85,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         if sid:
             bc.send_message(chat_id, run_mgr('reject', bale_uid, int(sid)))
         else:
-            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید، یا از دکمهٔ زیر همان سفارش استفاده کنید.')
+            bc.send_message(chat_id, 'شماره نوبت را هم بفرستید.')
         return True
     m = CMD_PAID.match(text)
     if m:
@@ -93,7 +93,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
 
         sid = _cmd_id(m)
         if not is_debug_user(bale_uid):
-            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف‌پول بله ثبت می‌شود.')
+            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف پول بله ثبت می‌شود.')
             return True
         if sid:
             r = process_payment_paid(int(sid))
@@ -106,17 +106,17 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         return True
 
     if text in ('/miniapp', '/minapp', '/مینی', '/مینیاپ'):
-        send_miniapp_entry(chat_id, 'پنل مدیر (مینی‌اپ):')
+        send_miniapp_entry(chat_id, 'بخش کانال‌دار:')
         return True
 
-    if text in ('/operator', '/op', '/اپراتور') and is_operator(bale_uid):
+    if text in ('/operator', '/op', '/اپراتور', '/پشتیبانی') and is_operator(bale_uid):
         opanel.open_panel(chat_id, bale_uid)
         return True
 
     if text.startswith('/payout_file') and is_operator(bale_uid):
         user = User.objects.filter(bale_user_id=bale_uid).first()
         if not user:
-            bc.send_message(chat_id, 'کاربر یافت نشد')
+            bc.send_message(chat_id, 'این کاربر را پیدا نکردم.')
             return True
         r = build_payout_batch(user)
         if not r.get('ok'):
@@ -148,7 +148,7 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
 
     if text.startswith('/audit_admin') and is_operator(bale_uid):
         r = daily_admin_audit()
-        bc.send_message(chat_id, f'چک ادمین: {r}')
+        bc.send_message(chat_id, f'نتیجهٔ بررسی کانال‌ها:\n{r}')
         return True
 
     return False
@@ -235,7 +235,7 @@ def handle_callback_query(cq: dict) -> None:
         sess.save()
         bc.send_message(
             chat_id,
-            'تاریخ تازه را به شکل ۱۴۰۴/۰۶/۱۵ بفرستید. فقط همین کانال عوض می‌شود.',
+            'تاریخ تازهٔ همین کانال را به شکل ۱۴۰۴/۰۶/۱۵ بفرستید.',
         )
         return
     if data.startswith('paid:'):
@@ -243,7 +243,7 @@ def handle_callback_query(cq: dict) -> None:
 
         if not is_debug_user(bale_uid):
             _answer(cq_id, 'فاکتور')
-            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف‌پول بله ثبت می‌شود.')
+            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف پول بله ثبت می‌شود.')
             return
         r = process_payment_paid(int(data.split(':')[1]))
         _answer(cq_id)
@@ -266,7 +266,7 @@ def handle_callback_query(cq: dict) -> None:
                 '✅ انتشار تأیید شد.\n' + '\n'.join(str(x) for x in links if x),
             )
         else:
-            bc.send_message(chat_id, '❌ تأیید انتشار ممکن نشد.')
+            bc.send_message(chat_id, 'انتشار تأیید نشد. یک بار دیگر بزنید.')
         return
 
     if data.startswith('execok:') or data.startswith('execno:'):
@@ -274,7 +274,7 @@ def handle_callback_query(cq: dict) -> None:
         ok = data.startswith('execok:')
         r = customer_confirm_execution(item_id, bale_uid, ok)
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
-        bc.send_message(chat_id, '✅ ثبت شد' if r.get('ok') else '❌ خطا در ثبت')
+        bc.send_message(chat_id, 'ثبت شد.' if r.get('ok') else 'ثبت نشد. یک بار دیگر تلاش کنید.')
         return
 
     if data.startswith('opok:') or data.startswith('opno:'):
@@ -282,9 +282,11 @@ def handle_callback_query(cq: dict) -> None:
         r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
         _answer(cq_id, 'OK' if r.get('ok') else 'ERR')
         if r.get('ok'):
-            bc.send_message(chat_id, '✅ ثبت شد')
+            bc.send_message(chat_id, 'ثبت شد.')
         else:
-            bc.send_message(chat_id, f'❌ {r.get("error") or "خطا"}')
+            from bot_flow.messages import user_error
+
+            bc.send_message(chat_id, user_error(r.get('error')))
         return
 
     _answer(cq_id, 'OK')
@@ -373,7 +375,7 @@ def handle_update(update: dict) -> None:
     if norm in ('/rules', '/law', '/قوانین'):
         bc.send_message(
             chat_id,
-            'شرایط و قوانین لینک‌بان داخل مینی‌اپ، دکمهٔ «شرایط و قوانین» است.\n'
+            'شرایط و قوانین لینک‌بان را از دکمهٔ «شرایط و قوانین» بخوانید.\n'
             'خلاصه: تبلیغ قمار، رمزارز، محتوای مستهجن، فیشینگ و ادعای «تضمینی» پذیرفته نمی‌شود. '
             'پول تا پایان مدت انتشار امانی می‌ماند و اگر کانال منتشر نکند برمی‌گردد. '
             'معامله خارج از سامانه ممنوع است. حذف خودکار پست فقط تا ۴۸ ساعت بعد از ارسال ممکن است.',
@@ -387,7 +389,7 @@ def handle_update(update: dict) -> None:
             item_id = (sess.data or {}).get('edit_item_id')
             start = _parse_manager_date(norm)
             if not start or not item_id:
-                bc.send_message(chat_id, 'تاریخ نامعتبر است. نمونه: ۱۴۰۴/۰۶/۱۵')
+                bc.send_message(chat_id, 'این تاریخ درست نیست. نمونه: ۱۴۰۴/۰۶/۱۵')
                 return
             text_out = run_mgr('edit', bale_uid, int(item_id), new_start=start)
             sess.state = 'idle'
@@ -417,7 +419,7 @@ def handle_update(update: dict) -> None:
                 return
         except Exception:
             log.exception('banner handle')
-            bc.send_message(chat_id, 'بنر را نگرفتیم. یک بار دیگر همان عکس یا متن را بفرستید.')
+            bc.send_message(chat_id, 'بنر را نگرفتم. یک بار دیگر همان عکس یا متن را بفرستید.')
             return
 
     if handle_legacy_commands(chat_id, bale_uid, norm):
@@ -435,5 +437,5 @@ def handle_update(update: dict) -> None:
     if norm:
         bc.send_message(
             chat_id,
-            'این پیام را نشناختم.\nاز دکمه‌های منو استفاده کنید، یا «شروع» را بزنید.',
+            'این پیام را نشناختم. از دکمه‌های منو یکی را بزنید.',
         )

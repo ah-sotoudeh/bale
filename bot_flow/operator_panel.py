@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from bot_flow.messages import fa_money, fa_num, label_exec_status, label_manager_status
 from integrations import bale_client as bc
 from orders.models import BannerPublishRequest, Order, OrderItem
 from orders.publish import daily_admin_audit
@@ -24,11 +25,11 @@ def main_keyboard() -> Dict[str, Any]:
         ],
         [
             {'text': '📋 سفارش‌های باز', 'callback_data': 'op:orders'},
-            {'text': '🔎 چک ادمین کانال', 'callback_data': 'op:audit'},
+            {'text': '🔎 بررسی کانال‌ها', 'callback_data': 'op:audit'},
         ],
         [
-            {'text': '🛒 پنل مشتری', 'callback_data': 'cu:home'},
-            {'text': '📢 پنل مدیر', 'callback_data': 'mgr:home'},
+            {'text': '🛒 بخش مشتری', 'callback_data': 'cu:home'},
+            {'text': '📢 بخش کانال‌دار', 'callback_data': 'mgr:home'},
         ],
         [{'text': '🏠 منوی اصلی', 'callback_data': 'nav:start'}],
     ])
@@ -36,7 +37,7 @@ def main_keyboard() -> Dict[str, Any]:
 
 def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
     if not ws.is_operator(bale_user_id):
-        bc.send_message(str(chat_id), 'این بخش فقط برای اپراتور سامانه است.')
+        bc.send_message(str(chat_id), 'این بخش فقط برای پشتیبانی است.')
         return
     user = _ensure(bale_user_id, username)
     pending_pay = ws.PayoutRequest.objects.filter(status='pending').count() if hasattr(ws, 'PayoutRequest') else 0
@@ -48,12 +49,12 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
         status__in=('waiting_managers', 'waiting_payment', 'paid')
     ).count()
     text = (
-        '🛠️ پنل اپراتور\n\n'
-        f'آیدی: {user.bale_handle or user.bale_user_id}\n'
-        f'درخواست تسویه باز: {pending_pay}\n'
-        f'درخواست بنر باز: {pending_banner}\n'
-        f'سفارش‌های فعال: {open_orders}\n\n'
-        'یک بخش را انتخاب کنید:'
+        '🛠️ بخش پشتیبانی\n\n'
+        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
+        f'درخواست تسویه باز: {fa_num(pending_pay)}\n'
+        f'درخواست بنر باز: {fa_num(pending_banner)}\n'
+        f'سفارش‌های فعال: {fa_num(open_orders)}\n\n'
+        'یکی را انتخاب کنید:'
     )
     bc.send_message(str(chat_id), text, reply_markup=main_keyboard())
 
@@ -65,20 +66,20 @@ def show_pending_banners(chat_id: str) -> None:
         .order_by('id')[:20]
     )
     if not qs:
-        bc.send_message(str(chat_id), 'درخواست بنر بازی نیست.', reply_markup=main_keyboard())
+        bc.send_message(str(chat_id), 'درخواست بنر بازی ندارید.', reply_markup=main_keyboard())
         return
     lines = ['🆕 درخواست‌های بنر در انتظار:']
     rows = []
     for r in qs:
         lines.append(
-            f'#{r.id} مشتری {r.customer.bale_user_id} | '
-            f'{"رایگان" if r.fee_toman == 0 else f"{r.fee_toman:,} ت"}'
+            f'{fa_num(r.id)} — مشتری {r.customer.bale_user_id} | '
+            f'{"رایگان" if r.fee_toman == 0 else fa_money(r.fee_toman, " ت")}'
         )
         rows.append([
-            {'text': f'✅ تأیید #{r.id}', 'callback_data': f'bappr:{r.id}'},
-            {'text': f'❌ رد #{r.id}', 'callback_data': f'brej:{r.id}'},
+            {'text': f'✅ تأیید {fa_num(r.id)}', 'callback_data': f'bappr:{r.id}'},
+            {'text': f'❌ رد {fa_num(r.id)}', 'callback_data': f'brej:{r.id}'},
         ])
-    rows.append([{'text': '🏠 پنل اپراتور', 'callback_data': 'op:home'}])
+    rows.append([{'text': '🏠 بخش پشتیبانی', 'callback_data': 'op:home'}])
     bc.send_message(str(chat_id), '\n'.join(lines), reply_markup=bc.inline_keyboard(rows))
 
 
@@ -91,13 +92,13 @@ def show_open_orders(chat_id: str) -> None:
         .order_by('-id')[:25]
     )
     if not items:
-        bc.send_message(str(chat_id), 'سفارش بازی نیست.', reply_markup=main_keyboard())
+        bc.send_message(str(chat_id), 'سفارش بازی ندارید.', reply_markup=main_keyboard())
         return
-    lines = ['📋 آیتم‌های فعال:']
+    lines = ['📋 نوبت‌های فعال:']
     for it in items:
         lines.append(
-            f'#{it.id} سفارش {it.order_id} | {it.manager_status}/{it.execution_status} | '
-            f'{it.price:,} ت'
+            f'{fa_num(it.id)} — سفارش {fa_num(it.order_id)} | {label_manager_status(it.manager_status)} | {label_exec_status(it.execution_status)} | '
+            f'{fa_money(it.price, " ت")}'
         )
     bc.send_message(str(chat_id), '\n'.join(lines)[:3900], reply_markup=main_keyboard())
 
@@ -121,7 +122,7 @@ def try_handle_callback(
         return True
 
     if not ws.is_operator(bale_user_id):
-        bc.send_message(str(chat_id), 'دسترسی اپراتور ندارید.')
+        bc.send_message(str(chat_id), 'این کار فقط برای پشتیبانی است.')
         return True
 
     user = _ensure(bale_user_id, username)
@@ -142,6 +143,6 @@ def try_handle_callback(
         return True
     if data == 'op:audit':
         r = daily_admin_audit()
-        bc.send_message(str(chat_id), f'نتیجه چک ادمین:\n{r}', reply_markup=main_keyboard())
+        bc.send_message(str(chat_id), f'نتیجهٔ بررسی کانال‌ها:\n{r}', reply_markup=main_keyboard())
         return True
     return False

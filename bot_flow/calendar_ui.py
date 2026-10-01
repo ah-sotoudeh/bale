@@ -76,7 +76,7 @@ def calendar_main_keyboard(tariff_id: int) -> Dict[str, Any]:
             {'text': '⬅️ لیست', 'callback_data': 'free:list'},
         ],
         [
-            {'text': '🏠 پنل مدیر', 'callback_data': 'mgr:home'},
+            {'text': '🏠 بخش کانال‌دار', 'callback_data': 'mgr:home'},
         ],
     ])
 
@@ -107,8 +107,8 @@ def ask_mark_busy_day(chat_id: str, tariff: Tariff) -> None:
     ])
     bc.send_message(
         str(chat_id),
-        'روز پر (نوبت دستی) را انتخاب کنید:\n'
-        '✅ خالی — ❌ از قبل پر',
+        'روزی را انتخاب کنید که می‌خواهید پر شود.\n'
+        '✅ خالی است و ❌ از قبل پر است.',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -118,11 +118,11 @@ def ask_clear_manual_busy(chat_id: str, tariff: Tariff) -> None:
     if not slots:
         bc.send_message(
             str(chat_id),
-            'نوبت دستی ثبت‌شده‌ای برای حذف نیست.',
+            'نوبت دستی برای حذف ندارید.',
             reply_markup=calendar_main_keyboard(tariff.id),
         )
         return
-    lines = ['🗑 نوبت‌های دستی — برای حذف روی دکمه بزنید:']
+    lines = ['🗑 نوبت‌های دستی\nبرای حذف، روی دکمه بزنید:']
     rows = []
     for slot in slots:
         day = timezone.localtime(slot.start).date()
@@ -164,7 +164,7 @@ def channels_keyboard_for_manager(manager: User) -> Optional[Dict[str, Any]]:
 
     if not rows:
         return None
-    rows.append([{'text': '🏠 پنل مدیر', 'callback_data': 'mgr:home'}])
+    rows.append([{'text': '🏠 بخش کانال‌دار', 'callback_data': 'mgr:home'}])
     return bc.inline_keyboard(rows)
 
 
@@ -203,12 +203,12 @@ def send_manager_channel_picker(chat_id: str, manager: User) -> None:
     if not kb:
         bc.send_message(
             str(chat_id),
-            'هنوز کانال یا مجموعه‌ای با تعرفه ندارید.\nابتدا از پنل مدیر کانال و تعرفه ثبت کنید.',
+            'هنوز کانالی با تعرفه ندارید. اول از بخش کانال‌دار یک تعرفه ثبت کنید.',
         )
         return
     bc.send_message(
         str(chat_id),
-        '📅 تقویم\nکانال یا مجموعه را انتخاب کنید:',
+        'تقویم\nکانال یا مجموعه را انتخاب کنید:',
         reply_markup=kb,
     )
 
@@ -248,11 +248,11 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 'ch':
         ch = Channel.objects.filter(id=int(parts[2]), manager=user).first()
         if not ch:
-            bc.send_message(str(chat_id), 'کانال پیدا نشد.')
+            bc.send_message(str(chat_id), 'این کانال را پیدا نکردم.')
             return True
         kb = tariffs_keyboard_channel(ch)
         if not kb:
-            bc.send_message(str(chat_id), 'تعرفه‌ای نیست.')
+            bc.send_message(str(chat_id), 'برای این کانال هنوز تعرفه‌ای ندارید.')
             return True
         bc.send_message(str(chat_id), f'تعرفه «{ch.name}» را انتخاب کنید:', reply_markup=kb)
         return True
@@ -260,11 +260,11 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 'g':
         g = ChannelGroup.objects.filter(id=int(parts[2]), manager=user).first()
         if not g:
-            bc.send_message(str(chat_id), 'مجموعه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این مجموعه را پیدا نکردم.')
             return True
         kb = tariffs_keyboard_group(g)
         if not kb:
-            bc.send_message(str(chat_id), 'تعرفه‌ای نیست.')
+            bc.send_message(str(chat_id), 'برای این مجموعه هنوز تعرفه‌ای ندارید.')
             return True
         bc.send_message(str(chat_id), f'تعرفه مجموعه «{g.name}»:', reply_markup=kb)
         return True
@@ -272,7 +272,7 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 't':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد یا دسترسی ندارید.')
+            bc.send_message(str(chat_id), 'این تعرفه برای شما نیست.')
             return True
         show_tariff_calendar(chat_id, t)
         return True
@@ -281,7 +281,7 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 'busy':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         ask_mark_busy_day(chat_id, t)
         return True
@@ -290,12 +290,12 @@ def handle_free_callback(
     if len(parts) == 4 and parts[1] == 'busy_day':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         try:
             day = date.fromisoformat(parts[3])
         except ValueError:
-            bc.send_message(str(chat_id), 'تاریخ نامعتبر.')
+            bc.send_message(str(chat_id), 'این تاریخ درست نیست.')
             return True
         try:
             slot = mark_tariff_day_busy(t, day)
@@ -303,14 +303,13 @@ def handle_free_callback(
             from orders.slots import SlotConflict
 
             if isinstance(exc, SlotConflict):
-                bc.send_message(str(chat_id), 'این نوبت پر است.')
+                bc.send_message(str(chat_id), 'این روز از قبل پر است.')
                 show_tariff_calendar(chat_id, t)
                 return True
             raise
         bc.send_message(
             str(chat_id),
-            f'🔒 روز {format_jalali(day)} برای «{t.name}» به‌عنوان نوبت دستی پر شد '
-            f'(#{fa_num(slot.id)}).',
+            f'روز {format_jalali(day)} برای «{t.name}» پر شد.',
         )
         show_tariff_calendar(chat_id, t)
         return True
@@ -319,7 +318,7 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 'unbusy':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         ask_clear_manual_busy(chat_id, t)
         return True
@@ -328,13 +327,13 @@ def handle_free_callback(
     if len(parts) == 4 and parts[1] == 'unbusy_slot':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         ok = clear_manual_busy_slot(int(parts[3]), t)
         if ok:
-            bc.send_message(str(chat_id), '✅ نوبت دستی حذف شد؛ روز دوباره خالی است.')
+            bc.send_message(str(chat_id), 'نوبت دستی برداشته شد و روز دوباره خالی است.')
         else:
-            bc.send_message(str(chat_id), 'این نوبت پیدا نشد یا قبلاً حذف شده.')
+            bc.send_message(str(chat_id), 'این نوبت را پیدا نکردم.')
         show_tariff_calendar(chat_id, t)
         return True
 

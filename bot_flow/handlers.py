@@ -17,7 +17,7 @@ from bot_flow.messages import (
     BTN_MODE_LINKYAR, BTN_MODE_MANUAL, BTN_OPERATOR_PANEL,
     MSG_HELP, MSG_PUBLISH_MODE_HINT_BOT, MSG_PUBLISH_MODE_HINT_LINKYAR,
     MSG_PUBLISH_MODE_SET, MSG_REMIND_HOURS_ASK, MSG_START_WELCOME,
-    MSG_TARIFF_HELP, format_publish_mode_screen, label_publish_mode,
+    MSG_TARIFF_HELP, fa_money, fa_num, format_publish_mode_screen, label_publish_mode,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,10 +188,8 @@ def handle_role_callback(
         save_session(sess, STATE_AWAIT_LINKS, role='manager', verified_ids=[])
         bc.send_message(
             str(chat_id),
-            'نقش: مدیر کانال ✅\n\n'
-            'لینک کانال‌ها را بفرستید (هر خط یکی).\n'
-            '• یک لینک = تک‌کانال\n'
-            '• چند لینک = مجموعه با تعرفه مشترک\n\n'
+            'بخش کانال‌دار\n\n'
+            'پیوند کانال را بفرستید. اگر چند کانال یک مجموعه هستند، هر پیوند را در یک خط بنویسید.\n\n'
             f'{ownership_prompt(user)}',
         )
         return
@@ -211,7 +209,7 @@ def _verify_and_register_channels(
         norm = normalize_channel_ref(ref)
         info = bc.get_channel_info(norm)
         if info.get('error'):
-            fail.append(f'{norm}: خطا ({info.get("error")})')
+            fail.append(f'{norm}: این پیوند را نخواندم. یک بار دیگر بفرستید.')
             continue
 
         bio = str(info.get('bio') or info.get('description') or '')
@@ -230,7 +228,7 @@ def _verify_and_register_channels(
             ch.manager = manager
             ch.save()
             ok.append(ch)
-            notes.append(f'{"ثبت" if created else "به‌روز"}: {title} ({norm})')
+            notes.append(f'{"وصل شد" if created else "به‌روز شد"}: {title}')
 
     return ok, fail, notes
 
@@ -254,7 +252,7 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     refs = extract_channel_refs(text)
     if not refs:
-        bc.send_message(str(chat_id), 'لینک معتبر پیدا نشد.')
+        bc.send_message(str(chat_id), 'پیوند کانال را در این پیام ندیدم. یک بار دیگر بفرستید.')
         return True
 
     manager = ensure_user(bale_user_id)
@@ -267,7 +265,7 @@ def handle_links_text(chat_id: str, bale_user_id: str, text: str) -> bool:
         parts.append('⚠️ اصلاح:\n' + '\n'.join(fail))
 
     if not ok:
-        parts.append('نام کاربری را در توضیحات کانال بگذارید و دوباره بفرستید.')
+        parts.append('نام کاربری‌تان را در بخش «درباره» کانال بنویسید و پیوند را دوباره بفرستید.')
         bc.send_message(str(chat_id), '\n\n'.join(parts))
         return True
 
@@ -287,27 +285,27 @@ def handle_publish_mode_callback(
 
     sess = get_session(bale_user_id)
     if sess.state != STATE_AWAIT_PUBLISH_MODE:
-        bc.send_message(str(chat_id), 'الان لازم نیست روش انتشار را عوض کنید. اگر منو گم شد، /start را بزنید.')
+        bc.send_message(str(chat_id), 'الان جای عوض کردن روش انتشار نیست. اگر منو گم شده، /start را بزنید.')
         return
 
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        bc.send_message(str(chat_id), 'این روش ارسال شناخته نشد.')
+        bc.send_message(str(chat_id), 'این روش انتشار را نمی‌شناسم.')
         return
 
     manager = ensure_user(bale_user_id)
     ids = list(sess.data.get('pending_channel_ids') or [])
     channels = list(Channel.objects.filter(id__in=ids, manager=manager))
     if not channels:
-        bc.send_message(str(chat_id), 'کانال پیدا نشد. /start')
+        bc.send_message(str(chat_id), 'کانال را پیدا نکردم. /start را بزنید تا از نو شروع کنیم.')
         save_session(sess, STATE_AWAIT_LINKS)
         return
 
     Channel.objects.filter(id__in=[c.id for c in channels]).update(publish_mode=mode)
-    label = dict(Channel.PUBLISH_MODE_CHOICES).get(mode, mode)
+    label = label_publish_mode(mode)
 
     hint = ''
     if mode == Channel.PUBLISH_BOT:
-        hint = '\nبازوی لینک‌بان را در کانال مدیر کنید تا سر وقت خودش پست را بفرستد.'
+        hint = MSG_PUBLISH_MODE_HINT_BOT
     elif mode == Channel.PUBLISH_LINKYAR:
         from integrations import linkyar_client as ly
 
@@ -315,13 +313,13 @@ def handle_publish_mode_callback(
 
     if sess.data.get('pmode_edit_only'):
         save_session(sess, STATE_IDLE, role='manager', pmode_edit_only=False)
-        bc.send_message(str(chat_id), f'روش ارسال ذخیره شد: {label}.{hint}')
+        bc.send_message(str(chat_id), f'روش انتشار ذخیره شد: {label}.{hint}')
         from bot_flow.manager_panel import open_panel
 
         open_panel(chat_id, bale_user_id)
         return
 
-    bc.send_message(str(chat_id), f'روش ارسال: {label}.{hint}')
+    bc.send_message(str(chat_id), f'روش انتشار: {label}.{hint}')
 
     package_mode = bool(sess.data.get('package_mode')) and len(channels) > 1
     if package_mode:
@@ -336,7 +334,7 @@ def handle_publish_mode_callback(
         names = '\n'.join(f'{i+1}. {c.name} — {c.link}' for i, c in enumerate(channels))
         bc.send_message(
             str(chat_id),
-            f'📦 مجموعه ({len(channels)} کانال)\n{names}\n\nنام مجموعه را بفرستید:',
+            f'📦 این مجموعه {fa_num(len(channels))} کانال دارد:\n{names}\n\nنام مجموعه را بفرستید:',
         )
         return
 
@@ -352,7 +350,7 @@ def handle_publish_mode_callback(
     )
     bc.send_message(
         str(chat_id),
-        f'تعرفه «{channels[0].name}»:\n{TARIFF_HELP}',
+        f'تعرفهٔ «{channels[0].name}» را بفرستید:\n{TARIFF_HELP}',
     )
 
 
@@ -388,7 +386,7 @@ def handle_group_name_text(chat_id: str, bale_user_id: str, text: str) -> bool:
     )
     bc.send_message(
         str(chat_id),
-        f'مجموعه «{group.name}» ذخیره شد.\nتعرفه مشترک:\n{TARIFF_HELP}',
+        f'مجموعه «{group.name}» ذخیره شد.\nحالا تعرفه مشترک را بفرستید:\n{TARIFF_HELP}',
     )
     return True
 
@@ -490,7 +488,7 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     rows = parse_tariff_lines(text)
     if not rows:
-        bc.send_message(str(chat_id), f'این را به‌صورت تعرفه نفهمیدم.\n{TARIFF_HELP}')
+        bc.send_message(str(chat_id), f'این را به‌صورت تعرفه نفهمیدم. یک خط را مثل نمونه بفرستید.\n{TARIFF_HELP}')
         return True
 
     package_mode = bool(sess.data.get('package_mode'))
@@ -543,14 +541,14 @@ def handle_tariffs_text(chat_id: str, bale_user_id: str, text: str) -> bool:
 
     summary = '\n'.join(
         f'• {x.name}: ارسال '
-        f'{x.start_hour if x.start_hour is not None else "—"} | '
-        f'{x.duration_hours}س | {x.price:,}ت'
+        f'{fa_num(x.start_hour) if x.start_hour is not None else "—"} | '
+        f'{fa_num(x.duration_hours)} ساعت | {fa_money(x.price)}'
         for x in created
     )
     bc.send_message(str(chat_id), f'ذخیره شد:\n{summary}')
 
     if pub.get('error') and pub.get('error') != 'no_tariffs':
-        bc.send_message(str(chat_id), 'نتوانستم این تعرفه را روی کانال بنرها بگذارم. کمی بعد دوباره تلاش کنید، یا به پشتیبانی بگویید.')
+        bc.send_message(str(chat_id), 'نتوانستم این تعرفه را روی کانال بنرها بگذارم. کمی بعد دوباره تلاش کنید.')
     elif not pub.get('error'):
         bc.send_message(str(chat_id), f'✅ «{label}» در {reference_channel()}')
 
@@ -567,7 +565,7 @@ def handle_pmode_edit_start(chat_id: str, bale_user_id: str, cq_id: Optional[str
     manager = ensure_user(bale_user_id)
     channels = list(Channel.objects.filter(manager=manager).order_by('id')[:20])
     if not channels:
-        bc.send_message(str(chat_id), 'کانالی ثبت نشده.')
+        bc.send_message(str(chat_id), 'هنوز کانالی ثبت نکرده‌اید. اول کانال را وصل کنید.')
         return
     rows = []
     for ch in channels:
@@ -577,7 +575,7 @@ def handle_pmode_edit_start(chat_id: str, bale_user_id: str, cq_id: Optional[str
         }])
     bc.send_message(
         str(chat_id),
-        'کانال را انتخاب کنید تا بگویید تبلیغ چطور منتشر شود:',
+        'کانال را انتخاب کنید.',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -590,7 +588,7 @@ def handle_pmode_channel_pick(
     manager = ensure_user(bale_user_id)
     ch = Channel.objects.filter(id=channel_id, manager=manager).first()
     if not ch:
-        bc.send_message(str(chat_id), 'کانال یافت نشد.')
+        bc.send_message(str(chat_id), 'این کانال را پیدا نکردم.')
         return
     sess = get_session(bale_user_id)
     save_session(
@@ -627,8 +625,8 @@ def try_handle_callback(
         bc.send_message(
             str(chat_id),
             'چطور کار می‌کند:\n'
-            'اگر مشتری هستید، بنر را بفرستید، کانال و روز را بردارید و بعد از قبول کانال با کیف پول بله بپردازید.\n'
-            'اگر کانال‌دار هستید، کانال و تعرفه را ثبت کنید و سفارش‌ها را جواب دهید.\n'
+            'مشتری هستید؟ اول بنر را بفرستید. پرداخت بعداً با کیف پول بله است.\n'
+            'کانال‌دار هستید؟ اول کانال را وصل کنید.\n'
             'پشتیبانی بنرها را می‌خواند و واریز پایا را ثبت می‌کند.\n\n'
             'با /start به خانه برمی‌گردید.',
         )

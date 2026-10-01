@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from bot_flow.banned_words import is_allowed
 from bot_flow.handlers import ensure_user, get_session, save_session
-from bot_flow.messages import user_error
+from bot_flow.messages import fa_money, fa_num, user_error
 from channels_app.models import Tariff
 from integrations import bale_client as bc
 from orders.availability import free_days_for_tariff
@@ -93,13 +93,13 @@ def open_customer_home(chat_id: str, bale_user_id: str, username: str = '') -> N
     text = (
         'بخش مشتری\n\n'
         f'شناسه: {user.bale_handle or user.bale_user_id}\n'
-        f'بنر آماده: {n_b}\n'
-        f'در انتظار بررسی: {n_pending}\n'
-        f'روز انتخاب‌شده: {n_cart}\n'
-        f'سفارش باز: {n_open}\n'
-        f'اعتبار: {bal["credit"]:,} تومان\n'
-        f'در امانت: {bal["escrow"]:,} تومان\n\n'
-        'یک گزینه را انتخاب کنید:'
+        f'بنر آماده: {fa_num(n_b)}\n'
+        f'در انتظار بررسی: {fa_num(n_pending)}\n'
+        f'روز انتخاب‌شده: {fa_num(n_cart)}\n'
+        f'سفارش باز: {fa_num(n_open)}\n'
+        f'اعتبار: {fa_money(bal["credit"])}\n'
+        f'در امانت: {fa_money(bal["escrow"])}\n\n'
+        'یکی را انتخاب کنید:'
     )
     bc.send_message(str(chat_id), text, reply_markup=customer_home_keyboard())
 
@@ -123,15 +123,15 @@ def show_banner_list(chat_id: str, bale_user_id: str) -> None:
     lb = linkbank_username()
     lines = [
         '🖼 بنرهای من',
-        f'مرجع انتشار: {lb}',
-        'برای مدیریت، روی یک بنر بزنید.',
+        f'کانال بنرها: {lb}',
+        'روی یک بنر بزنید.',
     ]
     rows: List[List[Dict[str, str]]] = [
         [{'text': '➕ افزودن بنر', 'callback_data': 'cu:new'}],
     ]
     if not banners:
         lines.append('')
-        lines.append('هنوز بنری ندارید. از کانال مرجع بازارسال کنید یا بنر جدید بفرستید.')
+        lines.append('هنوز بنری ندارید. دکمهٔ «افزودن بنر» را بزنید.')
     else:
         for b in banners:
             label = stage_label.get(banner_stage(b), '')
@@ -149,20 +149,27 @@ def show_banner_detail(chat_id: str, bale_user_id: str, banner_id: int) -> None:
         id=banner_id, customer=user, is_active=True
     ).first()
     if not b:
-        bc.send_message(str(chat_id), 'بنر پیدا نشد.')
+        bc.send_message(str(chat_id), 'این بنر را پیدا نکردم.')
         show_banner_list(chat_id, bale_user_id)
         return
     cap = (b.caption or '').strip()
     if len(cap) > 120:
         cap = cap[:120] + '…'
+    kind = {
+        'photo': 'عکس',
+        'video': 'ویدیو',
+        'animation': 'ویدیو',
+        'document': 'فایل',
+        'text': 'متن',
+    }.get(b.media_kind or '', 'متن' if not b.media_kind else b.media_kind)
     lines = [
         f'📌 {b.display_title()}',
-        f'شناسه: #{b.id}',
-        f'نوع: {b.media_kind or "—"}',
-        f'مرجع: {"بله" if b.from_linkbank else "خیر"}',
-        f'متن: {cap or "(بدون کپشن)"}',
+        f'شناسه: {fa_num(b.id)}',
+        f'نوع: {kind}',
+        f'از کانال بنرها: {"آمده" if b.from_linkbank else "نیامده"}',
+        f'متن: {cap or "بدون متن"}',
         '',
-        'چه کاری انجام می‌دهید؟',
+        'یکی را انتخاب کنید:',
     ]
     rows = [
         [{'text': '✅ استفاده در سفارش', 'callback_data': f'cu:use:{b.id}'}],
@@ -283,10 +290,8 @@ def _apply_banner_to_draft(
 def _banner_rules() -> str:
     lb = linkbank_username()
     return (
-        f'بنر یکی از این‌هاست:\n'
-        f'• بازارسال از کانال بنرها ({lb})\n'
-        f'• عکس یا ویدیو، ترجیحاً با متن زیرش (حداکثر ۸۰۰ نویسه)\n'
-        f'• متن تبلیغ، حداقل یک جمله'
+        f'یک بنر بفرستید: عکس یا ویدیو با متن زیرش، '
+        f'یا یک جملهٔ تبلیغ، یا بازارسال از کانال بنرها ({lb}).'
     )
 
 
@@ -301,9 +306,8 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
         note = 'بنر از کانال بنرها رسید و آمادهٔ سفارش است.'
     else:
         note = (
-            'بنر ثبت شد و برای بررسی رفت. '
-            'همین حالا می‌توانید کانال و روز را انتخاب کنید؛ '
-            'سفارش بعد از تأیید بنر برای کانال فرستاده می‌شود.'
+            'بنر برای بررسی رفت.\n'
+            'حالا کانال و روز را انتخاب کنید.'
         )
     rows = [
         [{'text': 'تأیید و انتخاب کانال', 'callback_data': 'cu:catalog'}],
@@ -339,26 +343,26 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         if has_media:
             bc.send_message(
                 str(chat_id),
-                'اگر این فایل بنر است، از «بخش مشتری» دکمهٔ «بنر جدید» را بزنید و دوباره بفرستید.\n\n'
+                'اگر این فایل بنر است، دکمهٔ «بنر جدید» را بزنید و دوباره بفرستید.\n\n'
                 + _banner_rules(),
             )
             return True
         return False
 
     if not has_media and not is_fwd and len(caption.strip()) < 8:
-        bc.send_message(str(chat_id), 'این متن برای بنر کوتاه است.\n\n' + _banner_rules())
+        bc.send_message(str(chat_id), 'این متن برای بنر کوتاه است. یک جملهٔ کامل بفرستید.\n\n' + _banner_rules())
         return True
 
     ok, hits = is_allowed(caption)
     if not ok:
-        bc.send_message(str(chat_id), 'امکان ثبت نیست.\nعبارت غیرمجاز: ' + ', '.join(hits))
+        bc.send_message(str(chat_id), 'این بنر را نمی‌توانم ثبت کنم. این عبارت مجاز نیست: ' + ', '.join(hits))
         return True
 
     user = ensure_user(bale_user_id)
     from_lb, lb_chat, lb_mid = _forward_meta(message)
     msg_id = message.get('message_id')
     if not msg_id:
-        bc.send_message(str(chat_id), 'این پیام شناسه نداشت. یک بار دیگر بفرستید.')
+        bc.send_message(str(chat_id), 'این پیام را نگرفتم. یک بار دیگر بفرستید.')
         return True
 
     banner = _apply_banner_to_draft(
@@ -399,7 +403,7 @@ def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
     sess = get_session(bale_user_id)
     pending = (sess.data or {}).get('pending_banner') or {}
     if not pending:
-        bc.send_message(str(chat_id), 'بنری در صف نیست.')
+        bc.send_message(str(chat_id), 'بنری برای نام‌گذاری نمانده. اول بنر را بفرستید.')
         open_customer_home(chat_id, bale_user_id)
         return
     user = ensure_user(bale_user_id)
@@ -410,7 +414,7 @@ def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
     if banner_id:
         banner = CustomerBanner.objects.filter(id=banner_id, customer=user, is_active=True).first()
         if not banner:
-            bc.send_message(str(chat_id), 'بنر پیدا نشد.')
+            bc.send_message(str(chat_id), 'این بنر را پیدا نکردم.')
             open_customer_home(chat_id, bale_user_id)
             return
         if name:
@@ -435,7 +439,7 @@ def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
     save_session(sess, STATE_CUST_BROWSE, role='customer')
     bc.send_message(
         str(chat_id),
-        f'✅ بنر «{banner.display_title()}» ذخیره و برای سفارش انتخاب شد.\n'
+        f'✅ بنر «{banner.display_title()}» ذخیره شد و برای سفارش انتخاب شد.\n'
         'حالا تعرفه را انتخاب کنید:',
     )
     show_catalog(chat_id, bale_user_id)
@@ -449,7 +453,7 @@ def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
         id=banner_id, customer=user, is_active=True
     ).first()
     if not banner or banner_stage(banner) == 'rejected':
-        bc.send_message(str(chat_id), 'بنر معتبر پیدا نشد.')
+        bc.send_message(str(chat_id), 'این بنر را نمی‌توانید برای سفارش بردارید.')
         show_banner_list(chat_id, bale_user_id)
         return
     Order.objects.filter(customer=user, status='draft').delete()
@@ -459,7 +463,7 @@ def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
     order.save(update_fields=['customer_banner'])
     sess = get_session(bale_user_id)
     save_session(sess, STATE_CUST_BROWSE, role='customer')
-    bc.send_message(str(chat_id), f'✅ بنر «{banner.display_title()}» انتخاب شد.\nفهرست تعرفه‌ها:')
+    bc.send_message(str(chat_id), f'✅ بنر «{banner.display_title()}» انتخاب شد.\nحالا فهرست تعرفه‌ها را ببینید.')
     show_catalog(chat_id, bale_user_id)
 
 
@@ -467,7 +471,7 @@ def soft_delete_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
     user = ensure_user(bale_user_id)
     b = CustomerBanner.objects.filter(id=banner_id, customer=user, is_active=True).first()
     if not b:
-        bc.send_message(str(chat_id), 'بنر پیدا نشد.')
+        bc.send_message(str(chat_id), 'این بنر را پیدا نکردم.')
         return
     b.is_active = False
     b.save(update_fields=['is_active'])
@@ -489,7 +493,7 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     if not tariffs:
         bc.send_message(
             str(chat_id),
-            'تعرفه‌ای فعال نیست.',
+            'الان تعرفه‌ای برای انتخاب نیست.',
             reply_markup=bc.inline_keyboard([_nav_row()]),
         )
         return
@@ -498,10 +502,10 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     rows = []
     for t in chunk:
         if t.group_id:
-            label = f'📦 {t.group.name} | {t.name} | {t.price:,}ت'
+            label = f'📦 {t.group.name} | {t.name} | {fa_money(t.price, "ت")}'
         else:
             ch = t.channel.name if t.channel else '?'
-            label = f'📢 {ch} | {t.name} | {t.price:,}ت'
+            label = f'📢 {ch} | {t.name} | {fa_money(t.price, "ت")}'
         rows.append([{'text': label[:64], 'callback_data': f'cu:tar:{t.id}'}])
     nav = []
     if page > 0:
@@ -517,7 +521,7 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     rows.append(_nav_row())
     bc.send_message(
         str(chat_id),
-        f'📋 فهرست تعرفه‌ها — صفحه {page + 1}',
+        f'📋 فهرست تعرفه‌ها — صفحه {fa_num(page + 1)}',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -535,7 +539,7 @@ def show_days_for_tariff(chat_id: str, bale_user_id: str, tariff_id: int) -> Non
     if not free:
         bc.send_message(
             str(chat_id),
-            f'برای «{owner} — {t.name}» نوبت خالی نیست.',
+            f'برای «{owner} — {t.name}» در این روزها نوبت خالی نیست.',
             reply_markup=bc.inline_keyboard([
                 [{'text': 'فهرست', 'callback_data': 'cu:catalog'}],
                 _nav_row(),
@@ -565,7 +569,7 @@ def show_days_for_tariff(chat_id: str, bale_user_id: str, tariff_id: int) -> Non
     ])
     bc.send_message(
         str(chat_id),
-        f'📅 روز خالی\n{owner} — {t.name} — {t.price:,} تومان',
+        f'📅 روز خالی\n{owner} — {t.name} — {fa_money(t.price)}',
         reply_markup=bc.inline_keyboard(rows),
     )
 
@@ -651,9 +655,8 @@ def handle_customer_callback(
         lb = linkbank_username()
         bc.send_message(
             str(chat_id),
-            f'عکس یا ویدیوی بنر را بفرستید و متنش را زیر همان عکس بنویسید.\n'
-            f'اگر بنر از قبل در کانال بنرها ({lb}) هست، همان پست را بازارسال کنید.\n'
-            'متن حداکثر ۸۰۰ نویسه است.',
+            f'بنر را بفرستید: عکس یا ویدیو، و متن را زیر همان عکس بنویسید.\n'
+            f'اگر بنر از قبل در کانال بنرها ({lb}) هست، همان پست را بازارسال کنید.',
             reply_markup=bc.inline_keyboard([[{'text': 'انصراف', 'callback_data': 'cu:banners'}]]),
         )
         return True
@@ -704,7 +707,7 @@ def handle_customer_callback(
         save_session(sess, STATE_CUST_RENAME, role='customer')
         sess.data = d
         sess.save(update_fields=['data'])
-        bc.send_message(str(chat_id), 'نام تازهٔ بنر را بفرستید. حداکثر چهل نویسه.')
+        bc.send_message(str(chat_id), 'یک نام کوتاه برای این بنر بفرستید.')
         return True
     if data.startswith('cu:editcap:'):
         bid = int(data.split(':')[2])
@@ -714,7 +717,7 @@ def handle_customer_callback(
         save_session(sess, STATE_CUST_EDIT_CAPTION, role='customer')
         sess.data = d
         sess.save(update_fields=['data'])
-        bc.send_message(str(chat_id), 'متن (کپشن) جدید را بفرستید. تصویر/فیلم عوض نمی‌شود.')
+        bc.send_message(str(chat_id), 'متن تازهٔ بنر را بفرستید. عکس و ویدیو همان می‌ماند.')
         return True
     if data.startswith('cu:del:'):
         bid = int(data.split(':')[2])
@@ -724,7 +727,7 @@ def handle_customer_callback(
                 {'text': 'خیر', 'callback_data': f'cu:banner:{bid}'},
             ]
         ])
-        bc.send_message(str(chat_id), 'حذف این بنر قطعی است؟', reply_markup=kb)
+        bc.send_message(str(chat_id), 'این بنر حذف شود؟', reply_markup=kb)
         return True
     if data.startswith('cu:delok:'):
         soft_delete_banner(chat_id, bale_user_id, int(data.split(':')[2]))
@@ -734,7 +737,7 @@ def handle_customer_callback(
         sess = get_session(bale_user_id)
         pending = (sess.data or {}).get('pending_banner')
         if not pending:
-            bc.send_message(str(chat_id), 'بنری در انتظار نیست.')
+            bc.send_message(str(chat_id), 'بنری برای ثبت درخواست نمانده. اول بنر را بفرستید.')
             return True
         from orders.banner_publish import create_publish_request
 
@@ -753,7 +756,7 @@ def handle_customer_callback(
         fee_txt = 'رایگان' if fee == 0 else f'{fee:,} تومان (اعلامی)'
         bc.send_message(
             str(chat_id),
-            f'📨 درخواست برای اپراتور ثبت شد.\nهزینه اعلامی: {fee_txt}',
+            f'📨 درخواست برای پشتیبانی ثبت شد.\nهزینه اعلامی: {fee_txt}',
             reply_markup=customer_home_keyboard(),
         )
         return True
@@ -802,7 +805,7 @@ def handle_customer_callback(
             return True
         bc.send_message(
             str(chat_id),
-            f'سفارش ثبت شد. {result["count"]} کانال باید جواب بدهد.',
+            f'سفارش ثبت شد. منتظر جواب {fa_num(result["count"])} کانال‌دار بمانید.',
             reply_markup=customer_home_keyboard(),
         )
         sess = get_session(bale_user_id)
@@ -833,8 +836,7 @@ def handle_customer_callback(
             bc.send_message(
                 str(chat_id),
                 'این روز را نگه داشتم.\n'
-                'برای ثبت سفارش اول بنر لازم است. عکس، ویدیو یا متن تبلیغ را بفرستید، '
-                'یا از کانال مرجع بازارسال کنید.',
+                'حالا بنر را بفرستید: عکس، ویدیو یا متن تبلیغ.',
                 reply_markup=bc.inline_keyboard([
                     [{'text': 'ساخت بنر', 'callback_data': 'cu:new'}],
                     [{'text': 'بنرهای من', 'callback_data': 'cu:banners'}],
@@ -849,7 +851,7 @@ def handle_customer_callback(
             sess.data = d
             sess.save(update_fields=['data'])
         if not result.get('ok'):
-            bc.send_message(str(chat_id), 'این نوبت در دسترس نیست.')
+            bc.send_message(str(chat_id), 'این روز دیگر خالی نیست. روز دیگری را انتخاب کنید.')
             show_days_for_tariff(chat_id, bale_user_id, tariff_id)
             return True
         kb = bc.inline_keyboard([
@@ -861,7 +863,7 @@ def handle_customer_callback(
         ])
         bc.send_message(
             str(chat_id),
-            f'➕ اضافه شد.\n\n{cart_summary(result["order"])}',
+            f'این روز انتخاب شد.\n\n{cart_summary(result["order"])}',
             reply_markup=kb,
         )
         return True
@@ -897,13 +899,13 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
         user = ensure_user(bale_user_id)
         b = CustomerBanner.objects.filter(id=bid, customer=user, is_active=True).first()
         if not b:
-            bc.send_message(str(chat_id), 'بنر پیدا نشد.')
+            bc.send_message(str(chat_id), 'این بنر را پیدا نکردم.')
             open_customer_home(chat_id, bale_user_id)
             return True
         b.title = (norm or '')[:40]
         b.save(update_fields=['title'])
         save_session(sess, STATE_CUST_HOME, role='customer')
-        bc.send_message(str(chat_id), f'✅ نام بنر شد: «{b.display_title()}»')
+        bc.send_message(str(chat_id), f'✅ نام بنر «{b.display_title()}» شد.')
         show_banner_detail(chat_id, bale_user_id, b.id)
         return True
 
@@ -930,7 +932,7 @@ def try_handle_customer_text(chat_id: str, bale_user_id: str, text: str) -> bool
         if norm:
             bc.send_message(
                 str(chat_id),
-                'از دکمه‌های پنل استفاده کنید.\n/customer خانه | /banners بنرها | /wallet کیف پول',
+                'از دکمه‌های پایین یکی را بزنید.',
                 reply_markup=customer_home_keyboard(),
             )
             return True

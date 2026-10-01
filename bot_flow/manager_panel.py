@@ -16,6 +16,7 @@ from bot_flow.messages import (
     fa_money,
     fa_num,
     format_manager_order_line,
+    label_publish_mode,
 )
 from channels_app.models import Channel, ChannelGroup, Tariff
 from integrations import bale_client as bc
@@ -88,12 +89,12 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
         manager=user, manager_status='pending'
     ).exclude(order__status='waiting_banner').count()
     text = (
-        '🎛️ پنل مدیر کانال\n\n'
-        f'آیدی: {user.bale_handle or user.bale_user_id}\n'
+        'بخش کانال‌دار\n\n'
+        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
         f'کانال‌ها: {fa_num(n_ch)}\n'
         f'سفارش در انتظار: {fa_num(n_pending)}\n'
-        f'موجودی قابل برداشت: {fa_money(bal)}\n\n'
-        'یک گزینه را انتخاب کنید:'
+        f'قابل برداشت: {fa_money(bal)}\n\n'
+        'یکی را انتخاب کنید:'
     )
     bc.send_message(str(chat_id), text, reply_markup=main_keyboard())
 
@@ -104,13 +105,13 @@ def show_channels(chat_id: str, user: User) -> None:
     if not channels and not groups:
         bc.send_message(
             str(chat_id),
-            'هنوز کانالی ندارید.\nاز «ثبت کانال» شروع کنید.',
+            'هنوز کانالی ندارید. دکمهٔ «ثبت کانال» را بزنید.',
             reply_markup=main_keyboard(),
         )
         return
     lines = ['📢 کانال‌های شما:']
     for ch in channels:
-        mode = ch.publish_mode_label
+        mode = label_publish_mode(ch.publish_mode)
         lines.append(
             f'• {ch.name} ({ch.link or "—"})\n'
             f'  حالت: {mode} | تعرفه: {fa_num(ch.tariffs.count())}'
@@ -137,9 +138,9 @@ def show_tariffs(chat_id: str, user: User) -> None:
         .order_by('-id')[:30]
     )
     if not tariffs:
-        bc.send_message(str(chat_id), 'تعرفه‌ای ثبت نشده. ابتدا کانال ثبت کنید.')
+        bc.send_message(str(chat_id), 'هنوز تعرفه‌ای ندارید. اول کانالتان را ثبت کنید.')
         return
-    lines = ['💳 تعرفه‌ها — برای ویرایش/حذف روی هر مورد بزنید:']
+    lines = ['💳 تعرفه‌ها\nروی هر مورد بزنید:']
     rows = []
     for tar in tariffs:
         owner = tar.group.name if tar.group_id else (tar.channel.name if tar.channel_id else '?')
@@ -169,7 +170,7 @@ def show_tariff_detail(chat_id: str, user: User, tariff_id: int) -> None:
         .first()
     )
     if not tar:
-        bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+        bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
         return
     owner = tar.group.name if tar.group_id else (tar.channel.name if tar.channel_id else '?')
     hour = f'{tar.start_hour:02d}:00' if tar.start_hour is not None else '—'
@@ -183,7 +184,7 @@ def show_tariff_detail(chat_id: str, user: User, tariff_id: int) -> None:
         f'وضعیت: {"فعال" if tar.is_active else "غیرفعال"}',
     ]
     rows = [
-        [{'text': '✏️ ویرایش (همان فرمت تعرفه)', 'callback_data': f'mgr:tedit:{tar.id}'}],
+        [{'text': '✏️ ویرایش تعرفه', 'callback_data': f'mgr:tedit:{tar.id}'}],
         [
             {
                 'text': '⏸ غیرفعال' if tar.is_active else '✅ فعال‌سازی',
@@ -199,11 +200,11 @@ def show_tariff_detail(chat_id: str, user: User, tariff_id: int) -> None:
 def start_add_tariff(chat_id: str, user: User, channel_id: int) -> None:
     ch = Channel.objects.filter(id=channel_id, manager=user).first()
     if not ch:
-        bc.send_message(str(chat_id), 'کانال یافت نشد.')
+        bc.send_message(str(chat_id), 'این کانال را پیدا نکردم.')
         return
     sess = _sess(user.bale_user_id or '')
     _save(sess, STATE_MGR_TARIFF, tariff_channel_id=ch.id, edit_tariff_id=None)
-    bc.send_message(str(chat_id), f'تعرفه جدید برای «{ch.name}»:\n{MSG_TARIFF_HELP}')
+    bc.send_message(str(chat_id), f'تعرفهٔ «{ch.name}» را بفرستید:\n{MSG_TARIFF_HELP}')
 
 
 def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
@@ -230,17 +231,17 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
             if start_hour is None or dur is None or price is None:
                 raise ValueError('nums')
             if not (0 <= start_hour <= 23):
-                bc.send_message(str(chat_id), 'ساعت ارسال باید بین ۰ تا ۲۳ باشد.')
+                bc.send_message(str(chat_id), 'ساعت ارسال را بین ۰ تا ۲۳ بنویسید.')
                 return True
         elif len(parts) == 3:
             name, dur, price = parts[0], _num(parts[1]), _num(parts[2])
             if dur is None or price is None:
                 raise ValueError('nums')
         else:
-            bc.send_message(str(chat_id), f'فرمت نامعتبر.\n{MSG_TARIFF_HELP}')
+            bc.send_message(str(chat_id), f'این خط را به‌صورت تعرفه نفهمیدم.\n{MSG_TARIFF_HELP}')
             return True
     except (ValueError, TypeError):
-        bc.send_message(str(chat_id), 'اعداد نامعتبر.')
+        bc.send_message(str(chat_id), 'عددها را درست ننوشته‌اید. یک بار دیگر بفرستید.')
         return True
 
     edit_id = (sess.data or {}).get('edit_tariff_id')
@@ -248,7 +249,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
         tar = Tariff.objects.filter(models_q_manager(user), id=edit_id).first()
         if not tar:
             _save(sess, 'idle')
-            bc.send_message(str(chat_id), 'تعرفه برای ویرایش پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را برای ویرایش پیدا نکردم.')
             return True
         tar.name = name[:100]
         tar.start_hour = start_hour
@@ -264,7 +265,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
             str(chat_id),
             f'تعرفه به‌روز شد: {tar.name}\n'
             f'ارسال {fa_num(hour_s)} | {fa_num(tar.duration_hours)} ساعت | {fa_money(tar.price)}\n'
-            'سفارش‌هایی که قبلاً ثبت شده‌اند با همان قیمت قبلی می‌مانند.',
+            'سفارش‌های قبلی با همان قیمت می‌مانند.',
             reply_markup=main_keyboard(),
         )
         return True
@@ -275,7 +276,7 @@ def handle_tariff_line(chat_id: str, user: User, text: str) -> bool:
 
     if not ch:
         _save(sess, 'idle')
-        bc.send_message(str(chat_id), 'کانال نامعتبر.')
+        bc.send_message(str(chat_id), 'این کانال را پیدا نکردم.')
         return True
 
     t = Tariff.objects.create(
@@ -343,8 +344,7 @@ def handle_busy_date_text(chat_id: str, user: User, text: str) -> bool:
     _save(sess, 'idle')
     bc.send_message(
         str(chat_id),
-        'ثبت روز پر از مسیر «تقویم و نوبت» انجام می‌شود:\n'
-        'کانال → تعرفه → ثبت نوبت دستی',
+        'برای پر کردن یک روز، از «تقویم و نوبت» کانال را انتخاب کنید.',
     )
     show_calendar_entry(chat_id, user)
     return True
@@ -385,7 +385,7 @@ def start_bank_add(chat_id: str, user: User) -> None:
     _save(sess, STATE_MGR_BANK_IBAN)
     bc.send_message(
         str(chat_id),
-        'شماره شبا را بفرستید (با IR و ۲۴ رقم):\nمثال: IR120170000000123456789001',
+        'شماره شبا را بفرستید.\nبا IR و ۲۴ رقم، مثل IR120170000000123456789001',
     )
 
 
@@ -395,10 +395,10 @@ def handle_bank_iban(chat_id: str, user: User, text: str) -> bool:
         return False
     iban = (text or '').replace(' ', '').upper()
     if not ws.validate_iban(iban):
-        bc.send_message(str(chat_id), 'شبا نامعتبر است. دوباره بفرستید.')
+        bc.send_message(str(chat_id), 'این شبا درست نیست. یک بار دیگر بفرستید.')
         return True
     _save(sess, STATE_MGR_BANK_HOLDER, pending_iban=iban)
-    bc.send_message(str(chat_id), 'نام صاحب حساب را دقیقاً مطابق کارت/شبا بفرستید:')
+    bc.send_message(str(chat_id), 'نام صاحب حساب را همان‌طور که روی کارت است بفرستید.')
     return True
 
 
@@ -453,7 +453,7 @@ def start_payout(chat_id: str, user: User) -> None:
 def confirm_payout(chat_id: str, user: User, bank_id: int) -> None:
     bank = BankAccount.objects.filter(id=bank_id, user=user).first()
     if not bank:
-        bc.send_message(str(chat_id), 'شبا یافت نشد.')
+        bc.send_message(str(chat_id), 'این شبا را پیدا نکردم.')
         return
     r = ws.request_payout(user, bank)
     if not r.get('ok'):
@@ -470,7 +470,7 @@ def confirm_payout(chat_id: str, user: User, bank_id: int) -> None:
 
 def operator_payout_file(chat_id: str, user: User) -> None:
     if not ws.is_operator(user.bale_user_id or ''):
-        bc.send_message(str(chat_id), 'فقط پشتیبانی.')
+        bc.send_message(str(chat_id), 'این کار فقط برای پشتیبانی است.')
         return
     r = ws.build_payout_batch(user)
     if not r.get('ok'):
@@ -543,7 +543,7 @@ def try_handle_callback(
         flow.save_session(sess, flow.STATE_AWAIT_LINKS, role='manager', verified_ids=[])
         bc.send_message(
             str(chat_id),
-            'لینک کانال‌ها را بفرستید (هر خط یکی).\n'
+            'پیوند کانال را بفرستید. اگر چند کانال یک مجموعه هستند، هر پیوند را در یک خط بنویسید.\n\n'
             f'{flow.ownership_prompt(user)}',
         )
         return True
@@ -557,7 +557,7 @@ def try_handle_callback(
         tid = int(data.split(':')[2])
         tar = Tariff.objects.filter(models_q_manager(user), id=tid).first()
         if not tar:
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         ch = tar.channel
         if not ch and tar.group_id:
@@ -569,19 +569,19 @@ def try_handle_callback(
             tariff_channel_id=ch.id if ch else None,
             edit_tariff_id=tid,
         )
-        bc.send_message(str(chat_id), f'ویرایش تعرفه «{tar.name}»:\n{MSG_TARIFF_HELP}')
+        bc.send_message(str(chat_id), f'تعرفهٔ تازهٔ «{tar.name}» را بفرستید:\n{MSG_TARIFF_HELP}')
         return True
     if data.startswith('mgr:ttoggle:'):
         tid = int(data.split(':')[2])
         tar = Tariff.objects.filter(models_q_manager(user), id=tid).first()
         if not tar:
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         tar.is_active = not tar.is_active
         tar.save(update_fields=['is_active'])
         bc.send_message(
             str(chat_id),
-            f'تعرفه «{tar.name}» {"فعال" if tar.is_active else "غیرفعال"} شد.',
+            f'تعرفه «{tar.name}» {"روشن" if tar.is_active else "خاموش"} شد.',
         )
         show_tariff_detail(chat_id, user, tid)
         return True
@@ -589,7 +589,7 @@ def try_handle_callback(
         tid = int(data.split(':')[2])
         tar = Tariff.objects.filter(models_q_manager(user), id=tid).first()
         if not tar:
-            bc.send_message(str(chat_id), 'تعرفه پیدا نشد.')
+            bc.send_message(str(chat_id), 'این تعرفه را پیدا نکردم.')
             return True
         from orders.cart import retire_tariff
 
@@ -598,19 +598,18 @@ def try_handle_callback(
         if kept:
             bc.send_message(
                 str(chat_id),
-                f'تعرفه «{name}» سفارش یا روز رزرو دارد، پس حذف نشد و فقط خاموش شد. '
-                'سفارش‌ها و روزهای قبلی سر جایشان ماندند.',
+                f'تعرفه «{name}» سفارش یا روز رزرو دارد، پس حذف نشد و فقط خاموش شد.',
                 reply_markup=main_keyboard(),
             )
         else:
-            bc.send_message(str(chat_id), f'تعرفه «{name}» حذف شد. سفارشی به آن وصل نبود.', reply_markup=main_keyboard())
+            bc.send_message(str(chat_id), f'تعرفه «{name}» حذف شد.', reply_markup=main_keyboard())
         return True
     if data == 'mgr:op_payout_file':
         operator_payout_file(chat_id, user)
         return True
     if data.startswith('mgr:op_paid:'):
         if not ws.is_operator(bale_user_id):
-            bc.send_message(str(chat_id), 'فقط پشتیبانی.')
+            bc.send_message(str(chat_id), 'این کار فقط برای پشتیبانی است.')
             return True
         r = ws.mark_batch_paid(int(data.split(':')[2]))
         bc.send_message(str(chat_id), '✅ ثبت شد' if r.get('ok') else f'❌ {r.get("error")}')

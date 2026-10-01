@@ -34,7 +34,7 @@ def manager_miniapp_url() -> str:
 
 
 def open_miniapp_keyboard(
-    label: str = 'دفتر کار لینک‌بانک',
+    label: str = 'دفتر کار لینک‌بان',
     role: str | None = None,
 ) -> Optional[Dict[str, Any]]:
     url = miniapp_url(role=role) if role else manager_miniapp_url()
@@ -48,7 +48,7 @@ def open_miniapp_keyboard(
 
 def send_miniapp_entry(
     chat_id: str,
-    text: str = 'دفتر کار لینک‌بانک:',
+    text: str = 'دفتر کار لینک‌بان:',
     role: str | None = 'manager',
 ) -> Dict[str, Any]:
     kb = open_miniapp_keyboard(role=role)
