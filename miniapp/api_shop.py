@@ -15,9 +15,13 @@ from miniapp.api import _auth_user, _json_body
 from orders import cart as cart_svc
 from orders.availability import (
     clear_manual_busy_slot,
+    day_status_for_viewer,
     day_status_map,
+    has_slot_conflict,
     list_manual_busy_slots,
     mark_tariff_day_busy,
+    unavailable_why,
+    viewer_has_ready_banner,
 )
 from orders.banner_publish import operator_decide
 from orders.models import BannerPublishRequest, CustomerBanner, Order, OrderItem
@@ -150,13 +154,16 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
         return _err('not_found', 404)
     elif t is False:
         return _err('forbidden', 403)
+    ready_banner = True if not customer else viewer_has_ready_banner(user)
     days = []
-    for d, status in day_status_map(t, 14):
+    for d, raw in day_status_map(t, 14):
+        status = raw if not customer else day_status_for_viewer(t, d, ready_banner=ready_banner)
         days.append({
             'date': d.isoformat(),
             'jalali': format_jalali(d),
             'free': status == 'free',
             'status': status,
+            'why': unavailable_why(status),
         })
     busy_slots = []
     if not customer:
@@ -325,11 +332,24 @@ def api_cart(request: HttpRequest) -> JsonResponse:
     assert user is not None
     cart_svc.release_abandoned_carts(user)
     order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
+    ready_banner = viewer_has_ready_banner(user)
     items = []
     total = 0
+    cart_status = 'free'
     if order:
         for it in order.items.filter(manager_status='cart').select_related('tariff', 'channel', 'tariff__group'):
             start = timezone.localtime(it.requested_start)
+            line_status = day_status_for_viewer(it.tariff, start.date(), ready_banner=True)
+            if line_status == 'full' and not has_slot_conflict(
+                it.tariff,
+                it.requested_start,
+                it.requested_end,
+                channel=it.channel,
+                exclude_item_id=it.id,
+            ):
+                line_status = 'free'
+            if line_status == 'free' and not ready_banner:
+                line_status = 'banner-hold'
             items.append({
                 'id': it.id,
                 'tariff_id': it.tariff_id,
@@ -338,8 +358,15 @@ def api_cart(request: HttpRequest) -> JsonResponse:
                 'date': start.date().isoformat(),
                 'jalali': format_jalali(start.date()),
                 'price': it.price,
+                'status': line_status,
+                'why': unavailable_why(line_status),
             })
         total = order.total_amount
+        rank = {'past': 3, 'full': 2, 'banner-hold': 1, 'free': 0}
+        cart_status = 'free'
+        for row in items:
+            if rank.get(row['status'], 0) > rank.get(cart_status, 0):
+                cart_status = row['status']
     banner = None
     if order and order.customer_banner_id:
         cb = order.customer_banner
@@ -355,6 +382,8 @@ def api_cart(request: HttpRequest) -> JsonResponse:
         'banner': banner,
         'has_banner': bool(order and order.banner_message_id),
         'hold_until': hold_until,
+        'status': cart_status if items else 'free',
+        'why': unavailable_why(cart_status) if items else '',
     })
 
 

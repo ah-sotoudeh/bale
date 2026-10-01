@@ -74,20 +74,36 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'members_count': (t.channel.members_count if t.channel_id else 0) or 0,
             'avg_views': (t.channel.avg_views if t.channel_id else 0) or 0,
         })
-    from orders.availability import day_status_map
+    from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
+    from orders.models import OrderItem
 
+    own_ids = set(
+        OrderItem.objects.filter(
+            order__customer=user,
+            order__status='draft',
+            manager_status='cart',
+        ).values_list('id', flat=True)
+    )
     busy = []
     seq = 0
     for t in qs:
         for day, status in day_status_map(t, 14):
             if status != 'full':
                 continue
+            if own_ids:
+                start, end = slot_bounds(t, day)
+                if not has_slot_conflict(
+                    t, start, end, channel=t.channel, exclude_item_ids=own_ids
+                ):
+                    continue
             seq += 1
             busy.append({
                 'id': -(t.id * 100 + seq),
                 'tariff_id': t.id,
                 'date': day.isoformat(),
                 'manual': False,
+                'status': 'full',
+                'why': unavailable_why('full'),
             })
     from integrations.channel_stats import recent_snapshots
 

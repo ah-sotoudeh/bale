@@ -82,12 +82,21 @@ def item_channel_ids(item: OrderItem) -> set:
     return ids
 
 
+def _exclude_items(qs, exclude_item_id: Optional[int], exclude_item_ids: Optional[set] = None):
+    if exclude_item_id is not None:
+        qs = qs.exclude(id=exclude_item_id)
+    if exclude_item_ids:
+        qs = qs.exclude(id__in=exclude_item_ids)
+    return qs
+
+
 def channel_window_conflict(
     tariff: Tariff,
     start: datetime,
     end: datetime,
     exclude_item_id: Optional[int] = None,
     channel: Optional[Channel] = None,
+    exclude_item_ids: Optional[set] = None,
 ) -> bool:
     """تعرفهٔ دیگرِ همان کانال، اگر بازه‌اش روی این ساعت بیفتد، روز را می‌بندد."""
     ch_ids = _channel_ids_for(tariff, channel)
@@ -106,8 +115,7 @@ def channel_window_conflict(
         )
         .distinct()
     )
-    if exclude_item_id is not None:
-        qs = qs.exclude(id=exclude_item_id)
+    qs = _exclude_items(qs, exclude_item_id, exclude_item_ids)
     wanted = set(ch_ids)
     for item in qs:
         if item.tariff_id == tariff.id:
@@ -134,14 +142,14 @@ def has_slot_conflict(
     end: datetime,
     exclude_item_id: Optional[int] = None,
     channel: Optional[Channel] = None,
+    exclude_item_ids: Optional[set] = None,
 ) -> bool:
     qs = OrderItem.objects.select_related('tariff', 'order').filter(
         tariff=tariff,
         manager_status__in=ACTIVE_ITEM_STATUSES,
         order__status__in=ACTIVE_ORDER_STATUSES,
     )
-    if exclude_item_id is not None:
-        qs = qs.exclude(id=exclude_item_id)
+    qs = _exclude_items(qs, exclude_item_id, exclude_item_ids)
 
     for item in qs:
         other_start, other_end = effective_window(item)
@@ -152,7 +160,12 @@ def has_slot_conflict(
             return True
 
     if channel_window_conflict(
-        tariff, start, end, exclude_item_id=exclude_item_id, channel=channel
+        tariff,
+        start,
+        end,
+        exclude_item_id=exclude_item_id,
+        channel=channel,
+        exclude_item_ids=exclude_item_ids,
     ):
         return True
 
@@ -222,14 +235,42 @@ def free_days_for_tariff(tariff: Tariff, from_date, to_date, channel: Optional[C
         day = day + timedelta(days=1)
 
 
+WHY_UNAVAILABLE = {
+    'past': 'این ساعت گذشته است و دیگر نمی‌شود این روز را برداشت.',
+    'full': 'این روز پر است.',
+    'banner-hold': 'اول بنر روی کانال بنرها',
+}
+
+
 def classify_day(tariff: Tariff, day: date, now: Optional[datetime] = None) -> str:
-    """free، full، یا past. بنر فقط روی کلاینت است."""
+    """free، full، یا past. بنرِ مشتری جداست."""
     if is_past_slot(tariff, day, now=now):
         return 'past'
     start, end = slot_bounds(tariff, day)
     if has_slot_conflict(tariff, start, end, channel=tariff.channel):
         return 'full'
     return 'free'
+
+
+def viewer_has_ready_banner(user) -> bool:
+    """بنر روی کانال بنرها تنها چیزی است که روز را از حالت بنر خارج می‌کند."""
+    from orders.banner_publish import banner_stage
+    from orders.models import CustomerBanner
+
+    banners = CustomerBanner.objects.filter(customer=user, is_active=True)
+    return any(banner_stage(banner) == 'ready' for banner in banners)
+
+
+def day_status_for_viewer(tariff: Tariff, day: date, *, ready_banner: bool) -> str:
+    """اگر روز خالی است ولی بنر آماده نیست، دلیل قفل banner-hold است."""
+    status = classify_day(tariff, day)
+    if status == 'free' and not ready_banner:
+        return 'banner-hold'
+    return status
+
+
+def unavailable_why(status: str) -> str:
+    return WHY_UNAVAILABLE.get(status, '')
 
 
 def day_status_map(tariff: Tariff, days: int = 14) -> List[Tuple[date, str]]:

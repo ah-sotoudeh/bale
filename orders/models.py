@@ -71,6 +71,7 @@ class BannerPublishRequest(models.Model):
 class Order(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft'),
+        ('waiting_banner', 'WaitingBanner'),
         ('waiting_managers', 'WaitingManagers'),
         ('waiting_customer_confirm', 'WaitingCustomerConfirm'),
         ('waiting_payment', 'WaitingPayment'),

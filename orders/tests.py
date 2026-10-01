@@ -1558,3 +1558,43 @@ class CalendarHoldTests(TestCase):
 
         self.assertNotIn('لغو نمی‌شود', user_error('not_cancellable'))
         self.assertIn('لغو نمی‌شود', user_error('too_late'))
+
+    def test_a_free_day_is_banner_hold_until_the_banner_is_ready(self):
+        from orders.models import CustomerBanner
+
+        calendar = self.client.get(
+            '/miniapp/api/calendar',
+            {'tariff_id': self.tariff.id, 'for': 'customer', 'debug_bale_id': 'hold-c'},
+        )
+        self.assertEqual(calendar.status_code, 200, calendar.content)
+        row = next(d for d in calendar.json()['days'] if d['date'] == self.day.isoformat())
+        self.assertEqual(row['status'], 'banner-hold')
+        self.assertFalse(row['free'])
+        self.assertIn('بنر', row['why'])
+        added = add_to_cart(self.customer, self.tariff, self.day)
+        self.assertTrue(added['ok'], added)
+        held = self.client.get('/miniapp/api/cart', {'debug_bale_id': 'hold-c'})
+        body = held.json()
+        self.assertEqual(body['status'], 'banner-hold')
+        self.assertIn('بنر', body['why'])
+        self.assertEqual(body['items'][0]['status'], 'banner-hold')
+        CustomerBanner.objects.create(
+            customer=self.customer,
+            storage_chat_id='1',
+            storage_message_id='9',
+            from_linkbank=True,
+            is_active=True,
+        )
+        opened = self.client.get(
+            '/miniapp/api/calendar',
+            {'tariff_id': self.night.id, 'for': 'customer', 'debug_bale_id': 'hold-c'},
+        )
+        night = next(d for d in opened.json()['days'] if d['date'] == self.day.isoformat())
+        self.assertEqual(night['status'], 'full')
+        later = self.day + timedelta(days=2)
+        free_day = next(d for d in opened.json()['days'] if d['date'] == later.isoformat())
+        self.assertEqual(free_day['status'], 'free')
+        self.assertEqual(free_day['why'], '')
+        ready_cart = self.client.get('/miniapp/api/cart', {'debug_bale_id': 'hold-c'})
+        self.assertEqual(ready_cart.json()['status'], 'free')
+        self.assertEqual(ready_cart.json()['why'], '')
