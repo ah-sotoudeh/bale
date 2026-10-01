@@ -52,19 +52,16 @@ def fee_for_user(user: User) -> int:
 
 
 def user_facing_error(code: str) -> str:
-    """پیام امن برای کاربر/اپراتور — بدون URL و توکن."""
+    """پیام امن برای کاربر — بدون URL و توکن."""
     mapping = {
-        'not_found': 'درخواست پیدا نشد.',
-        'already_handled': 'این درخواست قبلاً رسیدگی شده.',
+        'not_found': 'این درخواست را پیدا نکردم. فهرست را یک بار تازه کنید.',
+        'already_handled': 'به این درخواست قبلاً جواب داده‌اید.',
         'not_operator': 'فقط پشتیبانی می‌تواند این کار را انجام دهد.',
-        'publish_failed': (
-            f'ارسال به کانال مرجع ({linkbank_channel()}) ناموفق بود. '
-            'بازو باید در آن کانال ادمین باشد و حق ارسال داشته باشد.'
-        ),
-        'banned': 'متن شامل عبارت غیرمجاز است.',
-        'forbidden': 'اجازه این کار را ندارید.',
+        'publish_failed': 'بنر در کانال بنرها منتشر نشد. به پشتیبانی بگویید تا ارسال را بررسی کند.',
+        'banned': 'این متن مجاز نیست. عبارت را عوض کنید و دوباره بفرستید.',
+        'forbidden': 'این کار برای شما نیست.',
     }
-    return mapping.get(code, 'خطایی رخ داد. یک بار دیگر تلاش کنید.')
+    return mapping.get(code, 'یک اشکال پیش آمد. یک بار دیگر تلاش کنید.')
 
 
 def banner_stage(banner: CustomerBanner) -> str:
@@ -175,7 +172,7 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
                 cancel_orders_waiting_on_banner(req.customer_banner)
             except Exception:
                 logger.exception('cancel orders after banner reject')
-        return {'ok': True, 'status': 'rejected', 'message': f'درخواست #{req.id} رد شد.'}
+        return {'ok': True, 'status': 'rejected', 'message': 'درخواست رد شد. مشتری خبردار می‌شود.'}
 
     lb = linkbank_channel()
     fwd = bc.forward_message(lb, req.storage_chat_id, int(req.storage_message_id))
@@ -247,7 +244,7 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         'ok': True,
         'status': 'approved',
         'banner_id': banner.id,
-        'message': f'تأیید شد و در {lb} منتشر شد (بنر #{banner.id}).',
+        'message': 'تأیید شد و بنر در کانال بنرها منتشر شد.',
     }
 
 

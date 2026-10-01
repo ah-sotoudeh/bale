@@ -470,7 +470,7 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     lines.append(f'\nمبلغ قابل پرداخت: {fa_money(total)}')
     if len(parts) > 1:
         lines.append(
-            f'سقف هر انتقال کیف‌پول {fa_money(WALLET_MAX_TOMAN)} است. '
+            f'سقف هر انتقال کیف پول بله {fa_money(WALLET_MAX_TOMAN)} است. '
             f'این مبلغ در {fa_num(len(parts))} درخواست جدا می‌آید:'
         )
         for index, part in enumerate(parts, start=1):

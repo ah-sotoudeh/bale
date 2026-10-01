@@ -97,7 +97,13 @@ def process_manager_response(
     if new_start:
         parsed = parse_datetime(new_start)
         if action == 'edit' and not parsed:
-            return {'ok': False, 'error': 'invalid_new_start'}
+            from bot_flow.messages import user_error
+
+            return {
+                'ok': False,
+                'error': 'invalid_new_start',
+                'message': user_error('invalid_new_start'),
+            }
     from orders.cart import process_manager_item
 
     return process_manager_item(order_item_id, str(manager_bale_id), action, new_start=parsed)
@@ -186,9 +192,9 @@ def process_payment_paid(order_id: int) -> Dict[str, Any]:
     if order.customer.bale_user_id:
         extra = ''
         if ref.get('ok'):
-            extra = f'\nبنر روی کانال مرجع ثبت شد.'
+            extra = '\nبنر در کانال بنرها ثبت شد.'
         elif ref.get('error'):
-            extra = '\nثبت روی کانال مرجع فعلاً ممکن نشد. پشتیبانی پیگیری می‌کند.'
+            extra = '\nثبت بنر در کانال بنرها این بار نشد. پشتیبانی پیگیری می‌کند.'
         from bot_flow.messages import fa_money, fa_num
 
         slots = []

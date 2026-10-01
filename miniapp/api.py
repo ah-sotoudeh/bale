@@ -183,7 +183,7 @@ def api_me_prefs(request: HttpRequest) -> JsonResponse:
     from users.models import get_bot_session
 
     if not user.bale_user_id:
-        return JsonResponse({'ok': False, 'error': 'no_user'}, status=400)
+        return _fail('no_user')
     sess = get_bot_session(str(user.bale_user_id))
     data = dict(sess.data or {})
     prefs = dict(data.get('prefs') or {})
@@ -196,7 +196,7 @@ def api_me_prefs(request: HttpRequest) -> JsonResponse:
             elif theme in ('', None, 'bale'):
                 prefs.pop('theme', None)
             else:
-                return JsonResponse({'ok': False, 'error': 'bad_theme'}, status=400)
+                return _fail('bad_theme')
         onboarded_in = body.get('onboarded')
         if isinstance(onboarded_in, dict):
             onboarded = dict(prefs.get('onboarded') or {})
@@ -308,7 +308,8 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     link = normalize_channel_ref(str(body.get('link') or ''))
     name = str(body.get('name') or '').strip()[:200]
     if not link or link == '@':
-        return JsonResponse({'ok': False, 'error': 'پیوند کانال را بنویسید.'}, status=400)
+        missing_link = 'پیوند کانال را بنویسید.'
+        return JsonResponse({'ok': False, 'error': missing_link, 'message': missing_link}, status=400)
 
     info: Dict[str, Any] = {}
     try:
@@ -346,7 +347,8 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
     existing = Channel.objects.filter(link__iexact=link).first()
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
-        return JsonResponse({'ok': False, 'error': 'این کانال برای مدیر دیگری ثبت شده.'}, status=403)
+        taken = 'این کانال برای کانال‌دار دیگری ثبت شده. اگر مال شماست، به پشتیبانی بگویید.'
+        return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=403)
     if existing:
         existing.manager = user
         existing.name = name

@@ -219,7 +219,7 @@ def announce_invoices(chat_id: str, result: Dict[str, Any]) -> None:
     elif sent:
         bc.send_message(
             str(chat_id),
-            f'{fa_num(sent)} فاکتور کیف‌پول آمد. هر کدام را جدا پرداخت کنید. '
+            f'{fa_num(sent)} فاکتور کیف پول بله آمد. هر کدام را جدا پرداخت کنید. '
             'سفارش بعد از پرداخت همهٔ بخش‌ها ثبت می‌شود.',
         )
     if failed and sent:
@@ -276,38 +276,38 @@ def handle_pre_checkout(query: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         amount = 0
     if not parsed:
-        bc.answer_pre_checkout_query(qid, False, 'سفارش نامعتبر است')
+        bc.answer_pre_checkout_query(qid, False, 'این فاکتور برای سفارشی نیست. از سفارش‌ها دوباره پرداخت کنید.')
         return
     try:
         order = Order.objects.get(id=parsed['order_id'])
     except Order.DoesNotExist:
-        bc.answer_pre_checkout_query(qid, False, 'سفارش پیدا نشد')
+        bc.answer_pre_checkout_query(qid, False, 'این سفارش را پیدا نکردم. از سفارش‌ها دوباره پرداخت کنید.')
         return
     if order.status == 'paid':
-        bc.answer_pre_checkout_query(qid, False, 'این سفارش قبلاً پرداخت شده است')
+        bc.answer_pre_checkout_query(qid, False, 'این سفارش قبلاً پرداخت شده. نیازی به پرداخت دوباره نیست.')
         return
     if order.status in ('cancelled', 'rejected'):
-        bc.answer_pre_checkout_query(qid, False, 'این سفارش لغو شده است')
+        bc.answer_pre_checkout_query(qid, False, 'این سفارش لغو شده. اگر هنوز می‌خواهید، سفارش تازه بسازید.')
         return
     if order.managers_deadline and order.managers_deadline < timezone.now():
-        bc.answer_pre_checkout_query(qid, False, 'مهلت پرداخت این سفارش تمام شده')
+        bc.answer_pre_checkout_query(qid, False, 'مهلت پرداخت تمام شده. اگر هنوز می‌خواهید، سفارش تازه بسازید.')
         return
     if order.status != 'waiting_payment':
-        bc.answer_pre_checkout_query(qid, False, 'سفارش آماده پرداخت نیست')
+        bc.answer_pre_checkout_query(qid, False, 'این سفارش الان قابل پرداخت نیست. وضعیت را در سفارش‌ها ببینید.')
         return
     if parsed.get('part') is None and len(payment_parts(order.total_amount)) > 1:
         bc.answer_pre_checkout_query(qid, False, 'این سفارش چند فاکتور دارد. هر فاکتور را جدا پرداخت کنید.')
         return
     sliced = _slice_for(order, parsed)
     if not sliced:
-        bc.answer_pre_checkout_query(qid, False, 'مبلغ با فاکتور یکی نیست')
+        bc.answer_pre_checkout_query(qid, False, 'مبلغ این فاکتور با سفارش یکی نیست. از سفارش‌ها دوباره پرداخت کنید.')
         return
     index, part_amount = sliced
     if paid_part_amounts(order).get(index) == part_amount:
-        bc.answer_pre_checkout_query(qid, False, 'این بخش قبلاً پرداخت شده است')
+        bc.answer_pre_checkout_query(qid, False, 'این بخش قبلاً پرداخت شده. بخش بعدی را بپردازید.')
         return
     if amount != bc.toman_to_rial(part_amount):
-        bc.answer_pre_checkout_query(qid, False, 'مبلغ با فاکتور یکی نیست')
+        bc.answer_pre_checkout_query(qid, False, 'مبلغ این فاکتور با سفارش یکی نیست. از سفارش‌ها دوباره پرداخت کنید.')
         return
     bc.answer_pre_checkout_query(qid, True)
 
@@ -380,7 +380,7 @@ def handle_successful_payment(message: Dict[str, Any]) -> None:
             order = Order.objects.select_for_update().get(id=parsed['order_id'])
         except Order.DoesNotExist:
             if chat_id:
-                bc.send_message(chat_id, 'پرداخت رسید ولی سفارش پیدا نشد.')
+                bc.send_message(chat_id, 'پرداخت رسید ولی سفارش را پیدا نکردم. به پشتیبانی بگویید.')
             return
         if order.status == 'paid':
             _credit_extra_payment(order, paid_rial, pay, chat_id)

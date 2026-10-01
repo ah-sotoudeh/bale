@@ -29,34 +29,39 @@ from wallet import services as ws
 
 
 ERR_FA = {
-    'not_found': 'این مورد پیدا نشد.',
-    'forbidden': 'این طرح مال کانال شما نیست، برای همین روزش را نمی‌توانید پر یا خالی کنید.',
+    'not_found': 'این مورد را پیدا نکردم. یک بار دیگر از فهرست انتخاب کنید.',
+    'forbidden': 'این کار برای شما نیست.',
     'bad_fields': 'نام، ساعت، مدت و قیمت را کامل بنویسید.',
-    'bad_date': 'این تاریخ معتبر نیست.',
+    'bad_date': 'این تاریخ درست نیست. یک روز دیگر را انتخاب کنید.',
     'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
     'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، نمی‌توانید روزی را انتخاب کنید.',
     'slot_conflict': 'این روز پر است. روز دیگری را انتخاب کنید.',
-    'no_channel': 'کانالی برای این تعرفه نیست.',
-    'already_pending': 'یک درخواست تسویه باز دارید.',
-    'weekly_limit': 'هر هفته فقط یک بار می‌توانید تسویه بزنید.',
-    'below_minimum': 'حداقل مبلغ تسویه صدهزار تومان است.',
-    'no_bank': 'ابتدا شماره شبا ثبت کنید.',
-    'invalid_iban': 'شماره شبا معتبر نیست.',
-    'need_holder_name': 'نام صاحب حساب لازم است.',
-    'not_pending': 'این سفارش دیگر در انتظار نیست.',
-    'inactive': 'این تعرفه فعال نیست.',
-    'not_cancellable': 'این سفارش در این وضعیت بسته نمی‌شود.',
+    'no_channel': 'برای این تعرفه کانالی وصل نیست. اول کانال را اضافه کنید.',
+    'already_pending': 'یک درخواست تسویه باز دارید. بعد از واریز همان، دوباره درخواست بدهید.',
+    'weekly_limit': 'از تسویهٔ قبلی هنوز یک هفته نگذشته. بعد از آن دوباره درخواست بدهید.',
+    'below_minimum': 'حداقل تسویه صد هزار تومان است. وقتی اعتبارتان رسید، دوباره درخواست بدهید.',
+    'no_bank': 'اول شماره شبا را ثبت کنید.',
+    'invalid_iban': 'شماره شبا درست نیست. با IR و ۲۴ رقم دوباره بفرستید.',
+    'need_holder_name': 'نام صاحب حساب را بنویسید.',
+    'not_pending': 'این سفارش دیگر منتظر پاسخ شما نیست.',
+    'inactive': 'این تعرفه خاموش است. یک تعرفهٔ روشن را انتخاب کنید.',
+    'not_cancellable': 'این سفارش الان بسته نمی‌شود. اگر منتشر شده، اعتراض ثبت کنید.',
     'too_late': 'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. اگر مشکلی هست، اعتراض ثبت کنید.',
-    'past': 'این ساعت گذشته است و دیگر نمی‌شود این روز را برداشت.',
-    'not_paid': 'این سفارش پرداخت نشده است.',
-    'already_refunded': 'مبلغ این سفارش قبلاً برگشته است.',
+    'past': 'این ساعت گذشته است. روز دیگری را انتخاب کنید.',
+    'not_paid': 'این سفارش هنوز پرداخت نشده. فقط سفارش پرداخت‌شده به اعتبار برمی‌گردد.',
+    'already_refunded': 'مبلغ این سفارش قبلاً به اعتبار برگشته.',
     'inactive_tariff': 'این تعرفه خاموش است و روزش فروخته نمی‌شود.',
 }
 
+_NOT_YOUR_TARIFF = 'این تعرفه برای کانال شما نیست. روز کانال خودتان را انتخاب کنید.'
+
 
 def _err(code: str, status: int = 400, message: str = '') -> JsonResponse:
+    from bot_flow.messages import user_error
+
+    text = message or ERR_FA.get(code) or user_error(code)
     return JsonResponse(
-        {'ok': False, 'error': code, 'message': message or ERR_FA.get(code, 'خطا')},
+        {'ok': False, 'error': code, 'message': text},
         status=status,
     )
 
@@ -153,7 +158,7 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
     elif t is None:
         return _err('not_found', 404)
     elif t is False:
-        return _err('forbidden', 403)
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
     ready_banner = True if not customer else viewer_has_ready_banner(user)
     days = []
     for d, raw in day_status_map(t, 14):
@@ -196,7 +201,7 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
     if t is None:
         return _err('not_found', 404)
     if t is False:
-        return _err('forbidden', 403)
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
     day = _parse_day(body)
     if not day:
         return _err('bad_date')
@@ -223,7 +228,7 @@ def api_clear_busy(request: HttpRequest) -> JsonResponse:
     if t is None:
         return _err('not_found', 404)
     if t is False:
-        return _err('forbidden', 403)
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
     ok = clear_manual_busy_slot(int(body.get('slot_id') or 0), t)
     if not ok:
         return _err('not_found', 404)
@@ -242,7 +247,7 @@ def api_tariff_update(request: HttpRequest) -> JsonResponse:
     if t is None:
         return _err('not_found', 404)
     if t is False:
-        return _err('forbidden', 403)
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
     fields = []
     if 'name' in body and str(body['name']).strip():
         t.name = str(body['name']).strip()[:100]
@@ -475,7 +480,7 @@ def api_suggest_time(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not user.bale_user_id:
-        return _err('forbidden', 403)
+        return _err('no_user')
     body = _json_body(request)
     day = _parse_day(body)
     if not day:
@@ -498,7 +503,7 @@ def api_answer_time(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not user.bale_user_id:
-        return _err('forbidden', 403)
+        return _err('no_user')
     body = _json_body(request)
     try:
         item_id = int(body.get('item_id') or 0)
@@ -598,8 +603,14 @@ def api_operator_banner_decide(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     r = operator_decide(int(body.get('request_id') or 0), str(user.bale_user_id), bool(body.get('approve')))
     if not r.get('ok'):
+        from bot_flow.messages import user_error
+
         return JsonResponse(
-            {'ok': False, 'error': r.get('error'), 'message': r.get('message') or ERR_FA.get(r.get('error') or '', 'خطا')},
+            {
+                'ok': False,
+                'error': r.get('error'),
+                'message': r.get('message') or ERR_FA.get(r.get('error') or '') or user_error(r.get('error')),
+            },
             status=400,
         )
     return JsonResponse({'ok': True, 'message': r.get('message') or 'ثبت شد'})
@@ -619,7 +630,10 @@ def api_operator_paid(request: HttpRequest) -> JsonResponse:
     if not body.get('confirm'):
         built = ws.build_payout_batch(user)
         if not built.get('ok'):
-            return JsonResponse({'ok': False, 'error': built.get('error'), 'message': 'درخواست تسویه باز نیست.'}, status=400)
+            return _err(
+                str(built.get('error') or 'no_pending'),
+                message='درخواست تسویه‌ای برای واریز نیست. وقتی درخواستی باز شد، دوباره بزنید.',
+            )
         return JsonResponse({
             'ok': True,
             'file_text': built.get('file_text') or '',
@@ -633,7 +647,10 @@ def api_operator_paid(request: HttpRequest) -> JsonResponse:
         return _err('bad_fields')
     marked = ws.mark_batch_paid(batch_id)
     if not marked.get('ok'):
-        return JsonResponse(marked, status=400)
+        code = str(marked.get('error') or 'batch_not_found')
+        if code == 'already_paid':
+            return _err(code, message='این واریز قبلاً ثبت شده. نیازی به تأیید دوباره نیست.')
+        return _err(code)
     return JsonResponse({
         'ok': True,
         'marked_paid': True,

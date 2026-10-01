@@ -223,12 +223,16 @@ def _set_item_status(request: HttpRequest, action: str) -> JsonResponse:
         return err
     assert user is not None
     if not user.bale_user_id:
-        return JsonResponse({'ok': False, 'error': 'no_user'}, status=400)
+        from miniapp.api import _fail
+
+        return _fail('no_user')
     body = _json_body(request)
     try:
         item_id = int(body.get('item_id') or 0)
     except (TypeError, ValueError):
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+        from miniapp.api import _fail
+
+        return _fail('not_found', 404)
     result = process_manager_item(item_id, str(user.bale_user_id), action)
     if not result.get('ok'):
         from miniapp.api import _with_message
@@ -258,7 +262,9 @@ def api_operator_payouts(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        from miniapp.api import _fail
+
+        return _fail('forbidden', 403)
     rows = []
     for p in PayoutRequest.objects.filter(status='pending').order_by('id')[:100]:
         rows.append({
@@ -279,12 +285,12 @@ def api_operator_mark_paid(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        from miniapp.api import _fail
+
+        return _fail('forbidden', 403)
+    from bot_flow.messages import user_error
+
     return JsonResponse(
-        {
-            'ok': False,
-            'error': 'use_bot',
-            'message': 'تسویه را از بازو بسازید و فقط بعد از واریز بانک تأیید کنید.',
-        },
+        {'ok': False, 'error': 'use_bot', 'message': user_error('use_bot')},
         status=400,
     )

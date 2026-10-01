@@ -87,7 +87,7 @@ def public_stats_error(raw: str) -> str:
     text = (raw or '').strip()
     known = {
         'link missing': 'پیوند کانال ثبت نشده.',
-        'BALE_TOKEN missing': 'حساب دستیار لینک‌بان روی سرور تنظیم نشده.',
+        'BALE_TOKEN missing': 'حساب دستیار لینک‌بان هنوز آماده نیست. کمی بعد دوباره آمار را بخوانید.',
         'empty': 'از این کانال عددی خوانده نشد.',
         'channel_not_found': 'این کانال در بله پیدا نشد.',
         'resolve_failed': 'این کانال در بله پیدا نشد.',
@@ -96,7 +96,7 @@ def public_stats_error(raw: str) -> str:
     if text in known:
         return known[text]
     if text.startswith('token_inject'):
-        return 'ورود حساب دستیار لینک‌بان ناموفق بود.'
+        return 'حساب دستیار لینک‌بان وصل نشد. کمی بعد دوباره آمار را بخوانید.'
     return 'خواندن آمار این کانال ممکن نشد.'
 
 
