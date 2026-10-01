@@ -34,7 +34,7 @@ def manager_miniapp_url() -> str:
 
 
 def open_miniapp_keyboard(
-    label: str = 'دفتر کار لینک‌بان',
+    label: str = 'باز کردن لینک‌بان',
     role: str | None = None,
 ) -> Optional[Dict[str, Any]]:
     url = miniapp_url(role=role) if role else manager_miniapp_url()
@@ -42,19 +42,19 @@ def open_miniapp_keyboard(
         return None
     return bc.inline_keyboard([
         [{'text': label[:64], 'web_app': {'url': url}}],
-        [{'text': 'منوی متنی', 'callback_data': 'home'}],
+        [{'text': 'ادامه در گفتگو', 'callback_data': 'home'}],
     ])
 
 
 def send_miniapp_entry(
     chat_id: str,
-    text: str = 'دفتر کار لینک‌بان:',
+    text: str = 'لینک‌بان را از اینجا باز کنید.',
     role: str | None = 'manager',
 ) -> Dict[str, Any]:
     kb = open_miniapp_keyboard(role=role)
     if not kb:
         return bc.send_message(
             str(chat_id),
-            text + '\n\nاز منوی متنی استفاده کنید.',
+            text + '\n\nاز دکمه‌های گفتگو ادامه دهید.',
         )
     return bc.send_message(str(chat_id), text, reply_markup=kb)

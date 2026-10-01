@@ -1874,7 +1874,7 @@ class MiniappErrorMessageTests(TestCase):
         body = response.json()
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(body['error'], 'no_user')
-        self.assertEqual(body['message'], 'حساب بله‌تان را نشناختم.')
+        self.assertEqual(body['message'], 'حساب بله‌تان را نشناختم. لینک‌بان را از داخل گفتگو دوباره باز کنید.')
 
     def test_invalid_iban_json_is_persian(self):
         response = self._post('/miniapp/api/bank', {

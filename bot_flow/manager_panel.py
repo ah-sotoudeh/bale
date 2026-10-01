@@ -17,6 +17,7 @@ from bot_flow.messages import (
     fa_num,
     format_manager_order_line,
     label_publish_mode,
+    user_error,
 )
 from channels_app.models import Channel, ChannelGroup, Tariff
 from integrations import bale_client as bc
@@ -90,11 +91,11 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
     ).exclude(order__status='waiting_banner').count()
     text = (
         'بخش کانال‌دار\n\n'
-        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
+        f'نام شما در بله: {user.bale_handle or user.bale_user_id}\n'
         f'کانال‌ها: {fa_num(n_ch)}\n'
         f'سفارش در انتظار: {fa_num(n_pending)}\n'
         f'قابل برداشت: {fa_money(bal)}\n\n'
-        'یکی را انتخاب کنید:'
+        'اگر سفارشی منتظر شماست، اول همان را جواب دهید.'
     )
     bc.send_message(str(chat_id), text, reply_markup=main_keyboard())
 
@@ -105,7 +106,7 @@ def show_channels(chat_id: str, user: User) -> None:
     if not channels and not groups:
         bc.send_message(
             str(chat_id),
-            'هنوز کانالی ندارید. دکمهٔ «ثبت کانال» را بزنید.',
+            'هنوز کانالی وصل نکرده‌اید. دکمهٔ «ثبت کانال» را بزنید و پیوند را بفرستید.',
             reply_markup=main_keyboard(),
         )
         return
@@ -138,7 +139,7 @@ def show_tariffs(chat_id: str, user: User) -> None:
         .order_by('-id')[:30]
     )
     if not tariffs:
-        bc.send_message(str(chat_id), 'هنوز تعرفه‌ای ندارید. اول کانالتان را ثبت کنید.')
+        bc.send_message(str(chat_id), 'هنوز قیمتی نگذاشته‌اید. اول کانال را وصل کنید.')
         return
     lines = ['💳 تعرفه‌ها\nروی هر مورد بزنید:']
     rows = []
@@ -360,9 +361,9 @@ def show_wallet(chat_id: str, user: User) -> None:
         f'در انتظار تسویه: {fa_money(br["locked_pending"])}',
         f'تسویه‌شده (مجموع): {fa_money(br["paid_out"])}',
         f'حداقل تسویه: {fa_money(ws.MIN_PAYOUT_TOMAN)}',
-        f'کارمزد پلتفرم: {fa_num(ws.PLATFORM_FEE_PERCENT)}٪',
+        f'کارمزد لینک‌بان: {fa_num(ws.PLATFORM_FEE_PERCENT)}٪',
         '',
-        'شباهای ثبت‌شده:' if banks else 'شبا ثبت نشده.',
+        'شباهای ثبت‌شده:' if banks else 'هنوز شبایی نگذاشته‌اید. برای برداشت، شماره شبا را بفرستید.',
     ]
     for b in banks:
         star = '⭐' if b.is_default else '•'
@@ -370,7 +371,7 @@ def show_wallet(chat_id: str, user: User) -> None:
     if pending:
         lines.append('\nدرخواست‌های باز:')
         for p in pending:
-            lines.append(f'• #{fa_num(p.id)} {fa_money(p.amount_toman)} → ...{p.iban[-6:]}')
+            lines.append(f'• {fa_money(p.amount_toman)} → ...{p.iban[-6:]}')
 
     rows = [
         [{'text': '➕ افزودن شبا', 'callback_data': 'mgr:bank_add'}],
@@ -428,11 +429,11 @@ def start_payout(chat_id: str, user: User) -> None:
     ok, reason = ws.can_request_payout(user)
     if not ok:
         msg = {
-            'already_pending': 'یک درخواست تسویه باز دارید.',
-            'weekly_limit': 'از تسویهٔ قبلی هنوز یک هفته نگذشته.',
-            'below_minimum': f'موجودی از حداقل تسویه کمتر است ({fa_money(ws.MIN_PAYOUT_TOMAN)}).',
-            'no_bank': 'اول شبا را ثبت کنید.',
-        }.get(reason, reason)
+            'already_pending': 'یک درخواست تسویه باز دارید. بعد از واریز همان، دوباره درخواست بدهید.',
+            'weekly_limit': 'از تسویهٔ قبلی هنوز یک هفته نگذشته. بعد از آن دوباره درخواست بدهید.',
+            'below_minimum': f'موجودی از حداقل تسویه کمتر است ({fa_money(ws.MIN_PAYOUT_TOMAN)}). وقتی رسید، دوباره درخواست بدهید.',
+            'no_bank': 'اول شماره شبا را ثبت کنید.',
+        }.get(reason) or user_error(reason)
         bc.send_message(str(chat_id), f'❌ {msg}')
         return
     banks = list(BankAccount.objects.filter(user=user).order_by('-is_default', '-id'))
@@ -604,7 +605,7 @@ def try_handle_callback(
         if kept:
             bc.send_message(
                 str(chat_id),
-                f'تعرفه «{name}» سفارش یا روز رزرو دارد، پس حذف نشد و فقط خاموش شد.',
+                f'تعرفه «{name}» روز فروخته‌شده دارد، برای همین حذف نشد و فقط خاموش شد.',
                 reply_markup=main_keyboard(),
             )
         else:

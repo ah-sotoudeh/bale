@@ -92,14 +92,14 @@ def open_customer_home(chat_id: str, bale_user_id: str, username: str = '') -> N
     bal = ws.balance_breakdown(user)
     text = (
         'بخش مشتری\n\n'
-        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
+        f'نام شما در بله: {user.bale_handle or user.bale_user_id}\n'
         f'بنر آماده: {fa_num(n_b)}\n'
         f'در انتظار بررسی: {fa_num(n_pending)}\n'
         f'روز انتخاب‌شده: {fa_num(n_cart)}\n'
         f'سفارش باز: {fa_num(n_open)}\n'
         f'اعتبار: {fa_money(bal["credit"])}\n'
         f'در امانت: {fa_money(bal["escrow"])}\n\n'
-        'یکی را انتخاب کنید:'
+        'اول بنر را بفرستید، بعد یک روز خالی بردارید.'
     )
     bc.send_message(str(chat_id), text, reply_markup=customer_home_keyboard())
 
@@ -164,12 +164,11 @@ def show_banner_detail(chat_id: str, bale_user_id: str, banner_id: int) -> None:
     }.get(b.media_kind or '', 'متن' if not b.media_kind else b.media_kind)
     lines = [
         f'📌 {b.display_title()}',
-        f'شناسه: {fa_num(b.id)}',
         f'نوع: {kind}',
-        f'از کانال بنرها: {"آمده" if b.from_linkbank else "نیامده"}',
+        f'روی کانال بنرها: {"هست" if b.from_linkbank else "نیست. بگذارید پشتیبانی ببیند"}',
         f'متن: {cap or "بدون متن"}',
         '',
-        'یکی را انتخاب کنید:',
+        'یکی از دکمه‌ها را بزنید:',
     ]
     rows = [
         [{'text': '✅ استفاده در سفارش', 'callback_data': f'cu:use:{b.id}'}],
@@ -303,7 +302,7 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
     if not preview:
         preview = 'بدون متن'
     if from_reference:
-        note = 'بنر از کانال بنرها رسید و آمادهٔ سفارش است.'
+        note = 'بنر از کانال بنرها رسید. حالا کانال و روز را انتخاب کنید.'
     else:
         note = (
             'بنر برای بررسی رفت.\n'
@@ -453,7 +452,7 @@ def use_saved_banner(chat_id: str, bale_user_id: str, banner_id: int) -> None:
         id=banner_id, customer=user, is_active=True
     ).first()
     if not banner or banner_stage(banner) == 'rejected':
-        bc.send_message(str(chat_id), 'این بنر را نمی‌توانید برای سفارش بردارید.')
+        bc.send_message(str(chat_id), 'این بنر هنوز روی کانال بنرها نیست. اول بگذارید پشتیبانی ببیند.')
         show_banner_list(chat_id, bale_user_id)
         return
     Order.objects.filter(customer=user, status='draft').delete()
@@ -493,7 +492,7 @@ def show_catalog(chat_id: str, bale_user_id: str, page: int = 0) -> None:
     if not tariffs:
         bc.send_message(
             str(chat_id),
-            'الان تعرفه‌ای برای انتخاب نیست.',
+            'الان تعرفه‌ای برای انتخاب نیست. کمی بعد دوباره سر بزنید.',
             reply_markup=bc.inline_keyboard([_nav_row()]),
         )
         return
@@ -584,7 +583,7 @@ def show_my_orders(chat_id: str, bale_user_id: str) -> None:
     if not orders:
         bc.send_message(
             str(chat_id),
-            'هنوز سفارشی ندارید.',
+            'هنوز سفارشی ندارید. از فهرست یک روز خالی بردارید.',
             reply_markup=customer_home_keyboard(),
         )
         return
@@ -673,7 +672,7 @@ def handle_customer_callback(
             return True
         order = Order.objects.filter(id=order_id, customer=user, status='waiting_payment').first()
         if not order:
-            bc.send_message(str(chat_id), 'این سفارش الان قابل پرداخت نیست.')
+            bc.send_message(str(chat_id), 'این سفارش الان برای پرداخت نیست. وضعیت را در سفارش‌ها ببینید.')
             return True
         from orders.bale_pay import announce_invoices, order_is_fully_paid, send_order_invoices
         from orders.services import process_payment_paid
@@ -798,9 +797,9 @@ def handle_customer_callback(
             err = result.get('error')
             msg = {
                 'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
-                'no_banner': 'اول یک بنر انتخاب کنید.',
+                'no_banner': 'اول یک بنر بیاورید. تا وقتی بنری نداشته باشید، نمی‌توانید روزی را انتخاب کنید.',
                 'slot_conflict': 'یکی از روزها پر شد. انتخاب‌ها را دوباره ببینید.',
-            }.get(err, str(err))
+            }.get(err) or user_error(err)
             bc.send_message(str(chat_id), msg)
             return True
         bc.send_message(

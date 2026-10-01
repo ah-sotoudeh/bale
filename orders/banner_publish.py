@@ -231,7 +231,7 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         ])
         bc.send_message(
             cust,
-            f'بنر «{banner.display_title()}» تأیید شد و آماده است.',
+            f'بنر «{banner.display_title()}» تأیید شد و آماده است. حالا روز کانال را بردارید.',
             reply_markup=kb,
         )
     try:

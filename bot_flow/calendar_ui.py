@@ -40,7 +40,7 @@ def _owner_label(tariff: Tariff) -> str:
 def _hour_label(tariff: Tariff) -> str:
     if tariff.start_hour is not None:
         return fa_num(f'{tariff.start_hour:02d}:00')
-    return 'بدون ساعت ثابت'
+    return 'ساعت ارسال ثابت نیست'
 
 
 def calendar_text_for_tariff(tariff: Tariff, days: int = 14) -> str:
@@ -50,7 +50,7 @@ def calendar_text_for_tariff(tariff: Tariff, days: int = 14) -> str:
     past_n = sum(1 for _, status in statuses if status == 'past')
     lines = [
         '📅 تقویم نوبت‌ها',
-        f'هدف: {_owner_label(tariff)}',
+        f'برای: {_owner_label(tariff)}',
         f'تعرفه: {tariff.name}',
         f'نوبت: {_hour_label(tariff)} | {fa_num(tariff.duration_hours)}س | {fa_money(tariff.price)}',
         '',
@@ -118,7 +118,7 @@ def ask_clear_manual_busy(chat_id: str, tariff: Tariff) -> None:
     if not slots:
         bc.send_message(
             str(chat_id),
-            'نوبت دستی برای حذف ندارید.',
+            'روز دستی برای حذف نمانده.',
             reply_markup=calendar_main_keyboard(tariff.id),
         )
         return
@@ -126,7 +126,7 @@ def ask_clear_manual_busy(chat_id: str, tariff: Tariff) -> None:
     rows = []
     for slot in slots:
         day = timezone.localtime(slot.start).date()
-        lines.append(f'• #{fa_num(slot.id)} {format_day(day)}')
+        lines.append(f'• {format_day(day)}')
         rows.append([{
             'text': f'حذف {_short_day(day)}',
             'callback_data': f'free:unbusy_slot:{tariff.id}:{slot.id}',
@@ -203,7 +203,7 @@ def send_manager_channel_picker(chat_id: str, manager: User) -> None:
     if not kb:
         bc.send_message(
             str(chat_id),
-            'هنوز کانالی با تعرفه ندارید. اول از بخش کانال‌دار یک تعرفه ثبت کنید.',
+            'هنوز کانالی با قیمت ندارید. اول از بخش کانال‌دار تعرفه را بنویسید.',
         )
         return
     bc.send_message(
@@ -252,7 +252,7 @@ def handle_free_callback(
             return True
         kb = tariffs_keyboard_channel(ch)
         if not kb:
-            bc.send_message(str(chat_id), 'برای این کانال هنوز تعرفه‌ای ندارید.')
+            bc.send_message(str(chat_id), 'برای این کانال هنوز قیمتی نگذاشته‌اید.')
             return True
         bc.send_message(str(chat_id), f'تعرفه «{ch.name}» را انتخاب کنید:', reply_markup=kb)
         return True
@@ -264,7 +264,7 @@ def handle_free_callback(
             return True
         kb = tariffs_keyboard_group(g)
         if not kb:
-            bc.send_message(str(chat_id), 'برای این مجموعه هنوز تعرفه‌ای ندارید.')
+            bc.send_message(str(chat_id), 'برای این مجموعه هنوز قیمتی نگذاشته‌اید.')
             return True
         bc.send_message(str(chat_id), f'تعرفه مجموعه «{g.name}»:', reply_markup=kb)
         return True
@@ -272,7 +272,7 @@ def handle_free_callback(
     if len(parts) == 3 and parts[1] == 't':
         t = Tariff.objects.select_related('channel', 'group').filter(id=int(parts[2])).first()
         if not t or not _tariff_owned_by(user, t):
-            bc.send_message(str(chat_id), 'این تعرفه برای شما نیست.')
+            bc.send_message(str(chat_id), 'این تعرفه مال کانال شما نیست.')
             return True
         show_tariff_calendar(chat_id, t)
         return True

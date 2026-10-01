@@ -1,4 +1,4 @@
-"""پنل اپراتور سامانه (لینک‌پخش)."""
+"""بخش پشتیبانی لینک‌بان."""
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
@@ -50,11 +50,11 @@ def open_panel(chat_id: str, bale_user_id: str, username: str = '') -> None:
     ).count()
     text = (
         '🛠️ بخش پشتیبانی\n\n'
-        f'شناسه: {user.bale_handle or user.bale_user_id}\n'
+        f'نام شما در بله: {user.bale_handle or user.bale_user_id}\n'
         f'درخواست تسویه باز: {fa_num(pending_pay)}\n'
         f'درخواست بنر باز: {fa_num(pending_banner)}\n'
         f'سفارش‌های فعال: {fa_num(open_orders)}\n\n'
-        'یکی را انتخاب کنید:'
+        'بنر تازه یا تسویه را از همین‌جا انجام دهید.'
     )
     bc.send_message(str(chat_id), text, reply_markup=main_keyboard())
 
