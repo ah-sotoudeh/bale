@@ -1057,6 +1057,12 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('n.checkout()', script)
         self.assertIn('C().catalog.needBanner', script[script.find('روزهای انتخاب‌شده'):])
         self.assertNotIn('درباره کانال: ', script)
+        self.assertIn('فرم پایین', script)
+        self.assertNotIn('فرم بالا', script)
+        self.assertIn('o.deadline?(0,Q.jsx)(lbHoldText,{end:o.deadline})', script)
+        self.assertIn('deadline:String(e.managers_deadline||``)', script)
+        self.assertIn('ساعت —', script)
+        self.assertIn('hourSet&&start.getTime()<=nowD.getTime()', script)
         rules = self.client.get('/miniapp/rules/')
         self.assertEqual(rules.status_code, 200)
         self.assertIn('قمار', rules.content.decode('utf-8'))
@@ -1645,23 +1651,42 @@ class CalendarHoldTests(TestCase):
         self.assertEqual(row['status'], 'past')
         self.assertIn(row['status'], ('free', 'full', 'past'))
 
-    def test_empty_start_hour_is_past_today(self):
+    def test_unset_start_hour_is_not_past_in_the_morning(self):
+        from datetime import datetime
+
         from orders.availability import classify_day
 
         today = timezone.localdate()
+        morning = timezone.make_aware(datetime.combine(today, datetime.min.time().replace(hour=7, minute=30)))
         unset = Tariff.objects.create(
-            channel=self.channel, name='بدون ساعت', duration_hours=6, price=700, start_hour=None
+            channel=self.channel, name='۶ ساعته', duration_hours=6, price=700, start_hour=None
         )
-        self.assertEqual(classify_day(unset, today), 'past')
-        blocked = add_to_cart(self.customer, unset, today)
-        self.assertEqual(blocked.get('error'), 'past')
+        self.assertEqual(classify_day(unset, today, now=morning), 'free')
+        self.assertEqual(classify_day(self.tariff, today, now=morning), 'free')
+        self.assertEqual(classify_day(unset, today - timedelta(days=1), now=morning), 'past')
+        booked = add_to_cart(self.customer, unset, today)
+        self.assertNotEqual(booked.get('error'), 'past')
         calendar = self.client.get(
             '/miniapp/api/calendar',
             {'tariff_id': unset.id, 'for': 'customer', 'debug_bale_id': 'hold-c'},
         )
         row = next(d for d in calendar.json()['days'] if d['date'] == today.isoformat())
-        self.assertEqual(row['status'], 'past')
-        self.assertFalse(row['free'])
+        self.assertNotEqual(row['status'], 'past')
+
+    def test_own_cart_on_another_tariff_keeps_the_day_full(self):
+        short = Tariff.objects.create(
+            channel=self.channel, name='شش‌ساعته', duration_hours=6, price=700, start_hour=None
+        )
+        next_day = self.day + timedelta(days=1)
+        added = add_to_cart(self.customer, short, next_day)
+        self.assertTrue(added['ok'], added)
+        listed = self.client.get('/miniapp/api/catalog', {'debug_bale_id': 'hold-c'})
+        self.assertEqual(listed.status_code, 200, listed.content)
+        busy = listed.json()['busy']
+        long_dates = [row['date'] for row in busy if row['tariff_id'] == self.tariff.id]
+        short_dates = [row['date'] for row in busy if row['tariff_id'] == short.id]
+        self.assertIn(self.day.isoformat(), long_dates)
+        self.assertNotIn(next_day.isoformat(), short_dates)
 
     def test_paid_order_closes_when_every_slot_finishes(self):
         from orders.execution import settle_paid_order

@@ -712,3 +712,12 @@ main.overflow-y-auto {
     max-width: 480px;
   }
 }
+
+.stage-title {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--lb-bg);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}

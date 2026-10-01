@@ -160,23 +160,25 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
     from orders.models import OrderItem
 
-    own_ids = set(
-        OrderItem.objects.filter(
-            order__customer=user,
-            order__status='draft',
-            manager_status='cart',
-        ).values_list('id', flat=True)
-    )
+    own_by_tariff: dict = {}
+    for item_id, tariff_id in OrderItem.objects.filter(
+        order__customer=user,
+        order__status='draft',
+        manager_status='cart',
+    ).values_list('id', 'tariff_id'):
+        own_by_tariff.setdefault(tariff_id, set()).add(item_id)
     busy = []
     seq = 0
     for t in visible:
         for day, status in day_status_map(t, 14):
             if status != 'full':
                 continue
-            if own_ids:
+            # سبد همین تعرفه «انتخاب» است. سبد تعرفهٔ دیگرِ همان کانال روز را پر می‌کند.
+            same_tariff_cart = own_by_tariff.get(t.id) or set()
+            if same_tariff_cart:
                 start, end = slot_bounds(t, day)
                 if not has_slot_conflict(
-                    t, start, end, channel=t.channel, exclude_item_ids=own_ids
+                    t, start, end, channel=t.channel, exclude_item_ids=same_tariff_cart
                 ):
                     continue
             seq += 1

@@ -45,8 +45,13 @@ def slot_bounds(tariff: Tariff, day: date) -> Tuple[datetime, datetime]:
 
 
 def is_past_slot(tariff: Tariff, day: date, now: Optional[datetime] = None) -> bool:
-    """ساعت شروع این روز گذشته است؛ دیگر فروخته نمی‌شود."""
+    """ساعت شروع همین تعرفه گذشته است. شروعِ خالی نیمه‌شب حساب نمی‌شود."""
     now = now or timezone.now()
+    local_now = timezone.localtime(now) if timezone.is_aware(now) else now
+    if day < local_now.date():
+        return True
+    if tariff.start_hour is None:
+        return False
     start, _end = slot_bounds(tariff, day)
     return start <= now
 
