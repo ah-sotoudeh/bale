@@ -995,6 +995,8 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('lbN(g.views)+` بازدید`', script)
         self.assertEqual(script.count('function lbN('), 1)
         self.assertIn('cartLabel:`در سبد`', script)
+        self.assertIn('مطمئنید؟ دوباره بزنید تا مبلغ به اعتبار برگردد', script)
+        self.assertIn('t.ownerName(e.tariffId)', script)
         self.assertNotIn('n.growth!=null', script)
         self.assertIn('errPack.known', script)
         self.assertIn('lb-pill', script)
@@ -2222,3 +2224,22 @@ class FailedPublishAfterPartialRefundTests(PartialRefundThenExecutionTests):
             WalletLedger.objects.filter(user=self.customer, entry_type='refund').values_list('amount', flat=True)
         )
         self.assertEqual(total2, 1000)
+
+
+class FailedPublishMessageAmountTests(PartialRefundThenExecutionTests):
+    """پیام بازگشت همان مبلغی را می‌گوید که واقعاً برگشته."""
+
+    @patch('orders.execution.bc.send_message')
+    @patch('orders.cart.bc.send_message')
+    def test_operator_resolve_tells_the_real_refunded_amount(self, _cart_send, exec_send):
+        from orders.cart import refund_paid_order
+        from orders.execution import operator_resolve
+
+        refund_paid_order(self.order, 400, reason='x')
+        OrderItem.objects.filter(pk=self.item.pk).update(execution_status='awaiting_operator')
+        with patch('wallet.services.OPERATOR_BALE_ID', 'op-9'):
+            res = operator_resolve(self.item.id, 'op-9', False)
+        self.assertTrue(res['ok'])
+        texts = ' '.join(str(c.args[1]) for c in exec_send.call_args_list)
+        self.assertIn('600', texts)
+        self.assertNotIn('1,000', texts)

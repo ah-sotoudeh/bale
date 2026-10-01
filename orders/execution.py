@@ -217,16 +217,16 @@ def operator_resolve(item_id: int, operator_bale_id: str, executed: bool) -> Dic
 
     it.execution_status = 'failed_publish'
     it.save(update_fields=['execution_status'])
-    credit_customer_refund(
+    refund_entry = credit_customer_refund(
         it.order.customer, it.price, it.id, 'عدم انتشار — بازگشت به کیف مشتری'
     )
     if it.manager:
         apply_manager_penalty(it.manager, it.price, it.id)
 
-    if it.order.customer.bale_user_id:
+    if it.order.customer.bale_user_id and refund_entry is not None:
         bc.send_message(
             it.order.customer.bale_user_id,
-            f'مبلغ {it.price:,} تومان بابت آیتم #{it.id} به کیف پول شما برگشت.',
+            f'مبلغ {refund_entry.amount:,} تومان بابت آیتم #{it.id} به کیف پول شما برگشت.',
         )
     if it.manager and it.manager.bale_user_id:
         pen = fee_amount(it.price)

@@ -206,13 +206,13 @@ def _finalize_channel_ok(item: OrderItem, ch: Channel, post_meta: Dict[str, Any]
 def _refund_failed_item(item: OrderItem) -> None:
     try:
         order = item.order
-        credit_customer_refund(order.customer, item.price, item.id, f'عدم انتشار #{item.id}')
+        entry = credit_customer_refund(order.customer, item.price, item.id, f'عدم انتشار #{item.id}')
         if item.manager:
             apply_manager_penalty(item.manager, item.price, item.id)
-        if order.customer.bale_user_id:
+        if order.customer.bale_user_id and entry is not None:
             bc.send_message(
                 order.customer.bale_user_id,
-                f'مبلغ {item.price:,} تومان بابت آیتم #{item.id} به کیف پول برگشت.',
+                f'مبلغ {entry.amount:,} تومان بابت آیتم #{item.id} به کیف پول برگشت.',
             )
     except Exception:
         logger.exception('refund failed item=%s', item.id)
