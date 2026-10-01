@@ -128,13 +128,17 @@ header.sticky {
 
 header > div:first-child {
   position: relative;
+  min-height: 52px;
+  overflow: visible;
+  padding-top: 6px;
 }
 
 header h1 {
   font-size: 18px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 32px;
   letter-spacing: 0;
+  overflow: visible;
 }
 
 header button.text-link,
@@ -670,7 +674,9 @@ main {
   }
 }
 
-/* نوار پایین ثابت است. این فاصله می‌گذارد آخر صفحه — خانهٔ پشتیبانی و آمار کانال — تا بالای نوار اسکرول شود. */
+/* نوار پایین ثابت است. فاصلهٔ بالا عنوان و نمودار را از زیر هدر جدا می‌کند. */
 main.overflow-y-auto {
+  padding-top: 24px;
   padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  scroll-padding-top: 24px;
 }
