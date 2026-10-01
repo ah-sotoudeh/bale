@@ -1029,6 +1029,7 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('lb-ava', script)
         self.assertIn('lb-price', script)
         self.assertIn('function lbCartLine(', script)
+        self.assertIn('این روز با سفارش پر شده و از اینجا خالی نمی‌شود', script)
         self.assertIn('ch.about||``} ${ch.description||``} ${ch.link||``}', script)
         self.assertNotIn('[`err`,`تعامل`]', script)
         self.assertNotIn('از ${X(t.price)}', script)
