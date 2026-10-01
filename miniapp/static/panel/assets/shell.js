@@ -146,12 +146,13 @@
     back.className = "lb-sheet-back";
     var manual = root.dataset.themeSource === "user";
     back.innerHTML =
-      '<div class="lb-sheet" role="dialog" aria-label="حساب">' +
+      '<div class="lb-sheet" role="dialog" aria-label="حساب شما">' +
       '<div class="lb-handle"></div>' +
-      "<h2>حساب</h2>" +
+      "<h2>حساب شما</h2>" +
       '<a class="row" href="/miniapp/rules/">شرایط و قوانین</a>' +
-      (manual ? '<button type="button" class="row" id="lb-theme-reset">برگشت به تم بله</button>' : "") +
-      '<p style="margin:16px 0 8px;font-size:12px;color:var(--lb-text-2)">نسخهٔ ۴٫۰٫۰</p>' +
+      (manual ? '<button type="button" class="row" id="lb-theme-reset">هم‌رنگ گفتگوی بله</button>' : "") +
+      '<p style="margin:16px 0 4px;font-size:13px;color:var(--lb-text)">اگر جایی ماندید، در گفتگو به پشتیبانی بگویید.</p>' +
+      '<p style="margin:0 0 8px;font-size:12px;color:var(--lb-text-2)">نسخهٔ ۴</p>' +
       "</div>";
     back.addEventListener("click", function (ev) {
       if (ev.target === back) closeSheet();
