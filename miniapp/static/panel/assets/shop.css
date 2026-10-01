@@ -669,3 +669,8 @@ main {
     max-height: min(720px, calc(100dvh - 48px));
   }
 }
+
+/* نوار پایین ثابت است. این فاصله می‌گذارد آخر صفحه — خانهٔ پشتیبانی و آمار کانال — تا بالای نوار اسکرول شود. */
+main.overflow-y-auto {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+}
