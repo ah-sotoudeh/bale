@@ -893,21 +893,46 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
   const tariffs = useMarket((s) => s.tariffs);
   const ownerName = useMarket((s) => s.ownerName);
   const addTariff = useMarket((s) => s.addTariff);
+  const updateTariff = useMarket((s) => s.updateTariff);
   const toggleTariff = useMarket((s) => s.toggleTariff);
   const [channelId, setChannelId] = useState(channels[0]?.id ?? 0);
   const [name, setName] = useState("");
   const [hour, setHour] = useState(12);
   const [duration, setDuration] = useState("24");
   const [price, setPrice] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName("");
+    setHour(12);
+    setDuration("24");
+    setPrice("");
+    setChannelId(channels[0]?.id ?? 0);
+  };
+
+  const loadForEdit = (row: (typeof tariffs)[number]) => {
+    setEditingId(row.id);
+    setName(row.name);
+    setHour(row.startHour ?? 12);
+    setDuration(String(row.durationHours ?? 24));
+    setPrice(String(row.price ?? ""));
+    if (row.channelId) setChannelId(row.channelId);
+  };
 
   return (
     <>
       <p className="mb-2 px-1 text-xs leading-relaxed text-muted">
-        {copy().manager.priceLead}
+        {editingId ? copy().manager.editTariff : copy().manager.priceLead}
       </p>
       <Card>
         <Field label={copy().screen.channel}>
-          <select className={control} value={channelId} onChange={(e) => setChannelId(Number(e.target.value))}>
+          <select
+            className={control}
+            value={channelId}
+            disabled={editingId != null}
+            onChange={(e) => setChannelId(Number(e.target.value))}
+          >
             {channels.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -935,32 +960,41 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
         <Field label={copy().manager.fieldPrice}>
           <input className={control} inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} />
         </Field>
-        <Btn
-          onClick={() => {
-            const err = addTariff({
-              channelId,
-              name,
-              startHour: hour,
-              durationHours: Number(duration),
-              price: Number(price.replace(/[^\d]/g, "")),
-            });
-            if (!err) {
-              setName("");
-              setPrice("");
-            }
-            run(toast, copy().toast.tariffSaved, err);
-          }}
-        >
-          {copy().manager.saveTariff}
-        </Btn>
+        <div className="flex gap-2">
+          <Btn
+            onClick={() => {
+              const payload = {
+                name,
+                startHour: hour,
+                durationHours: Number(duration),
+                price: Number(price.replace(/[^\d]/g, "")),
+              };
+              const err = editingId
+                ? updateTariff({ id: editingId, ...payload })
+                : addTariff({ channelId, ...payload });
+              if (!err) resetForm();
+              run(toast, editingId ? copy().toast.tariffUpdated : copy().toast.tariffSaved, err);
+            }}
+          >
+            {editingId ? copy().manager.saveTariffEdit : copy().manager.saveTariff}
+          </Btn>
+          {editingId ? (
+            <Btn onClick={resetForm}>{copy().manager.cancelTariffEdit}</Btn>
+          ) : null}
+        </div>
       </Card>
       <h2 className="mb-1 mt-1 px-1 text-[11px] text-muted">{copy().manager.tariffList}</h2>
+      <p className="mb-2 px-1 text-[11px] text-muted">{copy().manager.pickToEdit}</p>
       {!tariffs.length ? <Empty>{copy().manager.noTariffs}</Empty> : null}
       {tariffs.length ? (
         <ul className="overflow-hidden rounded-2xl bg-surface">
           {tariffs.map((t) => (
             <li key={t.id} className="flex items-center gap-2 border-b border-line px-3 py-3 last:border-b-0">
-              <span className="min-w-0 flex-1">
+              <button
+                type="button"
+                className={`min-w-0 flex-1 text-start ${editingId === t.id ? "opacity-100" : ""}`}
+                onClick={() => loadForEdit(t)}
+              >
                 <span className="block truncate text-sm font-semibold">{t.name}</span>
                 <span className="block truncate text-[11px] text-muted">
                   {fill(copy().common.tariffMeta, {
@@ -970,7 +1004,7 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
                     price: money(t.price),
                   })}
                 </span>
-              </span>
+              </button>
               <button
                 type="button"
                 className={`min-h-9 shrink-0 rounded-full px-3 text-xs font-semibold ${t.isActive ? "bg-ok/15 text-ok" : "bg-line text-muted"}`}

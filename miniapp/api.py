@@ -127,6 +127,8 @@ def api_me(request: HttpRequest) -> JsonResponse:
     ch_count = Channel.objects.filter(manager=user).count()
     is_op = ws.is_operator(user.bale_user_id or '')
     debug_user = is_debug_user(user.bale_user_id or '')
+    can_switch = _can_switch_roles(user.bale_user_id or '')
+    # هر کاربر می‌تواند پنل مدیر را باز کند (برای ثبت کانال). سوییچ نقش فقط مالک/پشتیبانی.
     return JsonResponse({
         'ok': True,
         'user': {
@@ -137,7 +139,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
         },
         'wallet': br,
         'is_operator': is_op,
-        'can_switch_roles': True,
+        'can_switch_roles': can_switch,
         'debug': debug_user,
         'channel_count': ch_count,
         'can_be_manager': True,

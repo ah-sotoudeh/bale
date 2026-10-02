@@ -356,4 +356,5 @@ def mark_batch_paid(batch_id: int) -> Dict[str, Any]:
 
 
 def is_operator(bale_user_id: str) -> bool:
-    return bool(OPERATOR_BALE_ID) and str(bale_user_id) == str(OPERATOR_BALE_ID)
+    op = (os.environ.get('OPERATOR_BALE_ID') or OPERATOR_BALE_ID or '').strip()
+    return bool(op) and str(bale_user_id) == str(op)

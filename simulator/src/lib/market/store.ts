@@ -606,6 +606,7 @@ export type MarketState = Data & {
   payoutBlock: (owner: "manager" | "customer") => string | null;
   setPublishMode: (channelId: number, mode: PublishMode, remindHours?: number) => string | null;
   addTariff: (input: { channelId: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
+  updateTariff: (input: { id: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
   toggleTariff: (id: number) => string | null;
   decideItem: (itemId: number, approve: boolean) => string | null;
   toggleBusy: (tariffId: number, date: string) => string | null;
@@ -864,6 +865,26 @@ export const useMarket = create<MarketState>()(
             },
             ...s.tariffs,
           ],
+        });
+        return null;
+      },
+      updateTariff: (input) => {
+        const name = input.name.trim();
+        if (!name || input.durationHours <= 0 || input.price < 0) return t().error.tariffFields;
+        const row = get().tariffs.find((x) => x.id === input.id);
+        if (!row) return t().error.tariffMissing;
+        set({
+          tariffs: get().tariffs.map((x) =>
+            x.id === input.id
+              ? {
+                  ...x,
+                  name: name.slice(0, 100),
+                  startHour: input.startHour,
+                  durationHours: input.durationHours,
+                  price: input.price,
+                }
+              : x,
+          ),
         });
         return null;
       },
