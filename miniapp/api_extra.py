@@ -158,7 +158,6 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'avg_views': (t.channel.avg_views if t.channel_id else 0) or 0,
         })
     from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
-    from orders.models import OrderItem
 
     own_by_tariff: dict = {}
     for item_id, tariff_id in OrderItem.objects.filter(

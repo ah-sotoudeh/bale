@@ -1000,6 +1000,9 @@ class MiniappLiveActionTests(TestCase):
         self.assertIn('اعتراض باز، منتظر تصمیم شما', script)
         self.assertIn('تأیید: لغو کل سفارش', script)
         self.assertNotIn('window.confirm', script)
+        self.assertIn('(معکوس)', script)
+        self.assertIn('rev?list.reverse():list', script)
+        self.assertIn('owner:String(e.owner||``),orderId:Number(e.order_id)||0', script)
         self.assertNotIn('n.growth!=null', script)
         self.assertIn('errPack.known', script)
         self.assertIn('lb-pill', script)
@@ -2246,3 +2249,25 @@ class FailedPublishMessageAmountTests(PartialRefundThenExecutionTests):
         texts = ' '.join(str(c.args[1]) for c in exec_send.call_args_list)
         self.assertIn('600', texts)
         self.assertNotIn('1,000', texts)
+
+
+class OperatorDisputeDetailsTests(PartialRefundThenExecutionTests):
+    """پشتیبانی برای تصمیم، سفارش و مبلغ و زمان را در خود صف می‌بیند."""
+
+    def test_operator_reviews_carry_order_price_and_time(self):
+        import os
+
+        os.environ['ALLOW_MINIAPP_DEBUG'] = '1'
+        self.addCleanup(lambda: os.environ.pop('ALLOW_MINIAPP_DEBUG', None))
+        OrderItem.objects.filter(pk=self.item.pk).update(execution_status='awaiting_operator')
+        with patch('wallet.services.OPERATOR_BALE_ID', 'op-7'), patch('miniapp.api.ws.OPERATOR_BALE_ID', 'op-7', create=True):
+            res = self.client.get('/miniapp/api/me', {'debug_bale_id': 'op-7'})
+        rows = res.json().get('operator_reviews', [])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row['item_id'], self.item.id)
+        self.assertEqual(row['order_id'], self.order.id)
+        self.assertEqual(row['price'], 1000)
+        self.assertEqual(row['customer'], 'pr1')
+        self.assertEqual(row['manager'], 'pr2')
+        self.assertTrue(row['when'])

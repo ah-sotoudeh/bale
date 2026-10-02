@@ -298,7 +298,7 @@ def handle_free_callback(
             bc.send_message(str(chat_id), 'این تاریخ درست نیست.')
             return True
         try:
-            slot = mark_tariff_day_busy(t, day)
+            mark_tariff_day_busy(t, day)
         except Exception as exc:
             from orders.slots import SlotConflict
 

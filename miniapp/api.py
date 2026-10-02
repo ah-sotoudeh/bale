@@ -8,12 +8,12 @@ from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, Optional
 
 from django.db.models import Q
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from bot_flow.jalali import format_jalali
+from bot_flow.jalali import format_jalali, format_slot
 from channels_app.models import Channel, ChannelGroup, Tariff
 from miniapp.auth import validate_init_data
 from orders.availability import free_days_for_tariff, mark_external_busy
@@ -506,7 +506,7 @@ def _operator_queues(is_op: bool) -> Dict[str, Any]:
     reviews = []
     for item in (
         OrderItem.objects.filter(execution_status='awaiting_operator')
-        .select_related('channel', 'tariff', 'tariff__group')
+        .select_related('channel', 'tariff', 'tariff__group', 'order__customer', 'manager')
         .order_by('id')[:40]
     ):
         owner = ''
@@ -514,10 +514,21 @@ def _operator_queues(is_op: bool) -> Dict[str, Any]:
             owner = item.tariff.group.name
         elif item.channel_id:
             owner = item.channel.name
+        start = item.effective_start
         note = owner or f'نوبت {item.id}'
         if item.published_link:
             note = f'{note} · {item.published_link}'
-        reviews.append({'item_id': item.id, 'note': note[:240]})
+        reviews.append({
+            'item_id': item.id,
+            'note': note[:240],
+            'owner': owner,
+            'order_id': item.order_id,
+            'price': int(item.price or 0),
+            'when': format_slot(timezone.localtime(start)) if start else '',
+            'customer': item.order.customer.bale_user_id or '',
+            'manager': (item.manager.bale_user_id or '') if item.manager_id else '',
+            'link': item.published_link or '',
+        })
     return {
         'operator_banners': banners,
         'operator_payouts': payouts,
