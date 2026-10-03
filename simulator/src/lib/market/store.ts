@@ -607,6 +607,8 @@ export type MarketState = Data & {
   setPublishMode: (channelId: number, mode: PublishMode, remindHours?: number) => string | null;
   addTariff: (input: { channelId: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
   updateTariff: (input: { id: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
+  removeTariff: (id: number) => string | null;
+  updateChannel: (channelId: number, name: string) => string | null;
   toggleTariff: (id: number) => string | null;
   decideItem: (itemId: number, approve: boolean) => string | null;
   toggleBusy: (tariffId: number, date: string) => string | null;
@@ -885,6 +887,24 @@ export const useMarket = create<MarketState>()(
                 }
               : x,
           ),
+        });
+        return null;
+      },
+      removeTariff: (id) => {
+        const row = get().tariffs.find((x) => x.id === id);
+        if (!row) return t().error.tariffMissing;
+        set({
+          tariffs: get().tariffs.filter((x) => x.id !== id),
+          busy: get().busy.filter((b) => b.tariffId !== id),
+        });
+        return null;
+      },
+      updateChannel: (channelId, name) => {
+        const n = name.trim();
+        if (!n) return t().error.needChannelName;
+        if (!get().channels.some((c) => c.id === channelId)) return t().error.channelMissing;
+        set({
+          channels: get().channels.map((c) => (c.id === channelId ? { ...c, name: n.slice(0, 200) } : c)),
         });
         return null;
       },

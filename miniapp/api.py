@@ -388,6 +388,26 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def api_channel_update(request: HttpRequest) -> JsonResponse:
+    """ویرایش نام کانال توسط مالک."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    if not ch:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+    name = str(body.get('name') or '').strip()
+    if not name:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=400)
+    ch.name = name[:200]
+    ch.save(update_fields=['name'])
+    return JsonResponse({'ok': True, 'channel': _channel_payload(ch)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

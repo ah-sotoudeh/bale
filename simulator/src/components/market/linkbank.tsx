@@ -821,7 +821,9 @@ function ChannelPulse({ channels }: { channels: Channel[] }) {
 function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: string) => void }) {
   const channel = useMarket((s) => s.channels.find((c) => c.id === channelId));
   const setPublishMode = useMarket((s) => s.setPublishMode);
+  const updateChannel = useMarket((s) => s.updateChannel);
   const [remind, setRemind] = useState(channel?.remindHours ?? 2);
+  const [editName, setEditName] = useState(channel?.name ?? "");
   if (!channel) return <Empty>{copy().error.channelMissing}</Empty>;
   const hints: Record<string, string> = {
     bot: copy().manager.modeBot,
@@ -836,6 +838,19 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
           {channel.link}
         </div>
       </div>
+      <Card>
+        <Field label={copy().manager.channelNameEdit}>
+          <input className={control} value={editName} onChange={(e) => setEditName(e.target.value)} />
+        </Field>
+        <Btn
+          onClick={() => {
+            const err = updateChannel(channel.id, editName);
+            run(toast, copy().toast.channelRenamed, err);
+          }}
+        >
+          {copy().manager.saveChannelName}
+        </Btn>
+      </Card>
       <ChannelPulse channels={[channel]} />
       <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.modeTitle}</h2>
       <ul className="mb-3 overflow-hidden rounded-2xl bg-surface">
@@ -894,6 +909,7 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
   const ownerName = useMarket((s) => s.ownerName);
   const addTariff = useMarket((s) => s.addTariff);
   const updateTariff = useMarket((s) => s.updateTariff);
+  const removeTariff = useMarket((s) => s.removeTariff);
   const toggleTariff = useMarket((s) => s.toggleTariff);
   const [channelId, setChannelId] = useState(channels[0]?.id ?? 0);
   const [name, setName] = useState("");
@@ -980,6 +996,17 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
           </Btn>
           {editingId ? (
             <Btn onClick={resetForm}>{copy().manager.cancelTariffEdit}</Btn>
+          ) : null}
+          {editingId ? (
+            <Btn
+              onClick={() => {
+                const err = removeTariff(editingId);
+                if (!err) resetForm();
+                run(toast, copy().toast.tariffDeleted, err);
+              }}
+            >
+              {copy().manager.deleteTariff}
+            </Btn>
           ) : null}
         </div>
       </Card>

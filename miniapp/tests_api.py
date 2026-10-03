@@ -197,6 +197,31 @@ class MiniappManagerFlowTests(TestCase):
         # may validate IBAN strictly — accept 200 ok or 400 invalid_iban
         self.assertIn(r2.status_code, (200, 400), r2.content)
 
+    
+    def test_tariff_delete_unused(self):
+        r = self.client.post(
+            '/miniapp/api/tariffs/delete',
+            data={'debug_bale_id': self.mgr_id, 'tariff_id': self.tariff.id},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertTrue(body.get('ok'))
+        self.assertTrue(body.get('deleted'))
+        from channels_app.models import Tariff
+        self.assertFalse(Tariff.objects.filter(id=self.tariff.id).exists())
+
+    def test_channel_update_name(self):
+        r = self.client.post(
+            '/miniapp/api/channels/update',
+            data={'debug_bale_id': self.mgr_id, 'channel_id': self.ch.id, 'name': 'کانال جدید'},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json().get('ok'), r.content)
+        self.ch.refresh_from_db()
+        self.assertEqual(self.ch.name, 'کانال جدید')
+
     def test_stranger_cannot_update_tariff(self):
         r = self.client.post(
             '/miniapp/api/tariffs/update',

@@ -294,6 +294,39 @@ def api_tariff_update(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['POST'])
+def api_tariff_delete(request: HttpRequest) -> JsonResponse:
+    """حذف تعرفه. اگر سفارش/رزرو داشته باشد فقط غیرفعال می‌شود."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    t = _own_tariff(user, body.get('tariff_id'))
+    if t is None:
+        return _err('not_found', 404)
+    if t is False:
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
+    has_items = OrderItem.objects.filter(tariff_id=t.id).exists()
+    from orders.models import SlotReservation
+    has_slots = SlotReservation.objects.filter(tariff_id=t.id).exists()
+    if has_items or has_slots:
+        if t.is_active:
+            t.is_active = False
+            t.save(update_fields=['is_active'])
+        return JsonResponse({
+            'ok': True,
+            'tariff_id': t.id,
+            'deleted': False,
+            'deactivated': True,
+            'message': 'این تعرفه سفارش یا رزرو دارد؛ فقط غیرفعال شد.',
+        })
+    tid = t.id
+    t.delete()
+    return JsonResponse({'ok': True, 'tariff_id': tid, 'deleted': True, 'deactivated': False})
+
+
+@csrf_exempt
 @require_http_methods(['GET'])
 def api_banners(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
