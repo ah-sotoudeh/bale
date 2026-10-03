@@ -61,3 +61,12 @@ python scripts/poll_bot.py
 | `orders/services.py` | ثبت پرداخت واقعی |
 | `miniapp/` | API مینی‌اپ روی همان مدل‌ها |
 | `integrations/linkyar_client.py` | حساب کاربری لینک‌یار برای آمار و ارسال |
+
+
+## تست مینی‌اپ (پرداخت و گزارش)
+
+```bash
+python manage.py test miniapp.tests_pay miniapp.tests_api -v 2
+```
+
+پوشش: پرداخت از اعتبار، `publish_due` برای کانال manual، `wallet.report.month_earn`، و تست‌های black-box نقش‌ها.

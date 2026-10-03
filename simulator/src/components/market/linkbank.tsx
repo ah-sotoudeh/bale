@@ -605,19 +605,31 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
         <div className="mb-2 flex gap-1 overflow-x-auto">
           {(
             [
-              ["all", copy().manager.filterAll],
-              ["pending", copy().manager.filterPending],
-              ["approved", copy().manager.filterApproved],
-              ["paid", copy().manager.filterPaid],
+              ["all", copy().manager.filterAll, s.items.length],
+              [
+                "pending",
+                copy().manager.filterPending,
+                s.items.filter((o) => o.managerStatus === "pending" || o.managerStatus === "edited").length,
+              ],
+              ["approved", copy().manager.filterApproved, s.items.filter((o) => o.managerStatus === "approved").length],
+              [
+                "paid",
+                copy().manager.filterPaid,
+                s.items.filter((o) =>
+                  ["paid", "remind_sent", "awaiting_manager_publish", "awaiting_customer_confirm", "executed"].includes(
+                    o.execution,
+                  ),
+                ).length,
+              ],
             ] as const
-          ).map(([id, label]) => (
+          ).map(([id, label, count]) => (
             <button
               key={id}
               type="button"
               onClick={() => setOrderFilter(id)}
               className={`min-h-9 shrink-0 rounded-full px-3 text-xs ${orderFilter === id ? "bg-link text-on" : "bg-surface text-muted"}`}
             >
-              {label}
+              {label} ({faNum(count)})
             </button>
           ))}
         </div>
@@ -701,15 +713,32 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
                         </Btn>
                       </div>
                     ) : null}
-                    {o.execution === "paid" || o.execution === "remind_sent" || o.execution === "awaiting_manager_publish" ? (
-                      <div className="mt-2">
-                        <Btn onClick={() => run(toast, copy().toast.publishedHold, s.publishItem(o.id))}>
-                          {t?.channelId && s.channels.find((c) => c.id === t.channelId)?.publishMode === "manual"
-                            ? copy().manager.selfPublished
-                            : copy().manager.published}
-                        </Btn>
-                      </div>
-                    ) : null}
+                    {(() => {
+                      const isManual =
+                        t?.channelId &&
+                        s.channels.find((c) => c.id === t.channelId)?.publishMode === "manual";
+                      const canPub =
+                        o.execution === "remind_sent" ||
+                        o.execution === "awaiting_manager_publish" ||
+                        (o.execution === "paid" &&
+                          (!isManual ||
+                            (() => {
+                              try {
+                                const d = new Date(`${o.date}T12:00:00`);
+                                return d.getTime() - Date.now() <= 48 * 3600 * 1000;
+                              } catch {
+                                return true;
+                              }
+                            })()));
+                      if (!canPub) return null;
+                      return (
+                        <div className="mt-2">
+                          <Btn onClick={() => run(toast, copy().toast.publishedHold, s.publishItem(o.id))}>
+                            {isManual ? copy().manager.selfPublished : copy().manager.published}
+                          </Btn>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : null}
               </li>
@@ -1973,10 +2002,46 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
   const s = useMarket();
   const [note, setNote] = useState("");
   const [open, setOpen] = useState<number | null>(null);
+  const [orderFilter, setOrderFilter] = useState<"all" | "pay" | "run" | "done">("all");
   if (!s.orders.length) return <Empty>{copy().orders.empty}</Empty>;
+  const rows = s.orders.filter((o) => {
+    if (orderFilter === "pay") return o.status === "waiting_payment";
+    if (orderFilter === "run")
+      return ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "paid"].includes(o.status);
+    if (orderFilter === "done") return ["completed", "cancelled", "rejected"].includes(o.status);
+    return true;
+  });
+  const cnt = {
+    all: s.orders.length,
+    pay: s.orders.filter((o) => o.status === "waiting_payment").length,
+    run: s.orders.filter((o) =>
+      ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "paid"].includes(o.status),
+    ).length,
+    done: s.orders.filter((o) => ["completed", "cancelled", "rejected"].includes(o.status)).length,
+  };
   return (
+    <>
+      <div className="mb-2 flex gap-1 overflow-x-auto">
+        {(
+          [
+            ["all", copy().orders.filterAll, cnt.all],
+            ["pay", copy().orders.filterPay, cnt.pay],
+            ["run", copy().orders.filterRun, cnt.run],
+            ["done", copy().orders.filterDone, cnt.done],
+          ] as const
+        ).map(([id, label, count]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setOrderFilter(id)}
+            className={`min-h-9 shrink-0 rounded-full px-3 text-xs ${orderFilter === id ? "bg-link text-on" : "bg-surface text-muted"}`}
+          >
+            {label} ({faNum(count)})
+          </button>
+        ))}
+      </div>
     <ul className="overflow-hidden rounded-2xl bg-surface">
-      {s.orders.map((o) => {
+      {rows.map((o) => {
         const lines = s.items.filter((i) => i.orderId === o.id);
         const shown = open === o.id;
         return (
@@ -2127,6 +2192,7 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
         );
       })}
     </ul>
+    </>
   );
 }
 
