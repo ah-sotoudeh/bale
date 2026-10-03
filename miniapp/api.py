@@ -408,6 +408,33 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def api_channel_delete(request: HttpRequest) -> JsonResponse:
+    """حذف کانال فقط وقتی سفارش مرتبط ندارد."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    if not ch:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+    from orders.models import OrderItem
+    if OrderItem.objects.filter(channel=ch).exists() or OrderItem.objects.filter(tariff__channel=ch).exists():
+        return JsonResponse({
+            'ok': False,
+            'error': 'has_orders',
+            'message': 'این کانال سفارش دارد؛ نمی‌شود حذف کرد. اول تعرفه‌ها را غیرفعال کنید.',
+        }, status=400)
+    cid = ch.id
+    # حذف تعرفه و اسلات‌های وابسته بدون سفارش
+    from channels_app.models import Tariff
+    Tariff.objects.filter(channel=ch).delete()
+    ch.delete()
+    return JsonResponse({'ok': True, 'channel_id': cid, 'deleted': True})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

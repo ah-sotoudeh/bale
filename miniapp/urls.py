@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/channels/refresh', api.api_refresh_channel_stats),
     path('api/channels/add', api.api_add_channel),
     path('api/channels/update', api.api_channel_update),
+    path('api/channels/delete', api.api_channel_delete),
     path('api/publish-mode', api_shop.api_set_publish_mode),
     path('api/tariffs', api.api_tariffs),
     path('api/tariffs/add', api.api_add_tariff),

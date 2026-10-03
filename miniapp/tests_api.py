@@ -211,6 +211,36 @@ class MiniappManagerFlowTests(TestCase):
         from channels_app.models import Tariff
         self.assertFalse(Tariff.objects.filter(id=self.tariff.id).exists())
 
+    
+    def test_channel_delete_unused(self):
+        r = self.client.post(
+            '/miniapp/api/channels/delete',
+            data={'debug_bale_id': self.mgr_id, 'channel_id': self.ch.id},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json().get('deleted'))
+        from channels_app.models import Channel
+        self.assertFalse(Channel.objects.filter(id=self.ch.id).exists())
+
+    def test_prefs_theme(self):
+        r = self.client.post(
+            '/miniapp/api/me/prefs',
+            data={'debug_bale_id': self.mgr_id, 'theme': 'dark'},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json().get('prefs', {}).get('theme'), 'dark')
+        r2 = self.client.get('/miniapp/api/me/prefs', {'debug_bale_id': self.mgr_id})
+        self.assertEqual(r2.json().get('prefs', {}).get('theme'), 'dark')
+
+    def test_calendar_manager(self):
+        r = self.client.get('/miniapp/api/calendar', {'debug_bale_id': self.mgr_id, 'tariff_id': self.tariff.id})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertTrue(body.get('ok'))
+        self.assertTrue(len(body.get('days') or []) >= 7)
+
     def test_channel_update_name(self):
         r = self.client.post(
             '/miniapp/api/channels/update',

@@ -104,6 +104,7 @@ export type Tariff = {
 };
 
 export type Busy = { id: number; tariffId: number; date: string; manual: boolean };
+export type CalDay = { date: string; status: string; why: string; free: boolean };
 
 export const FEE_PERCENT = 14;
 export const MIN_PAYOUT = 100_000;
@@ -225,6 +226,8 @@ type Data = {
   groups: Group[];
   tariffs: Tariff[];
   busy: Busy[];
+  /** وضعیت روز از سرور برای هر تعرفه */
+  calendarByTariff?: Record<number, CalDay[]>;
   banners: Banner[];
   selectedBannerId: number | null;
   cart: CartItem[];
@@ -609,6 +612,9 @@ export type MarketState = Data & {
   updateTariff: (input: { id: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
   removeTariff: (id: number) => string | null;
   updateChannel: (channelId: number, name: string) => string | null;
+  removeChannel: (channelId: number) => string | null;
+  loadCalendar: (tariffId: number, asCustomer?: boolean) => Promise<string | null>;
+  calendarDays: (tariffId: number) => CalDay[];
   toggleTariff: (id: number) => string | null;
   decideItem: (itemId: number, approve: boolean) => string | null;
   toggleBusy: (tariffId: number, date: string) => string | null;
@@ -908,6 +914,37 @@ export const useMarket = create<MarketState>()(
         });
         return null;
       },
+      removeChannel: (channelId) => {
+        if (!get().channels.some((c) => c.id === channelId)) return t().error.channelMissing;
+        const drop = new Set(get().tariffs.filter((x) => x.channelId === channelId).map((x) => x.id));
+        set({
+          channels: get().channels.filter((c) => c.id !== channelId),
+          tariffs: get().tariffs.filter((x) => x.channelId !== channelId),
+          busy: get().busy.filter((b) => !drop.has(b.tariffId)),
+          calendarByTariff: Object.fromEntries(
+            Object.entries(get().calendarByTariff).filter(([id]) => !drop.has(Number(id))),
+          ),
+        });
+        return null;
+      },
+      loadCalendar: async (tariffId, asCustomer) => {
+        // demo: derive from busy
+        const busy = get().busy.filter((b) => b.tariffId === tariffId);
+        const days: CalDay[] = [];
+        const today = new Date();
+        for (let i = 0; i < 14; i++) {
+          const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i, 12);
+          const iso = d.toISOString().slice(0, 10);
+          const slot = busy.find((b) => b.date === iso);
+          const status = slot ? (slot.manual ? "full" : "full") : "free";
+          days.push({ date: iso, status, why: slot ? "پر است" : "", free: !slot });
+        }
+        set({
+          calendarByTariff: { ...(get().calendarByTariff || {}), [tariffId]: days },
+        });
+        return null;
+      },
+      calendarDays: (tariffId) => (get().calendarByTariff || {})[tariffId] ?? [],
       toggleTariff: (id) => {
         set({
           tariffs: get().tariffs.map((t) => (t.id === id ? { ...t, isActive: !t.isActive } : t)),

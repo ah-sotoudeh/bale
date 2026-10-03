@@ -822,6 +822,8 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
   const channel = useMarket((s) => s.channels.find((c) => c.id === channelId));
   const setPublishMode = useMarket((s) => s.setPublishMode);
   const updateChannel = useMarket((s) => s.updateChannel);
+  const removeChannel = useMarket((s) => s.removeChannel);
+  const back = useMarket((s) => s.back);
   const [remind, setRemind] = useState(channel?.remindHours ?? 2);
   const [editName, setEditName] = useState(channel?.name ?? "");
   if (!channel) return <Empty>{copy().error.channelMissing}</Empty>;
@@ -842,14 +844,25 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
         <Field label={copy().manager.channelNameEdit}>
           <input className={control} value={editName} onChange={(e) => setEditName(e.target.value)} />
         </Field>
-        <Btn
-          onClick={() => {
-            const err = updateChannel(channel.id, editName);
-            run(toast, copy().toast.channelRenamed, err);
-          }}
-        >
-          {copy().manager.saveChannelName}
-        </Btn>
+        <div className="flex flex-wrap gap-2">
+          <Btn
+            onClick={() => {
+              const err = updateChannel(channel.id, editName);
+              run(toast, copy().toast.channelRenamed, err);
+            }}
+          >
+            {copy().manager.saveChannelName}
+          </Btn>
+          <Btn
+            onClick={() => {
+              const err = removeChannel(channel.id);
+              if (!err) back();
+              run(toast, copy().toast.channelDeleted, err);
+            }}
+          >
+            {copy().manager.deleteChannel}
+          </Btn>
+        </div>
       </Card>
       <ChannelPulse channels={[channel]} />
       <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.modeTitle}</h2>
@@ -1047,7 +1060,7 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
   );
 }
 
-type DayState = "free" | "busy" | "locked" | "cart";
+type DayState = "free" | "busy" | "locked" | "cart" | "past" | "hold";
 
 function DayGrid({
   days,
@@ -1067,18 +1080,24 @@ function DayGrid({
     busy: "border-danger/40 bg-danger/15",
     cart: "border-link bg-link/15",
     locked: "border-line bg-header",
+    past: "border-line bg-header opacity-60",
+    hold: "border-amber-500/40 bg-amber-500/10",
   };
   const tag: Record<DayState, string> = {
     free: "text-ok",
     busy: "text-danger",
     cart: "text-link",
     locked: "text-muted",
+    past: "text-muted",
+    hold: "text-amber-700",
   };
   const label: Record<DayState, string> = {
     free: copy().day.free,
     busy: copy().day.busy,
     cart: copy().day.cart,
     locked: copy().day.order,
+    past: copy().day.past,
+    hold: copy().day.hold,
   };
   return (
     <div className="mb-3">
@@ -1142,15 +1161,61 @@ function DayLegend() {
   );
 }
 
+function CustomerDays({ tariffId, toast }: { tariffId: number; toast: (m: string) => void }) {
+  const s = useMarket();
+  const t = s.tariffById(tariffId);
+  const loadCalendar = useMarket((st) => st.loadCalendar);
+  const calDays = useMarket((st) => st.calendarDays(tariffId));
+  useEffect(() => {
+    void loadCalendar(tariffId, true);
+  }, [tariffId, loadCalendar]);
+  if (!t) return <Empty>{copy().catalog.missing}</Empty>;
+  const byDate = new Map(calDays.map((d) => [d.date, d]));
+  return (
+    <DayGrid
+      days={horizon()}
+      model={(date) => {
+        const inCart = s.cart.some((c) => c.tariffId === t.id && c.date === date);
+        if (inCart) return { state: "cart" as DayState };
+        const cal = byDate.get(date);
+        const busy = s.isBusy(t.id, date);
+        const status = cal?.status || (busy ? "full" : "free");
+        const state = statusToDayState(status, false);
+        return {
+          state,
+          onClick:
+            state === "free"
+              ? () => run(toast, copy().toast.addedCart, s.addToCart(t.id, date))
+              : undefined,
+        };
+      }}
+    />
+  );
+}
+
+function statusToDayState(status: string, manual?: boolean): DayState {
+  if (status === "free") return "free";
+  if (status === "past") return "past";
+  if (status === "banner-hold") return "hold";
+  if (status === "full") return manual ? "busy" : "locked";
+  return "locked";
+}
+
 function ManagerDays({ tariffId, toast }: { tariffId: number; toast: (m: string) => void }) {
   const tariff = useMarket((s) => s.tariffs.find((t) => t.id === tariffId));
   const ownerName = useMarket((s) => s.ownerName);
   const busyAll = useMarket((s) => s.busy);
   const toggleBusy = useMarket((s) => s.toggleBusy);
+  const loadCalendar = useMarket((s) => s.loadCalendar);
+  const calDays = useMarket((s) => s.calendarDays(tariffId));
   const busy = (Array.isArray(busyAll) ? busyAll : []).filter((b) => b.tariffId === tariffId);
+  useEffect(() => {
+    void loadCalendar(tariffId, false);
+  }, [tariffId, loadCalendar]);
   if (!tariff) return <Empty>{copy().catalog.missing}</Empty>;
   const days = horizon();
   const manual = busy.filter((b) => b.manual);
+  const byDate = new Map(calDays.map((d) => [d.date, d]));
   return (
     <>
       <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl bg-surface px-3 py-3">
@@ -1162,27 +1227,32 @@ function ManagerDays({ tariffId, toast }: { tariffId: number; toast: (m: string)
         </span>
         <span className="shrink-0 text-xs text-link">{fill(copy().common.dayCount, { n: faNum(manual.length) })}</span>
       </div>
-      <p className="mb-2 px-1 text-xs leading-relaxed text-muted">
-        {copy().manager.dayLead}
-      </p>
+      <p className="mb-2 px-1 text-xs leading-relaxed text-muted">{copy().manager.dayLead}</p>
       <DayLegend />
       <DayGrid
         days={days}
         model={(date) => {
           const slot = busy.find((b) => b.date === date);
-          const state: DayState = !slot ? "free" : slot.manual ? "busy" : "locked";
+          const cal = byDate.get(date);
+          const status = cal?.status || (slot ? "full" : "free");
+          const state = statusToDayState(status, slot?.manual);
+          const canToggle = state === "free" || (state === "busy" && !!slot?.manual);
           return {
             state,
-            onClick: () => {
-              const err = toggleBusy(tariffId, date);
-              run(toast, state === "free" ? copy().toast.dayMarked : copy().toast.dayCleared, err);
-            },
+            onClick: canToggle
+              ? () => {
+                  const err = toggleBusy(tariffId, date);
+                  void loadCalendar(tariffId, false);
+                  run(toast, state === "free" ? copy().toast.dayMarked : copy().toast.dayCleared, err);
+                }
+              : undefined,
           };
         }}
       />
     </>
   );
 }
+
 
 function ledgerLabel(kind: string) {
   const map = copy().ledger as Record<string, string>;
@@ -1824,21 +1894,7 @@ function Customer({ screen, toast }: { screen: Screen; toast: (m: string) => voi
           {copy().catalog.dayLead}
         </p>
         <ChannelPulse channels={tariffChannels(s, t.id)} />
-        <DayGrid
-          days={horizon()}
-          model={(date) => {
-            const busy = s.isBusy(t.id, date);
-            const inCart = s.cart.some((c) => c.tariffId === t.id && c.date === date);
-            const state: DayState = inCart ? "cart" : busy ? "busy" : "free";
-            return {
-              state,
-              onClick:
-                state === "free"
-                  ? () => run(toast, copy().toast.addedCart, s.addToCart(t.id, date))
-                  : undefined,
-            };
-          }}
-        />
+        <CustomerDays tariffId={t.id} toast={toast} />
       </>
     );
   }
