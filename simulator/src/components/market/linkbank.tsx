@@ -1694,8 +1694,21 @@ function CatalogBoard() {
                   {s.ownerName(t.id).slice(0, 1)}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{s.ownerName(t.id)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="block truncate text-sm font-semibold">{s.ownerName(t.id)}</span>
+                    {t.groupId ? (
+                      <span className="shrink-0 rounded-full bg-link/15 px-2 py-0.5 text-[10px] font-semibold text-link">
+                        {copy().catalog.packageBadge}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block truncate text-[11px] text-muted">
+                    {t.groupId
+                      ? fill(copy().catalog.packageChannels, {
+                          n: faNum((s.groups.find((g) => g.id === t.groupId)?.channelIds || []).length || 0),
+                        })
+                      : null}
+                    {t.groupId ? " · " : ""}
                     {fill(copy().common.membersLine, {
                       members: faNum(pulse.members),
                       views: faNum(views),
@@ -1968,17 +1981,20 @@ function Customer({ screen, toast }: { screen: Screen; toast: (m: string) => voi
           </span>
           <ChevronLeft className="size-4 shrink-0 text-muted" />
         </button>
-        <Guide
-          title={copy().customer.guideTitle}
-          steps={[
-            copy().customer.guide[0],
-            fill(copy().tpl.customerBannerFee, { fee: money(BANNER_FEE) }),
-            copy().customer.guide[1],
-            copy().customer.guide[2],
-            copy().customer.guide[3],
-            copy().tpl.customerPay,
-          ]}
-        />
+        {!(s.onboarded || {}).customer ? (
+          <Guide
+            title={copy().customer.guideTitle}
+            steps={[
+              copy().customer.guide[0],
+              fill(copy().tpl.customerBannerFee, { fee: money(BANNER_FEE) }),
+              copy().customer.guide[1],
+              copy().customer.guide[2],
+              copy().customer.guide[3],
+              copy().tpl.customerPay,
+            ]}
+            onDismiss={() => s.markOnboarded("customer")}
+          />
+        ) : null}
         <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().customer.next}</h2>
         <MenuList>
           <MenuRow
@@ -2565,15 +2581,18 @@ function Operator({ screen, toast }: { screen: Screen; toast: (m: string) => voi
           </span>
           <ChevronLeft className="size-4 shrink-0 text-muted" />
         </button>
-        <Guide
-          title={copy().operator.guideTitle}
-          steps={[
-            copy().operator.guide[0],
-            copy().operator.guide[1],
-            copy().operator.guide[2],
-            copy().operator.guide[3],
-          ]}
-        />
+        {!(s.onboarded || {}).operator ? (
+          <Guide
+            title={copy().operator.guideTitle}
+            steps={[
+              copy().operator.guide[0],
+              copy().operator.guide[1],
+              copy().operator.guide[2],
+              copy().operator.guide[3],
+            ]}
+            onDismiss={() => s.markOnboarded("operator")}
+          />
+        ) : null}
         <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().operator.queues}</h2>
         <MenuList>
           <MenuRow

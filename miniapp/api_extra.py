@@ -154,8 +154,23 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else ''),
             'channel_id': t.channel_id,
             'group_id': t.group_id,
-            'members_count': (t.channel.members_count if t.channel_id else 0) or 0,
-            'avg_views': (t.channel.avg_views if t.channel_id else 0) or 0,
+            'is_package': bool(t.group_id),
+            'channel_count': (
+                t.group.channels.count() if t.group_id else (1 if t.channel_id else 0)
+            ),
+            'members_count': (
+                sum(ch.members_count or 0 for ch in t.group.channels.all())
+                if t.group_id
+                else ((t.channel.members_count if t.channel_id else 0) or 0)
+            ),
+            'avg_views': (
+                int(
+                    sum(ch.avg_views or 0 for ch in t.group.channels.all())
+                    / max(1, t.group.channels.count())
+                )
+                if t.group_id
+                else ((t.channel.avg_views if t.channel_id else 0) or 0)
+            ),
         })
     from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
 

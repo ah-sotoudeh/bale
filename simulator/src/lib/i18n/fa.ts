@@ -478,6 +478,8 @@ export const fa = {
     cartLabel: "سبد",
   },
   catalog: {
+    packageBadge: "مجموعه",
+    packageChannels: "{n} کانال",
     needBannerTitle: "اول بنر کانال بنرها",
     needBanner: "اول بنر را بیاورید. اگر روی کانال بنرها هست، همان پست را بازارسال کنید. اگر نیست، یک درخواست تازه بدهید.",
     search: "جستجوی کانال یا تعرفه",

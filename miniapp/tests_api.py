@@ -279,6 +279,26 @@ class MiniappManagerFlowTests(TestCase):
         self.assertEqual(r2.status_code, 200, r2.content)
         self.assertTrue(r2.json().get('deleted'))
 
+    
+    def test_channel_delete_blocked_when_open_order(self):
+        from orders.models import Order, OrderItem
+        from django.utils import timezone
+        from datetime import timedelta
+        cust = User.objects.create_user(username='cdel', password='x', bale_user_id='300777')
+        order = Order.objects.create(customer=cust, status='waiting_payment', total_price=1000)
+        start = timezone.now() + timedelta(days=2)
+        OrderItem.objects.create(
+            order=order, channel=self.ch, tariff=self.tariff, manager=self.mgr,
+            requested_start=start, requested_end=start + timedelta(hours=24),
+            price=1000, manager_status='pending', execution_status='none',
+        )
+        r = self.client.post(
+            '/miniapp/api/channels/delete',
+            data={'debug_bale_id': self.mgr_id, 'channel_id': self.ch.id},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400, r.content)
+
     def test_channel_update_name(self):
         r = self.client.post(
             '/miniapp/api/channels/update',

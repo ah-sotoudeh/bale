@@ -409,7 +409,7 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_channel_delete(request: HttpRequest) -> JsonResponse:
-    """حذف کانال فقط وقتی سفارش مرتبط ندارد."""
+    """حذف کانال اگر سفارش باز نداشته باشد (سفارش‌های بسته‌شده مانع نیستند)."""
     user, err = _auth_user(request)
     if err:
         return err
@@ -418,16 +418,29 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
     ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
     if not ch:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+    from django.db.models import Q
     from orders.models import OrderItem
-    if OrderItem.objects.filter(channel=ch).exists() or OrderItem.objects.filter(tariff__channel=ch).exists():
+
+    related = OrderItem.objects.filter(Q(channel=ch) | Q(tariff__channel=ch))
+    open_q = Q(manager_status__in=('pending', 'approved', 'edited')) | Q(
+        execution_status__in=(
+            'paid',
+            'remind_sent',
+            'awaiting_manager_publish',
+            'awaiting_customer_confirm',
+            'awaiting_operator',
+        )
+    )
+    if related.filter(open_q).exists():
         return JsonResponse({
             'ok': False,
             'error': 'has_orders',
-            'message': 'این کانال سفارش دارد؛ نمی‌شود حذف کرد. اول تعرفه‌ها را غیرفعال کنید.',
+            'message': 'این کانال سفارش باز دارد؛ بعد از اتمام یا لغو سفارش می‌توانید حذف کنید.',
         }, status=400)
     cid = ch.id
-    # حذف تعرفه و اسلات‌های وابسته بدون سفارش
     from channels_app.models import Tariff
+    # قلم‌های بسته‌شده را از کانال جدا کن تا CASCADE مانع نشود
+    related.update(channel=None)
     Tariff.objects.filter(channel=ch).delete()
     ch.delete()
     return JsonResponse({'ok': True, 'channel_id': cid, 'deleted': True})
@@ -555,6 +568,8 @@ def api_tariffs(request: HttpRequest) -> JsonResponse:
             'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else '?'),
             'channel_id': t.channel_id,
             'group_id': t.group_id,
+            'is_package': bool(t.group_id),
+            'channel_count': t.group.channels.count() if t.group_id else (1 if t.channel_id else 0),
         })
     from orders.availability import list_manual_busy_slots
 
