@@ -458,6 +458,7 @@ function run(toast: (m: string) => void, ok: string, err: string | null) {
 function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void }) {
   const s = useMarket();
   const [openItem, setOpenItem] = useState<number | null>(null);
+  const [orderFilter, setOrderFilter] = useState<"all" | "pending" | "approved" | "paid">("all");
   const pending = s.items.filter((i) => i.managerStatus === "pending").length;
 
   if (screen.name === "home") {
@@ -495,6 +496,19 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
           <div className="mb-3">
             <Btn onClick={() => s.go({ name: "orders" })}>{fill(copy().tpl.pendingCta, { n: faNum(pending) })}</Btn>
           </div>
+        ) : null}
+        {s.items.some(
+          (o) =>
+            ["paid", "remind_sent", "awaiting_manager_publish"].includes(o.execution) &&
+            s.channels.find((c) => c.id === s.tariffById(o.tariffId)?.channelId)?.publishMode === "manual",
+        ) ? (
+          <button
+            type="button"
+            className="mb-3 w-full rounded-2xl bg-surface px-3 py-3 text-start text-sm text-link"
+            onClick={() => s.go({ name: "orders" })}
+          >
+            {copy().manager.publishDue}
+          </button>
         ) : null}
         <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.nextTitle}</h2>
         <MenuList>
@@ -566,13 +580,49 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
 
   if (screen.name === "orders") {
     if (!s.items.length) return <Empty>{copy().manager.ordersEmpty}</Empty>;
+    const filteredItems = s.items.filter((o) => {
+      if (orderFilter === "pending") return o.managerStatus === "pending" || o.managerStatus === "edited";
+      if (orderFilter === "approved") return o.managerStatus === "approved";
+      if (orderFilter === "paid")
+        return ["paid", "remind_sent", "awaiting_manager_publish", "awaiting_customer_confirm", "executed"].includes(o.execution);
+      return true;
+    });
+    const publishDue = s.items.filter(
+      (o) =>
+        ["paid", "remind_sent", "awaiting_manager_publish"].includes(o.execution) &&
+        s.channels.find((c) => c.id === s.tariffById(o.tariffId)?.channelId)?.publishMode === "manual",
+    );
     return (
       <>
+        {publishDue.length ? (
+          <p className="mb-2 rounded-2xl bg-link/10 px-3 py-2 text-xs text-link">
+            {copy().manager.publishDue} ({faNum(publishDue.length)})
+          </p>
+        ) : null}
         <p className="mb-2 px-1 text-xs leading-relaxed text-muted">
           {copy().manager.ordersLead}
         </p>
+        <div className="mb-2 flex gap-1 overflow-x-auto">
+          {(
+            [
+              ["all", copy().manager.filterAll],
+              ["pending", copy().manager.filterPending],
+              ["approved", copy().manager.filterApproved],
+              ["paid", copy().manager.filterPaid],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setOrderFilter(id)}
+              className={`min-h-9 shrink-0 rounded-full px-3 text-xs ${orderFilter === id ? "bg-link text-on" : "bg-surface text-muted"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <ul className="overflow-hidden rounded-2xl bg-surface">
-          {s.items.map((o) => {
+          {filteredItems.map((o) => {
             const t = s.tariffById(o.tariffId);
             const open = openItem === o.id;
             const tone =
@@ -633,7 +683,7 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
                         </Btn>
                       </div>
                     ) : null}
-                    {o.execution === "paid" ? (
+                    {o.execution === "paid" || o.execution === "remind_sent" || o.execution === "awaiting_manager_publish" ? (
                       <div className="mt-2">
                         <Btn onClick={() => run(toast, copy().toast.publishedHold, s.publishItem(o.id))}>
                           {t?.channelId && s.channels.find((c) => c.id === t.channelId)?.publishMode === "manual"
@@ -1547,6 +1597,16 @@ function WalletPanel({ owner, toast }: { owner: "manager" | "customer"; toast: (
         <span className="mt-1 block text-xs text-on/80">
           {owner === "manager" ? copy().wallet.escrow : copy().wallet.locked} {money(escrow)}
         </span>
+        {owner === "manager" ? (
+          <span className="mt-2 block text-xs text-on/90">
+            {copy().wallet.monthEarn}:{" "}
+            {money(
+              ledgerFull
+                .filter((l) => l.kind === "earn" || (l as { entryType?: string }).entryType === "earn")
+                .reduce((a, l) => a + (Number(l.amount) || 0), 0),
+            )}
+          </span>
+        ) : null}
       </div>
       <WeekChart entries={ledgerFull} />
       {owner === "manager" ? (
@@ -1921,8 +1981,18 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
               </p>
             ) : null}
             {o.status === "waiting_payment" ? (
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Btn onClick={() => payOrderViaBale(o.id, o.total, toast)}>{copy().orders.pay}</Btn>
+              <div className="mt-2 flex flex-col gap-2">
+                {s.customerBalance >= o.total && o.total > 0 ? (
+                  <Btn
+                    onClick={() => {
+                      const err = s.payOrder(o.id, "wallet");
+                      run(toast, copy().toast.paymentRecorded, err);
+                    }}
+                  >
+                    {copy().orders.payWallet}
+                  </Btn>
+                ) : null}
+                <Btn onClick={() => payOrderViaBale(o.id, o.total, toast)}>{copy().orders.payBot}</Btn>
                 {(window as unknown as { __lbBotUrl?: string }).__lbBotUrl ? (
                   <Btn
                     onClick={() => {
@@ -1956,7 +2026,7 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
                   </p>
                   {line.publishedLink ? (
                     <a className="text-xs text-link" href={line.publishedLink} target="_blank" rel="noreferrer">
-                      {copy().common.link}
+                      {copy().orders.publishedOpen}
                     </a>
                   ) : null}
                   {line.managerStatus === "edited" && line.proposedDate ? (

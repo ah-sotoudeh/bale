@@ -752,6 +752,29 @@ def _item_in_manager_inbox(it: OrderItem, user: User) -> bool:
 
 @csrf_exempt
 @require_http_methods(['GET'])
+
+def _item_publish_due(it: OrderItem) -> bool:
+    """نوبت انتشار دستی نزدیک یا رسیده است."""
+    if not it.channel_id:
+        return False
+    mode = getattr(it.channel, 'publish_mode', '') or ''
+    if mode != 'manual':
+        return False
+    if it.execution_status not in (
+        'paid',
+        'remind_sent',
+        'awaiting_manager_publish',
+    ):
+        return False
+    start = it.effective_start
+    if not start:
+        return False
+    from datetime import timedelta
+    hours = int(getattr(it.channel, 'manual_remind_hours', None) or 2)
+    now = timezone.now()
+    return start - timedelta(hours=hours) <= now <= start + timedelta(hours=6)
+
+
 def api_orders(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
@@ -790,6 +813,10 @@ def api_orders(request: HttpRequest) -> JsonResponse:
             ),
             'start_jalali': format_jalali(timezone.localtime(start).date()) if start else '',
             'published_link': it.published_link or '',
+            'publish_due': _item_publish_due(it),
+            'publish_mode': (
+                it.channel.publish_mode if it.channel_id else ''
+            ),
         })
     return JsonResponse({'ok': True, 'orders': items})
 
@@ -891,6 +918,26 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
         can, reason = ws.can_request_payout(user)
         balance = ws.balance_breakdown(user)
         ledger = ws.recent_ledger(user)
+        from django.db.models import Sum
+        from django.utils import timezone as dj_tz
+        from wallet.models import WalletLedger
+
+        now = dj_tz.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_earn = int(
+            WalletLedger.objects.filter(
+                user=user, entry_type='earn', created_at__gte=month_start
+            ).aggregate(s=Sum('amount'))['s']
+            or 0
+        )
+        report = {
+            'month_earn': month_earn,
+            'available': int(balance.get('available') or 0),
+            'escrow': int(balance.get('manager_escrow') or balance.get('escrow') or 0),
+            'locked_pending': int(balance.get('locked_pending') or 0),
+            'paid_out': int(balance.get('paid_out') or 0),
+            'can_payout': can,
+        }
     except Exception:
         logger.exception('wallet api failed')
         return JsonResponse(
@@ -905,6 +952,14 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
                 'min_payout': ws.MIN_PAYOUT_TOMAN,
                 'fee_percent': ws.PLATFORM_FEE_PERCENT,
                 'degraded': True,
+                'report': {
+                    'month_earn': 0,
+                    'available': 0,
+                    'escrow': 0,
+                    'locked_pending': 0,
+                    'paid_out': 0,
+                    'can_payout': False,
+                },
             }
         )
     return JsonResponse({
@@ -917,6 +972,7 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
         'payout_block_reason': reason if not can else '',
         'min_payout': ws.MIN_PAYOUT_TOMAN,
         'fee_percent': ws.PLATFORM_FEE_PERCENT,
+        'report': report,
     })
 
 
