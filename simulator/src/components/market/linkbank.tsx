@@ -458,7 +458,20 @@ function run(toast: (m: string) => void, ok: string, err: string | null) {
 function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void }) {
   const s = useMarket();
   const [openItem, setOpenItem] = useState<number | null>(null);
-  const [orderFilter, setOrderFilter] = useState<"all" | "pending" | "approved" | "paid">("all");
+  const [orderFilter, setOrderFilter] = useState<"all" | "pending" | "approved" | "paid">(() => {
+    try {
+      const m = String(location.hash || "").match(/(?:^#|&)?of=(\w+)/);
+      if (m && ["all", "pending", "approved", "paid"].includes(m[1])) return m[1] as "all" | "pending" | "approved" | "paid";
+    } catch { /* ignore */ }
+    return "all";
+  });
+  const setOrderFilterH = (id: "all" | "pending" | "approved" | "paid") => {
+    setOrderFilter(id);
+    try {
+      const base = String(location.hash || "#").replace(/[?&]?of=\w+/g, "").replace(/^#&/, "#");
+      location.hash = (base === "#" ? "#of=" : base + (base.includes("=") ? "&of=" : "of=")) + id;
+    } catch { /* ignore */ }
+  };
   const pending = s.items.filter((i) => i.managerStatus === "pending").length;
 
   if (screen.name === "home") {
@@ -580,13 +593,20 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
 
   if (screen.name === "orders") {
     if (!s.items.length) return <Empty>{copy().manager.ordersEmpty}</Empty>;
-    const filteredItems = s.items.filter((o) => {
-      if (orderFilter === "pending") return o.managerStatus === "pending" || o.managerStatus === "edited";
-      if (orderFilter === "approved") return o.managerStatus === "approved";
-      if (orderFilter === "paid")
-        return ["paid", "remind_sent", "awaiting_manager_publish", "awaiting_customer_confirm", "executed"].includes(o.execution);
-      return true;
-    });
+    const filteredItems = s.items
+      .filter((o) => {
+        if (orderFilter === "pending") return o.managerStatus === "pending" || o.managerStatus === "edited";
+        if (orderFilter === "approved") return o.managerStatus === "approved";
+        if (orderFilter === "paid")
+          return ["paid", "remind_sent", "awaiting_manager_publish", "awaiting_customer_confirm", "executed"].includes(
+            o.execution,
+          );
+        return true;
+      })
+      .sort((a, b) => {
+        if (orderFilter === "paid") return String(a.date).localeCompare(String(b.date)) || b.id - a.id;
+        return b.id - a.id;
+      });
     const publishDue = s.items.filter(
       (o) =>
         ["paid", "remind_sent", "awaiting_manager_publish"].includes(o.execution) &&
@@ -626,13 +646,16 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
             <button
               key={id}
               type="button"
-              onClick={() => setOrderFilter(id)}
+              onClick={() => setOrderFilterH(id)}
               className={`min-h-9 shrink-0 rounded-full px-3 text-xs ${orderFilter === id ? "bg-link text-on" : "bg-surface text-muted"}`}
             >
               {label} ({faNum(count)})
             </button>
           ))}
         </div>
+        {!filteredItems.length ? (
+          <Empty>{copy().manager.filterEmpty}</Empty>
+        ) : (
         <ul className="overflow-hidden rounded-2xl bg-surface">
           {filteredItems.map((o) => {
             const t = s.tariffById(o.tariffId);
@@ -745,6 +768,7 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
             );
           })}
         </ul>
+        )}
       </>
     );
   }
@@ -2004,13 +2028,15 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
   const [open, setOpen] = useState<number | null>(null);
   const [orderFilter, setOrderFilter] = useState<"all" | "pay" | "run" | "done">("all");
   if (!s.orders.length) return <Empty>{copy().orders.empty}</Empty>;
-  const rows = s.orders.filter((o) => {
-    if (orderFilter === "pay") return o.status === "waiting_payment";
-    if (orderFilter === "run")
-      return ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "paid"].includes(o.status);
-    if (orderFilter === "done") return ["completed", "cancelled", "rejected"].includes(o.status);
-    return true;
-  });
+  const rows = s.orders
+    .filter((o) => {
+      if (orderFilter === "pay") return o.status === "waiting_payment";
+      if (orderFilter === "run")
+        return ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "paid"].includes(o.status);
+      if (orderFilter === "done") return ["completed", "cancelled", "rejected"].includes(o.status);
+      return true;
+    })
+    .sort((a, b) => b.id - a.id);
   const cnt = {
     all: s.orders.length,
     pay: s.orders.filter((o) => o.status === "waiting_payment").length,
@@ -2040,6 +2066,9 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
           </button>
         ))}
       </div>
+    {!rows.length ? (
+      <Empty>{copy().orders.filterEmpty}</Empty>
+    ) : (
     <ul className="overflow-hidden rounded-2xl bg-surface">
       {rows.map((o) => {
         const lines = s.items.filter((i) => i.orderId === o.id);
@@ -2192,6 +2221,7 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
         );
       })}
     </ul>
+    )}
     </>
   );
 }
