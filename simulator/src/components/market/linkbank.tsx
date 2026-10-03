@@ -1833,8 +1833,10 @@ function chargeViaBale(amount: number, toast: (m: string) => void) {
 }
 
 function payOrderViaBale(orderId: number, amount: number, toast: (m: string) => void) {
-  // فاکتور فقط در چت بازو؛ درگاه داخل مینی‌اپ نیست.
-  const err = useMarket.getState().payOrder(orderId, "bale");
+  // اول اعتبار؛ اگر کافی نبود فاکتور در چت بازو.
+  const bal = useMarket.getState().customerBalance;
+  const prefer = bal >= amount ? "wallet" : "bale";
+  const err = useMarket.getState().payOrder(orderId, prefer);
   if (err) {
     toast(err);
     return;

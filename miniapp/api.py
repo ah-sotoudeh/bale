@@ -979,6 +979,54 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
             'message': 'این سفارش الان قابل پرداخت نیست.',
         }, status=400)
 
+    via = str(body.get('via') or 'auto').strip().lower()
+    total = int(order.total_amount or 0)
+
+    # پرداخت از اعتبار مشتری (بدون درگاه داخل مینی‌اپ)
+    if via in ('wallet', 'credit', 'auto'):
+        from wallet.services import balance_breakdown, spend_customer_credit
+        from orders.services import process_payment_paid
+
+        credit = int(balance_breakdown(user).get('credit') or 0)
+        if via in ('wallet', 'credit') or (via == 'auto' and credit >= total > 0):
+            if credit < total:
+                if via in ('wallet', 'credit'):
+                    return JsonResponse({
+                        'ok': False,
+                        'error': 'low_balance',
+                        'message': 'اعتبار کافی نیست. از پرداخت در بازو استفاده کنید.',
+                        'credit': credit,
+                        'total': total,
+                    }, status=400)
+            else:
+                spent = spend_customer_credit(
+                    user,
+                    total,
+                    ref=f'order:{order.id}',
+                    note=f'پرداخت سفارش {order.id} از اعتبار',
+                    idempotency_key=f'spend:order:{order.id}',
+                )
+                if not spent.get('ok'):
+                    return JsonResponse({
+                        'ok': False,
+                        'error': spent.get('error') or 'low_balance',
+                        'message': 'کسر از اعتبار انجام نشد.',
+                    }, status=400)
+                result = process_payment_paid(order.id)
+                if not result.get('ok'):
+                    return JsonResponse({
+                        'ok': False,
+                        'error': result.get('error') or 'pay_failed',
+                        'message': 'پرداخت از اعتبار ثبت نشد. پشتیبانی را خبر کنید.',
+                    }, status=400)
+                return JsonResponse({
+                    'ok': True,
+                    'via': 'wallet',
+                    'order_id': order.id,
+                    'order_status': 'paid',
+                    'message': 'از اعتبار شما پرداخت شد. سفارش ثبت است.',
+                })
+
     chat_id = str(user.bale_user_id or '').strip()
     if not chat_id:
         return JsonResponse({
@@ -987,9 +1035,8 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
             'message': 'شناسه بله شما پیدا نشد. یک‌بار از بازو وارد مینی‌اپ شوید.',
         }, status=400)
 
-    via = str(body.get('via') or 'bot').strip().lower()
-    # مسیر اصلی: فاکتور در چت بازو
-    if via in ('bot', 'chat', 'reopen', ''):
+    # مسیر اصلی بدون اعتبار کافی: فاکتور در چت بازو
+    if via in ('bot', 'chat', 'reopen', 'auto', ''):
         payment = send_order_invoices(order, chat_id)
         announce_invoices(chat_id, payment)
         sent = int(payment.get('sent') or 0)

@@ -77,7 +77,10 @@ def balance_breakdown(user: User) -> Dict[str, int]:
     qs = WalletLedger.objects.filter(user=user)
     # اعتبار مشتری فقط بازگشت‌هاست. درآمد کانال‌دار جداست. ردیف امانت در جمع هیچ‌کدام نمی‌آید.
     available = qs.exclude(entry_type__in=('escrow', 'refund')).aggregate(s=Sum('amount'))['s'] or 0
-    credit = qs.filter(entry_type='refund').aggregate(s=Sum('amount'))['s'] or 0
+    # اعتبار مشتری = بازگشت‌ها + خرج‌ها (spend معمولاً منفی است)
+    credit = (
+        qs.filter(entry_type__in=('refund', 'spend')).aggregate(s=Sum('amount'))['s'] or 0
+    )
     locked = (
         PayoutRequest.objects.filter(user=user, status='pending').aggregate(s=Sum('amount_toman'))[
             's'
@@ -164,6 +167,36 @@ def refunded_toman_for_item(order_item_id: int) -> int:
         )['s']
         or 0
     )
+
+
+@transaction.atomic
+def spend_customer_credit(
+    user: User,
+    amount: int,
+    *,
+    ref: str = '',
+    note: str = '',
+    idempotency_key: str = '',
+) -> Dict[str, Any]:
+    """کسر از اعتبار مشتری (refundها). برای پرداخت سفارش بدون فاکتور بازو."""
+    amount = int(amount or 0)
+    if amount <= 0:
+        return {'ok': False, 'error': 'bad_amount'}
+    br = balance_breakdown(user)
+    if int(br.get('credit') or 0) < amount:
+        return {'ok': False, 'error': 'low_balance', 'credit': br.get('credit')}
+    key = (idempotency_key or f'spend:{ref}:{amount}')[:80]
+    if key and WalletLedger.objects.filter(idempotency_key=key).exists():
+        return {'ok': True, 'already': True, 'amount': amount}
+    WalletLedger.objects.create(
+        user=user,
+        amount=-amount,
+        entry_type='spend',
+        ref=ref[:80],
+        note=(note or 'پرداخت از اعتبار')[:200],
+        idempotency_key=key,
+    )
+    return {'ok': True, 'amount': amount, 'credit_left': int(br['credit']) - amount}
 
 
 def credit_manager_for_execution(

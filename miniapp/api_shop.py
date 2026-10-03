@@ -761,6 +761,30 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             pay_parts_paid = sum(
                 1 for i, amount in enumerate(parts, start=1) if got.get(i) == amount
             )
+        item_rows = []
+        for it in o.items.exclude(manager_status='cart').select_related(
+            'channel', 'tariff', 'tariff__group'
+        )[:20]:
+            start = it.effective_start
+            item_rows.append({
+                'id': it.id,
+                'owner': (
+                    it.tariff.group.name
+                    if it.tariff_id and it.tariff.group_id
+                    else (it.channel.name if it.channel_id else '?')
+                ),
+                'tariff_name': it.tariff.name if it.tariff_id else '',
+                'date': timezone.localtime(start).date().isoformat() if start else '',
+                'price': int(it.price or 0),
+                'manager_status': it.manager_status,
+                'execution_status': it.execution_status,
+                'proposed_date': (
+                    timezone.localtime(it.manager_edited_start).date().isoformat()
+                    if it.manager_status == 'edited' and it.manager_edited_start
+                    else ''
+                ),
+                'published_link': it.published_link or '',
+            })
         rows.append({
             'id': o.id,
             'status': o.status,
@@ -775,6 +799,7 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'can_pay': can_pay,
             'can_cancel': can_cancel,
             'can_dispute': o.status == 'paid' and not can_cancel,
+            'items': item_rows,
         })
     bot = _bot_deep_link()
     return JsonResponse({'ok': True, 'orders': rows, 'bot_url': bot})
