@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { fill, t as copy } from "@/lib/i18n";
 import { Bar, BarChart, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -102,6 +102,14 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
 
   const tabs = tabsFor(role);
   const active = tabId(role, screen.name);
+  const pendingOrders = useMarket((s) => s.items.filter((i) => i.managerStatus === "pending").length);
+  const lastPending = useRef(pendingOrders);
+  useEffect(() => {
+    if (role === "manager" && pendingOrders > lastPending.current) {
+      toast(copy().toast.newOrderToast);
+    }
+    lastPending.current = pendingOrders;
+  }, [pendingOrders, role]);
 
   return (
     <div className={embedded ? "flex h-full min-h-0 flex-col bg-bg text-fg" : "min-h-dvh bg-header text-fg md:py-6"}>
@@ -543,35 +551,7 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
           {copy().manager.channelLead}
         </p>
         <GroupDesk toast={toast} />
-        <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.yourChannels}</h2>
-        <ul className="overflow-hidden rounded-2xl bg-surface">
-          {s.channels.map((ch) => (
-            <li key={ch.id} className="border-b border-line last:border-b-0">
-              <button
-                type="button"
-                onClick={() => s.push({ name: "channel", id: ch.id })}
-                className="flex w-full items-center gap-2 px-3 py-3 text-start"
-              >
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-header text-sm font-bold text-link">
-                  {ch.name.slice(0, 1)}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{ch.name}</span>
-                  <span className="block truncate text-[11px] text-muted">
-                    {fill(copy().common.channelMeta, {
-                      mode: MODE_LABEL[ch.publishMode],
-                      admin: adminPhrase(ch),
-                    })}
-                  </span>
-                  <span className="block truncate text-[11px] text-muted">
-                    {fill(copy().stats.membersViews, { members: faNum(ch.members), views: faNum(ch.avgViews) })}
-                  </span>
-                </span>
-                <ChevronLeft className="size-4 shrink-0 text-muted" />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ChannelsList />
       </>
     );
   }
@@ -914,6 +894,71 @@ function GroupDesk({ toast }: { toast: (m: string) => void }) {
           ))}
         </ul>
       ) : null}
+    </>
+  );
+}
+
+
+function ChannelsList() {
+  const s = useMarket();
+  const [showArchived, setShowArchived] = useState(false);
+  const list = s.channels.filter((ch) => {
+    const listed = (ch as { isListed?: boolean }).isListed !== false;
+    return showArchived ? true : listed;
+  });
+  const hasArchived = s.channels.some((ch) => (ch as { isListed?: boolean }).isListed === false);
+  return (
+    <>
+      <div className="mb-1 flex items-center justify-between gap-2 px-1">
+        <h2 className="text-[11px] text-muted">{copy().manager.yourChannels}</h2>
+        {hasArchived ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-link"
+            onClick={() => setShowArchived((v) => !v)}
+          >
+            {showArchived ? copy().manager.hideArchived : copy().manager.showArchived}
+          </button>
+        ) : null}
+      </div>
+      <ul className="overflow-hidden rounded-2xl bg-surface">
+        {list.map((ch) => {
+          const archived = (ch as { isListed?: boolean }).isListed === false;
+          return (
+            <li key={ch.id} className="border-b border-line last:border-b-0">
+              <button
+                type="button"
+                onClick={() => s.push({ name: "channel", id: ch.id })}
+                className="flex w-full items-center gap-2 px-3 py-3 text-start"
+              >
+                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-header text-sm font-bold text-link">
+                  {ch.name.slice(0, 1)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="block truncate text-sm font-semibold">{ch.name}</span>
+                    {archived ? (
+                      <span className="shrink-0 rounded-full bg-muted/20 px-2 py-0.5 text-[10px] text-muted">
+                        {copy().manager.archivedBadge}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted">
+                    {fill(copy().common.channelMeta, {
+                      mode: MODE_LABEL[ch.publishMode],
+                      admin: adminPhrase(ch),
+                    })}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted">
+                    {fill(copy().stats.membersViews, { members: faNum(ch.members), views: faNum(ch.avgViews) })}
+                  </span>
+                </span>
+                <ChevronLeft className="size-4 shrink-0 text-muted" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }
@@ -2062,13 +2107,20 @@ function Customer({ screen, toast }: { screen: Screen; toast: (m: string) => voi
     return (
       <>
         <div className="mb-3 rounded-2xl bg-surface px-3 py-3">
-          <b className="block text-sm">{t.name}</b>
+          <b className="flex items-center gap-1.5 text-sm">
+            {t.name}
+            {t.groupId ? (
+              <span className="rounded-full bg-link/15 px-2 py-0.5 text-[10px] font-semibold text-link">
+                {copy().catalog.packageBadge}
+              </span>
+            ) : null}
+          </b>
           <span className="block text-[11px] text-muted">
             {s.ownerName(t.id)} · {money(t.price)} · {copy().catalog.dayHint}
           </span>
         </div>
         <p className="mb-2 px-1 text-xs leading-relaxed text-muted">
-          {copy().catalog.dayLead}
+          {t.groupId ? copy().manager.packageCalendar : copy().catalog.dayLead}
         </p>
         <ChannelPulse channels={tariffChannels(s, t.id)} />
         <CustomerDays tariffId={t.id} toast={toast} />
@@ -2093,9 +2145,21 @@ function Customer({ screen, toast }: { screen: Screen; toast: (m: string) => voi
             return (
               <li key={it.id} className="flex items-center gap-1 border-b border-line pe-1 last:border-b-0">
                 <span className="min-w-0 flex-1 px-3 py-3">
-                  <span className="block truncate text-sm font-semibold">{s.ownerName(it.tariffId)}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="block truncate text-sm font-semibold">{s.ownerName(it.tariffId)}</span>
+                    {t?.groupId ? (
+                      <span className="shrink-0 rounded-full bg-link/15 px-2 py-0.5 text-[10px] font-semibold text-link">
+                        {copy().catalog.packageBadge}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block truncate text-[11px] text-muted">
                     {t?.name} · {formatJalali(shiftFromIso(it.date))}
+                    {t?.groupId
+                      ? ` · ${fill(copy().catalog.packageInCart, {
+                          n: faNum((s.groups.find((g) => g.id === t.groupId)?.channelIds || []).length || 0),
+                        })}`
+                      : ""}
                   </span>
                 </span>
                 <b className="shrink-0 text-xs">{money(t?.price ?? 0)}</b>

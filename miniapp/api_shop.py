@@ -543,6 +543,11 @@ def api_cart(request: HttpRequest) -> JsonResponse:
                 'price': it.price,
                 'status': line_status,
                 'why': unavailable_why(line_status),
+                'is_package': bool(it.tariff.group_id),
+                'channel_count': len(it.booked_channel_ids or []) or (
+                    it.tariff.group.channels.count() if it.tariff.group_id else (1 if it.channel_id else 0)
+                ),
+                'group_id': it.tariff.group_id,
             })
         total = order.total_amount
         rank = {'past': 3, 'full': 2, 'banner-hold': 1, 'free': 0}

@@ -94,7 +94,12 @@ def add_to_cart(
     if not channel:
         return {'ok': False, 'error': 'no_channel'}
 
-    if has_slot_conflict(tariff, start, end, channel=channel):
+    if has_slot_conflict(
+        tariff,
+        start,
+        end,
+        channel=None if tariff.group_id else channel,
+    ):
         return {'ok': False, 'error': 'slot_conflict'}
 
     order = get_or_create_draft(customer)

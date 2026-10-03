@@ -244,6 +244,7 @@ export const fa = {
   },
   toast: {
     timeSent: "زمان تازه برای مشتری فرستاده شد",
+    newOrderToast: "سفارش جدید دارید",
     channelAccepted: "این کانال سفارش را قبول کرد",
     channelLeft: "این کانال از سفارش کنار رفت",
     publishedHold: "انتشار اعلام شد. تا تأیید مشتری پول در امانت می‌ماند",
@@ -401,6 +402,9 @@ export const fa = {
     groupChannels: "کانال‌های مجموعه",
     deleteGroup: "حذف مجموعه",
     groups: "مجموعه‌ها",
+    showArchived: "نمایش آرشیو",
+    hideArchived: "فقط فعال‌ها",
+    archivedBadge: "آرشیو",
     yourChannels: "کانال‌های شما",
     ordersEmpty: "هنوز سفارشی نرسیده. همین که مشتری روزی را بردارد، این‌جا می‌بینید.",
     ordersLead: "این‌ها سفارش‌های کانال شماست. هر کدام را باز کنید و بگویید قبول است، یا روز دیگری بهتر است.",
@@ -483,6 +487,7 @@ export const fa = {
     cartLabel: "سبد",
   },
   catalog: {
+    packageInCart: "پکیج · {n} کانال",
     packageBadge: "مجموعه",
     packageChannels: "{n} کانال",
     needBannerTitle: "اول بنر کانال بنرها",
