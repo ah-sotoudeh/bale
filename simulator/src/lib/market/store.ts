@@ -142,6 +142,13 @@ export function referencePosts(): Pick<Banner, "title" | "caption" | "mediaKind"
 export type CartItem = { id: number; tariffId: number; date: string };
 
 export type Order = {
+  canCancel?: boolean;
+  canPay?: boolean;
+  payHint?: string;
+  paymentDeadline?: string;
+  payParts?: number;
+  payPartsPaid?: number;
+
   id: number;
   status: OrderStatus;
   created: string;
@@ -651,6 +658,7 @@ export type MarketState = Data & {
   requestPayout: (owner: "manager" | "customer", bankId: number) => string | null;
   topUp: (owner: "manager" | "customer", amount: number, note?: string) => string | null;
   payOrder: (orderId: number, via?: "wallet" | "bale") => string | null;
+  cancelOrder: (orderId: number) => string | null;
   publishItem: (itemId: number) => string | null;
   confirmPublish: (itemId: number) => string | null;
   openDispute: (itemId: number, note: string) => string | null;
@@ -1318,6 +1326,24 @@ export const useMarket = create<MarketState>()(
         set({
           nextId: id + 1,
           banks: [...get().banks, { id, owner, holder: name, iban: clean }],
+        });
+        return null;
+      },
+      cancelOrder: (orderId) => {
+        const order = get().orders.find((o) => o.id === orderId);
+        if (!order) return "سفارش پیدا نشد";
+        if (order.status === "cancelled") return null;
+        const cancellable = ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "waiting_payment"].includes(
+          order.status,
+        );
+        if (!cancellable) return "این سفارش قابل لغو نیست";
+        set({
+          orders: get().orders.map((o) => (o.id === orderId ? { ...o, status: "cancelled" as const } : o)),
+          items: get().items.map((i) =>
+            i.orderId === orderId
+              ? { ...i, managerStatus: "customer_declined" as const, execution: "cancelled" as const }
+              : i,
+          ),
         });
         return null;
       },

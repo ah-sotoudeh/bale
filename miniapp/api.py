@@ -1017,6 +1017,14 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
                 'فاکتور همین الان در گفتگوی بازو هست. '
                 'همان‌جا پرداخت کنید و بعد به مینی‌اپ برگردید تا وضعیت به‌روز شود.'
             )
+        import os
+        bot_user = (
+            os.environ.get('BALE_BOT_USERNAME')
+            or os.environ.get('BOT_USERNAME')
+            or os.environ.get('LINKBANK_BOT_USERNAME')
+            or ''
+        ).strip().lstrip('@')
+        bot_url = f'https://ble.ir/{bot_user}' if bot_user else ''
         return JsonResponse({
             'ok': True,
             'via': 'bot',
@@ -1027,6 +1035,7 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
             'failed': failed,
             'message': bc_msg,
             'open_bot': True,
+            'bot_url': bot_url,
         })
 
     # مسیر اختیاری: لینک فاکتور (اگر کلاینت openInvoice داشته باشد)

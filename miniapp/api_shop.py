@@ -99,6 +99,24 @@ def _align_submitted_order(order: Order) -> None:
         order.refresh_from_db()
 
 
+
+def _bot_deep_link() -> str:
+    """لینک باز کردن گفتگوی بازو در بله."""
+    import os
+    raw = (
+        os.environ.get('BALE_BOT_USERNAME')
+        or os.environ.get('BOT_USERNAME')
+        or os.environ.get('LINKBANK_BOT_USERNAME')
+        or ''
+    ).strip()
+    if not raw:
+        return ''
+    if raw.startswith('https://') or raw.startswith('ble://'):
+        return raw
+    user = raw.lstrip('@')
+    return f'https://ble.ir/{user}'
+
+
 def _order_deadline_hint(order: Order) -> str:
     """مهلت مرحلهٔ جاری، از همان managers_deadline، بدون ستون تازه."""
     if order.status not in ('waiting_payment', 'waiting_managers', 'waiting_customer_confirm'):
@@ -725,9 +743,24 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'waiting_customer_confirm',
             'waiting_payment',
         ) or (o.status == 'paid' and cart_svc.refund_window_open(o))
-        managers_deadline = None
-        if o.status == 'waiting_managers' and o.managers_deadline:
-            managers_deadline = timezone.localtime(o.managers_deadline).isoformat()
+        deadline_iso = ''
+        if o.managers_deadline and o.status in (
+            'waiting_payment',
+            'waiting_managers',
+            'waiting_customer_confirm',
+        ):
+            deadline_iso = timezone.localtime(o.managers_deadline).isoformat()
+        pay_parts = 0
+        pay_parts_paid = 0
+        if o.status == 'waiting_payment':
+            from orders.bale_pay import paid_part_amounts, payment_parts
+
+            parts = payment_parts(o.total_amount)
+            got = paid_part_amounts(o)
+            pay_parts = len(parts)
+            pay_parts_paid = sum(
+                1 for i, amount in enumerate(parts, start=1) if got.get(i) == amount
+            )
         rows.append({
             'id': o.id,
             'status': o.status,
@@ -735,12 +768,16 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
             'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
             'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
             'pay_hint': _order_deadline_hint(o),
-            'managers_deadline': managers_deadline,
+            'managers_deadline': deadline_iso,
+            'payment_deadline': deadline_iso if can_pay else '',
+            'pay_parts': pay_parts,
+            'pay_parts_paid': pay_parts_paid,
             'can_pay': can_pay,
             'can_cancel': can_cancel,
             'can_dispute': o.status == 'paid' and not can_cancel,
         })
-    return JsonResponse({'ok': True, 'orders': rows})
+    bot = _bot_deep_link()
+    return JsonResponse({'ok': True, 'orders': rows, 'bot_url': bot})
 
 
 @csrf_exempt

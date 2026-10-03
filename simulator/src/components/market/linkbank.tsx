@@ -1833,19 +1833,39 @@ function chargeViaBale(amount: number, toast: (m: string) => void) {
 }
 
 function payOrderViaBale(orderId: number, amount: number, toast: (m: string) => void) {
-  // در پروداکشن فاکتور فقط در چت بازو می‌آید؛ درگاه داخل مینی‌اپ نیست.
+  // فاکتور فقط در چت بازو؛ درگاه داخل مینی‌اپ نیست.
   const err = useMarket.getState().payOrder(orderId, "bale");
   if (err) {
     toast(err);
     return;
   }
   toast(copy().toast.payGoBot ?? "فاکتور در گفتگوی بازو فرستاده شد. بعد از پرداخت برگردید.");
+  const botUrl = (window as unknown as { __lbBotUrl?: string }).__lbBotUrl;
+  if (botUrl) {
+    try {
+      window.open(botUrl, "_blank");
+    } catch {
+      /* ignore */
+    }
+  }
+  // poll تا paid شود
+  let tries = 0;
+  const timer = window.setInterval(() => {
+    tries += 1;
+    const o = useMarket.getState().orders.find((x) => x.id === orderId);
+    if (o?.status === "paid" || o?.status === "completed") {
+      window.clearInterval(timer);
+      toast(copy().toast.paymentRecorded ?? "پرداخت ثبت شد");
+      return;
+    }
+    if (tries >= 40) window.clearInterval(timer);
+  }, 3000);
   const sim = window.__baleSim;
   if (sim?.openInvoice) {
     sim.openInvoice({ title: fill(copy().common.orderNo, { n: faNum(orderId) }), amountToman: amount }, (status) => {
       if (status === "paid") {
         useMarket.getState().payOrder(orderId, "wallet");
-        toast(copy().toast.paidHold);
+        toast(copy().toast.paymentRecorded ?? copy().toast.paidHold);
       } else if (status === "cancelled") toast(copy().toast.payCancel);
       else if (status === "failed") toast(copy().toast.payFail);
     });
@@ -1887,9 +1907,41 @@ function MyOrders({ toast }: { toast: (m: string) => void }) {
             {shown ? (
               <div className="px-3 pb-3">
             <p className="text-xs text-muted">{formatJalali(shiftFromIso(o.created))}</p>
+            {o.payHint ? (
+              <p className="mt-1 text-xs text-muted">{o.payHint}</p>
+            ) : null}
+            {o.status === "waiting_payment" && (o.payParts || 0) > 1 ? (
+              <p className="mt-1 text-xs text-link">
+                {fill(copy().toast.payPartsProgress, {
+                  paid: faNum(o.payPartsPaid || 0),
+                  total: faNum(o.payParts || 0),
+                })}
+              </p>
+            ) : null}
             {o.status === "waiting_payment" ? (
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <Btn onClick={() => payOrderViaBale(o.id, o.total, toast)}>{copy().orders.pay}</Btn>
+                {(window as unknown as { __lbBotUrl?: string }).__lbBotUrl ? (
+                  <Btn
+                    onClick={() => {
+                      const u = (window as unknown as { __lbBotUrl?: string }).__lbBotUrl;
+                      if (u) window.open(u, "_blank");
+                    }}
+                  >
+                    {copy().toast.openBot}
+                  </Btn>
+                ) : null}
+              </div>
+            ) : null}
+            {o.canCancel !== false &&
+            ["waiting_banner", "waiting_managers", "waiting_customer_confirm", "waiting_payment"].includes(o.status) ? (
+              <div className="mt-2">
+                <Btn
+                  tone="danger"
+                  onClick={() => run(toast, copy().toast.orderCancelled, s.cancelOrder(o.id))}
+                >
+                  {copy().orders.cancelOrder}
+                </Btn>
               </div>
             ) : null}
             {lines.map((line) => {
