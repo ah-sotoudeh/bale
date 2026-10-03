@@ -17,6 +17,7 @@ urlpatterns = [
     path('api/channels/add', api.api_add_channel),
     path('api/channels/update', api.api_channel_update),
     path('api/channels/delete', api.api_channel_delete),
+    path('api/channels/archive', api.api_channel_archive),
     path('api/groups/add', api.api_group_add),
     path('api/groups/update', api.api_group_update),
     path('api/groups/delete', api.api_group_delete),

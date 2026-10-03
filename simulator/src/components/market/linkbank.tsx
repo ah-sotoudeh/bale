@@ -190,16 +190,25 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const on = active === tab.id;
+            const showBadge = role === "manager" && tab.id === "orders" && pendingOrders > 0;
             return (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => go(tab.screen)}
-                className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-xs ${
+                className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-xs ${
                   on ? "font-bold text-link" : "text-muted"
                 }`}
               >
-                <Icon className="size-4" />
+                <span className="relative">
+                  <Icon className="size-4" />
+                  {showBadge ? (
+                    <span className="absolute -end-2 -top-1 grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[9px] font-bold text-white">
+                      {faNum(pendingOrders > 9 ? 9 : pendingOrders)}
+                      {pendingOrders > 9 ? "+" : ""}
+                    </span>
+                  ) : null}
+                </span>
                 {tab.label}
               </button>
             );
@@ -914,6 +923,7 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
   const setPublishMode = useMarket((s) => s.setPublishMode);
   const updateChannel = useMarket((s) => s.updateChannel);
   const removeChannel = useMarket((s) => s.removeChannel);
+  const archiveChannel = useMarket((s) => s.archiveChannel);
   const back = useMarket((s) => s.back);
   const [remind, setRemind] = useState(channel?.remindHours ?? 2);
   const [editName, setEditName] = useState(channel?.name ?? "");
@@ -943,6 +953,21 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
             }}
           >
             {copy().manager.saveChannelName}
+          </Btn>
+          <Btn
+            onClick={() => {
+              const listed = (channel as { isListed?: boolean }).isListed !== false;
+              const err = archiveChannel(channel.id, !listed ? true : false);
+              run(
+                toast,
+                listed ? copy().toast.channelArchived : copy().toast.channelUnarchived,
+                err,
+              );
+            }}
+          >
+            {(channel as { isListed?: boolean }).isListed === false
+              ? copy().manager.unarchiveChannel
+              : copy().manager.archiveChannel}
           </Btn>
           <Btn
             onClick={() => {
@@ -1354,6 +1379,9 @@ function ManagerDays({ tariffId, toast }: { tariffId: number; toast: (m: string)
         <span className="shrink-0 text-xs text-link">{fill(copy().common.dayCount, { n: faNum(manual.length) })}</span>
       </div>
       <p className="mb-2 px-1 text-xs leading-relaxed text-muted">{copy().manager.dayLead}</p>
+      {tariff.groupId ? (
+        <p className="mb-2 px-1 text-xs leading-relaxed text-link">{copy().manager.packageCalendar}</p>
+      ) : null}
       <DayLegend />
       <DayGrid
         days={days}

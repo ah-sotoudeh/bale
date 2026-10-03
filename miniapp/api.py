@@ -70,6 +70,7 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'linkyar_checked_at': ch.linkyar_checked_at.isoformat() if ch.linkyar_checked_at else '',
         'manual_remind_hours': ch.manual_remind_hours,
         'tariff_count': ch.tariffs.count(),
+        'is_listed': bool(getattr(ch, 'is_listed', True)),
         'members_count': getattr(ch, 'members_count', 0) or 0,
         'avg_views': getattr(ch, 'avg_views', 0) or 0,
         'daily_reach': getattr(ch, 'daily_reach', 0) or 0,
@@ -444,6 +445,36 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
     Tariff.objects.filter(channel=ch).delete()
     ch.delete()
     return JsonResponse({'ok': True, 'channel_id': cid, 'deleted': True})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_channel_archive(request: HttpRequest) -> JsonResponse:
+    """آرشیو: از کاتالوگ مخفی می‌شود؛ سفارش‌ها و کانال می‌مانند."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    if not ch:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+    listed = body.get('is_listed')
+    if listed is None:
+        # toggle: archive if currently listed
+        ch.is_listed = not bool(ch.is_listed)
+    else:
+        ch.is_listed = bool(listed)
+    ch.save(update_fields=['is_listed'])
+    # غیرفعال کردن تعرفه‌ها هنگام آرشیو تا در کاتالوگ نیایند
+    if not ch.is_listed:
+        Tariff.objects.filter(channel=ch, is_active=True).update(is_active=False)
+    return JsonResponse({
+        'ok': True,
+        'channel_id': ch.id,
+        'is_listed': ch.is_listed,
+        'archived': not ch.is_listed,
+    })
 
 
 def _group_payload(g: ChannelGroup) -> dict:

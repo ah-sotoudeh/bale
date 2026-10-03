@@ -70,6 +70,7 @@ export type ChannelSnapshot = {
 };
 
 export type Channel = {
+  isListed?: boolean;
   id: number;
   name: string;
   link: string;
@@ -616,6 +617,7 @@ export type MarketState = Data & {
   removeTariff: (id: number) => string | null;
   updateChannel: (channelId: number, name: string) => string | null;
   removeChannel: (channelId: number) => string | null;
+  archiveChannel: (channelId: number, listed?: boolean) => string | null;
   loadCalendar: (tariffId: number, asCustomer?: boolean) => Promise<string | null>;
   calendarDays: (tariffId: number) => CalDay[];
   searchCatalog: (q: string) => Promise<string | null>;

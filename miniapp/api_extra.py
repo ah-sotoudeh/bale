@@ -91,6 +91,11 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             chans = list(t.group.channels.all())
         else:
             chans = []
+        # آرشیو: کانال تکی مخفی؛ پکیج فقط اگر حداقل یک کانال لیست‌شده داشته باشد
+        if t.channel_id and not getattr(t.channel, 'is_listed', True):
+            return False
+        if t.group_id and not any(getattr(ch, 'is_listed', True) for ch in chans):
+            return False
         if needle and not any(_text_match(ch) for ch in chans):
             return False
         if ready_only and (not chans or any(not _ready_publish(ch) for ch in chans)):

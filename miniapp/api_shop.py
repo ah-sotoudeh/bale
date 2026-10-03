@@ -202,11 +202,18 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
                 'date': day.isoformat(),
                 'jalali': format_jalali(day),
             })
+    channel_count = 0
+    if t.group_id:
+        channel_count = t.group.channels.count()
+    elif t.channel_id:
+        channel_count = 1
     return JsonResponse({
         'ok': True,
         'tariff_id': t.id,
         'name': t.name,
         'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else ''),
+        'is_package': bool(t.group_id),
+        'channel_count': channel_count,
         'days': days,
         'manual_busy': busy_slots,
     })

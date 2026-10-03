@@ -248,11 +248,12 @@ WHY_UNAVAILABLE = {
 
 
 def classify_day(tariff: Tariff, day: date, now: Optional[datetime] = None) -> str:
-    """free، full، یا past. بنرِ مشتری جداست."""
+    """free، full، یا past. برای پکیج همه کانال‌های مجموعه یکجا چک می‌شود."""
     if is_past_slot(tariff, day, now=now):
         return 'past'
     start, end = slot_bounds(tariff, day)
-    if has_slot_conflict(tariff, start, end, channel=tariff.channel):
+    # channel=None → has_slot_conflict از group/channels تعرفه استفاده می‌کند
+    if has_slot_conflict(tariff, start, end, channel=None if tariff.group_id else tariff.channel):
         return 'full'
     return 'free'
 

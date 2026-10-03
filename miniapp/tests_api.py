@@ -299,6 +299,18 @@ class MiniappManagerFlowTests(TestCase):
         )
         self.assertEqual(r.status_code, 400, r.content)
 
+    
+    def test_channel_archive_hides_from_catalog(self):
+        r = self.client.post(
+            '/miniapp/api/channels/archive',
+            data={'debug_bale_id': self.mgr_id, 'channel_id': self.ch.id, 'is_listed': False},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json().get('archived'))
+        self.ch.refresh_from_db()
+        self.assertFalse(self.ch.is_listed)
+
     def test_channel_update_name(self):
         r = self.client.post(
             '/miniapp/api/channels/update',

@@ -54,6 +54,10 @@ class Channel(models.Model):
     err_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     stats_updated_at = models.DateTimeField(null=True, blank=True)
     stats_error = models.CharField(max_length=255, blank=True, default='')
+    is_listed = models.BooleanField(
+        default=True,
+        help_text='اگر False باشد از کاتالوگ مشتری مخفی است؛ سفارش‌ها می‌مانند',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
