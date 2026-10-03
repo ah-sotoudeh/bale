@@ -66,6 +66,8 @@ python scripts/poll_bot.py
 ## تست مینی‌اپ (پرداخت و گزارش)
 
 ```bash
+./scripts/run_miniapp_tests.sh
+# یا:
 python manage.py test miniapp.tests_pay miniapp.tests_api -v 2
 ```
 

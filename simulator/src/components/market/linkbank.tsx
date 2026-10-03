@@ -102,7 +102,11 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
 
   const tabs = tabsFor(role);
   const active = tabId(role, screen.name);
-  const pendingOrders = useMarket((s) => s.items.filter((i) => i.managerStatus === "pending").length);
+  const pendingOrders = useMarket((s) =>
+    role === "customer"
+      ? s.orders.filter((o) => o.status === "waiting_payment").length
+      : s.items.filter((i) => i.managerStatus === "pending").length,
+  );
   const lastPending = useRef(pendingOrders);
   useEffect(() => {
     if (role === "manager" && pendingOrders > lastPending.current) {
@@ -198,7 +202,7 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const on = active === tab.id;
-            const showBadge = role === "manager" && tab.id === "orders" && pendingOrders > 0;
+            const showBadge = (role === "manager" || role === "customer") && tab.id === "orders" && pendingOrders > 0;
             return (
               <button
                 key={tab.id}
@@ -462,6 +466,8 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
     try {
       const m = String(location.hash || "").match(/(?:^#|&)?of=(\w+)/);
       if (m && ["all", "pending", "approved", "paid"].includes(m[1])) return m[1] as "all" | "pending" | "approved" | "paid";
+      const ls = localStorage.getItem("lb_of");
+      if (ls && ["all", "pending", "approved", "paid"].includes(ls)) return ls as "all" | "pending" | "approved" | "paid";
     } catch { /* ignore */ }
     return "all";
   });
@@ -604,7 +610,8 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
         return true;
       })
       .sort((a, b) => {
-        if (orderFilter === "paid") return String(a.date).localeCompare(String(b.date)) || b.id - a.id;
+        if (orderSort === "slot" || orderFilter === "paid")
+          return String(a.date).localeCompare(String(b.date)) || b.id - a.id;
         return b.id - a.id;
       });
     const publishDue = s.items.filter(
@@ -652,6 +659,22 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
               {label} ({faNum(count)})
             </button>
           ))}
+        </div>
+        <div className="mb-2 flex gap-1">
+          <button
+            type="button"
+            onClick={() => setOrderSort("new")}
+            className={`min-h-9 rounded-full px-3 text-xs ${orderSort !== "slot" ? "bg-link text-on" : "bg-surface text-muted"}`}
+          >
+            {copy().manager.sortNew}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderSort("slot")}
+            className={`min-h-9 rounded-full px-3 text-xs ${orderSort === "slot" ? "bg-link text-on" : "bg-surface text-muted"}`}
+          >
+            {copy().manager.sortSlot}
+          </button>
         </div>
         {!filteredItems.length ? (
           <Empty>{copy().manager.filterEmpty}</Empty>
