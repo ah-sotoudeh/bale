@@ -228,6 +228,7 @@ type Data = {
   busy: Busy[];
   /** وضعیت روز از سرور برای هر تعرفه */
   calendarByTariff?: Record<number, CalDay[]>;
+  onboarded?: Record<string, boolean>;
   banners: Banner[];
   selectedBannerId: number | null;
   cart: CartItem[];
@@ -608,7 +609,9 @@ export type MarketState = Data & {
   isBusy: (tariffId: number, date: string) => boolean;
   payoutBlock: (owner: "manager" | "customer") => string | null;
   setPublishMode: (channelId: number, mode: PublishMode, remindHours?: number) => string | null;
-  addTariff: (input: { channelId: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
+  addTariff: (input: { channelId?: number | null; groupId?: number | null; name: string; startHour: number; durationHours: number; price: number }) => string | null;
+  markOnboarded: (role: "customer" | "manager" | "operator") => void;
+  onboarded: Record<string, boolean>;
   updateTariff: (input: { id: number; name: string; startHour: number; durationHours: number; price: number }) => string | null;
   removeTariff: (id: number) => string | null;
   updateChannel: (channelId: number, name: string) => string | null;
@@ -859,17 +862,21 @@ export const useMarket = create<MarketState>()(
       },
       addTariff: (input) => {
         const name = input.name.trim();
-        if (!name || input.durationHours <= 0 || input.price < 0 || !input.channelId) return t().error.tariffFields;
+        const channelId = input.channelId || null;
+        const groupId = input.groupId || null;
+        if (!name || input.durationHours <= 0 || input.price < 0) return t().error.tariffFields;
+        if (!!channelId === !!groupId) return t().error.tariffOwner ?? "کانال یا مجموعه را انتخاب کنید";
         const s = get();
-        if (!s.channels.some((c) => c.id === input.channelId)) return t().error.channelMissing;
+        if (channelId && !s.channels.some((c) => c.id === channelId)) return t().error.channelMissing;
+        if (groupId && !s.groups.some((g) => g.id === groupId)) return t().error.groupMissing;
         const id = s.nextId;
         set({
           nextId: id + 1,
           tariffs: [
             {
               id,
-              channelId: input.channelId,
-              groupId: null,
+              channelId,
+              groupId,
               name: name.slice(0, 100),
               startHour: input.startHour,
               durationHours: input.durationHours,
@@ -880,6 +887,9 @@ export const useMarket = create<MarketState>()(
           ],
         });
         return null;
+      },
+      markOnboarded: (role) => {
+        set({ onboarded: { ...(get().onboarded || {}), [role]: true } });
       },
       updateTariff: (input) => {
         const name = input.name.trim();

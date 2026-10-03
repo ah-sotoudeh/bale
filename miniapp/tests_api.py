@@ -242,6 +242,27 @@ class MiniappManagerFlowTests(TestCase):
         self.assertTrue(len(body.get('days') or []) >= 7)
 
     
+    
+    def test_tariff_add_on_group(self):
+        from channels_app.models import ChannelGroup
+        g = ChannelGroup.objects.create(name='پکیج', manager=self.mgr)
+        g.channels.add(self.ch)
+        r = self.client.post(
+            '/miniapp/api/tariffs/add',
+            data={
+                'debug_bale_id': self.mgr_id,
+                'group_id': g.id,
+                'name': 'بسته ۲۴س',
+                'duration_hours': 24,
+                'price': 100000,
+                'start_hour': 12,
+            },
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json().get('ok'))
+        self.assertEqual(r.json().get('group_id'), g.id)
+
     def test_group_add_and_delete(self):
         r = self.client.post(
             '/miniapp/api/groups/add',

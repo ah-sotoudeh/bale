@@ -355,7 +355,15 @@ function Field({
 const control =
   "min-h-11 w-full rounded-xl border border-line bg-bg px-3 text-sm text-fg outline-none focus:border-link";
 
-function Guide({ title, steps }: { title: string; steps: string[] }) {
+function Guide({
+  title,
+  steps,
+  onDismiss,
+}: {
+  title: string;
+  steps: string[];
+  onDismiss?: () => void;
+}) {
   return (
     <section className="mb-3">
       <h2 className="mb-1 px-1 text-[11px] text-muted">{title}</h2>
@@ -369,6 +377,11 @@ function Guide({ title, steps }: { title: string; steps: string[] }) {
           </li>
         ))}
       </ol>
+      {onDismiss ? (
+        <button type="button" onClick={onDismiss} className="mt-2 w-full min-h-9 rounded-full bg-surface text-xs font-semibold text-link">
+          {copy().manager.gotIt}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -447,17 +460,20 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
           </span>
           <ChevronLeft className="size-4 shrink-0 text-muted" />
         </button>
-        <Guide
-          title={copy().manager.guideTitle}
-          steps={[
-            copy().manager.guide[0],
-            copy().manager.guide[1],
-            copy().manager.guide[2],
-            copy().manager.guide[3],
-            copy().manager.guide[4],
-            fill(copy().tpl.managerHomeFee, { fee: faNum(FEE_PERCENT), min: money(MIN_PAYOUT) }),
-          ]}
-        />
+        {!(s.onboarded || {}).manager ? (
+          <Guide
+            title={copy().manager.guideTitle}
+            steps={[
+              copy().manager.guide[0],
+              copy().manager.guide[1],
+              copy().manager.guide[2],
+              copy().manager.guide[3],
+              copy().manager.guide[4],
+              fill(copy().tpl.managerHomeFee, { fee: faNum(FEE_PERCENT), min: money(MIN_PAYOUT) }),
+            ]}
+            onDismiss={() => s.markOnboarded("manager")}
+          />
+        ) : null}
         {pending > 0 ? (
           <div className="mb-3">
             <Btn onClick={() => s.go({ name: "orders" })}>{fill(copy().tpl.pendingCta, { n: faNum(pending) })}</Btn>
@@ -993,13 +1009,16 @@ function ChannelEditor({ channelId, toast }: { channelId: number; toast: (m: str
 
 function TariffDesk({ toast }: { toast: (m: string) => void }) {
   const channels = useMarket((s) => s.channels);
+  const groups = useMarket((s) => s.groups);
   const tariffs = useMarket((s) => s.tariffs);
   const ownerName = useMarket((s) => s.ownerName);
   const addTariff = useMarket((s) => s.addTariff);
   const updateTariff = useMarket((s) => s.updateTariff);
   const removeTariff = useMarket((s) => s.removeTariff);
   const toggleTariff = useMarket((s) => s.toggleTariff);
+  const [ownerKind, setOwnerKind] = useState<"channel" | "group">("channel");
   const [channelId, setChannelId] = useState(channels[0]?.id ?? 0);
+  const [groupId, setGroupId] = useState(groups[0]?.id ?? 0);
   const [name, setName] = useState("");
   const [hour, setHour] = useState(12);
   const [duration, setDuration] = useState("24");
@@ -1012,7 +1031,9 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
     setHour(12);
     setDuration("24");
     setPrice("");
+    setOwnerKind("channel");
     setChannelId(channels[0]?.id ?? 0);
+    setGroupId(groups[0]?.id ?? 0);
   };
 
   const loadForEdit = (row: (typeof tariffs)[number]) => {
@@ -1021,7 +1042,13 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
     setHour(row.startHour ?? 12);
     setDuration(String(row.durationHours ?? 24));
     setPrice(String(row.price ?? ""));
-    if (row.channelId) setChannelId(row.channelId);
+    if (row.groupId) {
+      setOwnerKind("group");
+      setGroupId(row.groupId);
+    } else {
+      setOwnerKind("channel");
+      if (row.channelId) setChannelId(row.channelId);
+    }
   };
 
   return (
@@ -1030,20 +1057,40 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
         {editingId ? copy().manager.editTariff : copy().manager.priceLead}
       </p>
       <Card>
-        <Field label={copy().screen.channel}>
-          <select
-            className={control}
-            value={channelId}
-            disabled={editingId != null}
-            onChange={(e) => setChannelId(Number(e.target.value))}
-          >
-            {channels.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {editingId == null ? (
+          <Field label={copy().manager.ownerType}>
+            <select className={control} value={ownerKind} onChange={(e) => setOwnerKind(e.target.value as "channel" | "group")}>
+              <option value="channel">{copy().manager.ownerChannel}</option>
+              <option value="group" disabled={!groups.length}>{copy().manager.ownerGroup}</option>
+            </select>
+          </Field>
+        ) : null}
+        {ownerKind === "channel" || editingId != null ? (
+          <Field label={copy().screen.channel}>
+            <select
+              className={control}
+              value={channelId}
+              disabled={editingId != null}
+              onChange={(e) => setChannelId(Number(e.target.value))}
+            >
+              {channels.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label={copy().manager.ownerGroup}>
+            <select className={control} value={groupId} onChange={(e) => setGroupId(Number(e.target.value))}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field label={copy().manager.fieldPlan}>
           <input className={control} value={name} placeholder={copy().manager.planPh} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -1075,7 +1122,11 @@ function TariffDesk({ toast }: { toast: (m: string) => void }) {
               };
               const err = editingId
                 ? updateTariff({ id: editingId, ...payload })
-                : addTariff({ channelId, ...payload });
+                : addTariff(
+                    ownerKind === "group"
+                      ? { groupId, channelId: null, ...payload }
+                      : { channelId, groupId: null, ...payload },
+                  );
               if (!err) resetForm();
               run(toast, editingId ? copy().toast.tariffUpdated : copy().toast.tariffSaved, err);
             }}

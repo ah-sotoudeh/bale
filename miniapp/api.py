@@ -580,9 +580,14 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
-    if not ch:
-        return _fail('channel_not_found', 404)
+    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first() if body.get('channel_id') not in (None, '', 0, '0') else None
+    group = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first() if body.get('group_id') not in (None, '', 0, '0') else None
+    if bool(ch) == bool(group):
+        return JsonResponse({
+            'ok': False,
+            'error': 'bad_fields',
+            'message': 'دقیقاً یک کانال یا یک مجموعه را انتخاب کنید.',
+        }, status=400)
     try:
         name = str(body.get('name') or '').strip()[:100]
         duration = int(body.get('duration_hours'))
@@ -595,13 +600,19 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         return _fail('bad_fields')
     t = Tariff.objects.create(
         channel=ch,
+        group=group,
         name=name,
         duration_hours=duration,
         price=price,
         start_hour=start_hour,
         is_active=True,
     )
-    return JsonResponse({'ok': True, 'tariff_id': t.id})
+    return JsonResponse({
+        'ok': True,
+        'tariff_id': t.id,
+        'channel_id': t.channel_id,
+        'group_id': t.group_id,
+    })
 
 
 def _operator_queues(is_op: bool) -> Dict[str, Any]:
