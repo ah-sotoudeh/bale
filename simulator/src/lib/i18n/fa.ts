@@ -481,6 +481,8 @@ export const fa = {
   wallet: {
     chart: "خالص هر روز",
     payoutChart: "تسویه هر روز",
+    lockedPending: "قفل تسویه",
+    paidOut: "واریز شده",
     monthEarn: "درآمد این ماه",
     available: "قابل برداشت",
     balance: "موجودی",

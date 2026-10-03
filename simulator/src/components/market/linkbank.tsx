@@ -648,6 +648,24 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
                 {open ? (
                   <div className="px-3 pb-3">
                     <p className="text-[11px] text-muted">{fill(copy().common.execLine, { status: ST_E[o.execution] })}</p>
+                    {["paid", "remind_sent", "awaiting_manager_publish"].includes(o.execution) &&
+                    s.channels.find((c) => c.id === s.tariffById(o.tariffId)?.channelId)?.publishMode === "manual" ? (
+                      <p className="mt-1 text-xs font-semibold text-link">
+                        {(() => {
+                          try {
+                            const d = new Date(`${o.date}T12:00:00`);
+                            const ms = d.getTime() - Date.now();
+                            if (ms <= 0) return "زمان انتشار رسیده — دکمه انتشار را بزنید";
+                            const h = Math.ceil(ms / 36e5);
+                            return h < 48
+                              ? `${faNum(h)} ساعت تا انتشار تقریبی`
+                              : `${faNum(Math.ceil(h / 24))} روز تا انتشار`;
+                          } catch {
+                            return copy().manager.publishDue;
+                          }
+                        })()}
+                      </p>
+                    ) : null}
                     {o.publishedLink ? (
                       <a className="mt-1 block text-xs text-link" href={o.publishedLink} target="_blank" rel="noreferrer">
                         {copy().common.link}
@@ -1598,14 +1616,25 @@ function WalletPanel({ owner, toast }: { owner: "manager" | "customer"; toast: (
           {owner === "manager" ? copy().wallet.escrow : copy().wallet.locked} {money(escrow)}
         </span>
         {owner === "manager" ? (
-          <span className="mt-2 block text-xs text-on/90">
-            {copy().wallet.monthEarn}:{" "}
-            {money(
-              ledgerFull
-                .filter((l) => l.kind === "earn" || (l as { entryType?: string }).entryType === "earn")
-                .reduce((a, l) => a + (Number(l.amount) || 0), 0),
-            )}
-          </span>
+          <div className="mt-2 space-y-0.5 text-xs text-on/90">
+            <div>
+              {copy().wallet.monthEarn}:{" "}
+              {money(
+                (window as unknown as { __lbReport?: { month_earn?: number } }).__lbReport?.month_earn ??
+                  ledgerFull
+                    .filter((l) => l.kind === "earn" || (l as { entryType?: string }).entryType === "earn")
+                    .reduce((a, l) => a + (Number(l.amount) || 0), 0),
+              )}
+            </div>
+            <div>
+              {copy().wallet.lockedPending}:{" "}
+              {money((window as unknown as { __lbReport?: { locked_pending?: number } }).__lbReport?.locked_pending ?? 0)}
+            </div>
+            <div>
+              {copy().wallet.paidOut}:{" "}
+              {money((window as unknown as { __lbReport?: { paid_out?: number } }).__lbReport?.paid_out ?? 0)}
+            </div>
+          </div>
         ) : null}
       </div>
       <WeekChart entries={ledgerFull} />

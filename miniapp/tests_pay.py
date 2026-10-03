@@ -65,3 +65,33 @@ class PayFlowTests(TestCase):
         self.assertIsNotNone(match)
         self.assertTrue(match.get('items'))
         self.assertEqual(match['items'][0]['price'], 50_000)
+
+    def test_wallet_report_month_earn(self):
+        from wallet.services import credit as wallet_credit
+        wallet_credit(self.mgr, 120_000, 'earn', ref='item:1', note='test earn', idempotency_key='earn:test:1')
+        r = self.client.get('/miniapp/api/wallet', {'debug_bale_id': '900200'})
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertTrue(body.get('ok'))
+        report = body.get('report') or {}
+        self.assertGreaterEqual(int(report.get('month_earn') or 0), 120_000)
+
+    def test_publish_due_flag_for_manual(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        self.ch.publish_mode = 'manual'
+        self.ch.manual_remind_hours = 48
+        self.ch.save(update_fields=['publish_mode', 'manual_remind_hours'])
+        o = Order.objects.create(customer=self.cust, status='paid', total_amount=50_000)
+        start = timezone.now() + timedelta(hours=12)
+        it = OrderItem.objects.create(
+            order=o, channel=self.ch, tariff=self.tariff, manager=self.mgr,
+            requested_start=start, requested_end=start + timedelta(hours=24),
+            price=50_000, manager_status='approved', execution_status='paid',
+        )
+        r = self.client.get('/miniapp/api/orders', {'debug_bale_id': '900200'})
+        self.assertEqual(r.status_code, 200, r.content)
+        rows = r.json().get('orders') or []
+        match = next((x for x in rows if x['id'] == it.id), None)
+        self.assertIsNotNone(match)
+        self.assertTrue(match.get('publish_due'))
