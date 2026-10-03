@@ -158,9 +158,8 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
               <span className="size-11" />
             )}
           </div>
-          {embedded ? null : (
-          <div className="flex items-center gap-1 px-3 pb-2">
-            {ROLES.map((r) => (
+          <div className="flex flex-wrap items-center gap-1 px-3 pb-2">
+            {ROLES.filter((r) => r.id !== "operator" || useMarket.getState().isOperator).map((r) => (
               <button
                 key={r.id}
                 type="button"
@@ -172,18 +171,19 @@ function Shell({ embedded = false }: { embedded?: boolean }) {
                 {r.label}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => {
-                reset();
-                toast(copy().common.resetDone);
-              }}
-              className="ms-auto text-xs text-muted"
-            >
-              {copy().a11y.reset}
-            </button>
+            {!embedded ? (
+              <button
+                type="button"
+                onClick={() => {
+                  reset();
+                  toast(copy().common.resetDone);
+                }}
+                className="ms-auto text-xs text-muted"
+              >
+                {copy().a11y.reset}
+              </button>
+            ) : null}
           </div>
-          )}
         </header>
 
         <main className={embedded ? "min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-3" : "flex-1 px-3 pt-2 pb-24"}>

@@ -44,17 +44,12 @@ def _init_from_request(request: HttpRequest) -> str:
 
 
 def _can_switch_roles(bale_user_id: str) -> bool:
-    """سوییچ مدیر/مشتری/پشتیبانی فقط برای حساب مالک."""
+    """سوییچ مشتری/مدیر برای همه؛ پشتیبانی فقط برای اپراتور/دیباگ/لیست."""
     uid = str(bale_user_id or '').strip()
     if not uid:
         return False
-    from bot_flow.access import is_debug_user
-
-    if is_debug_user(uid) or ws.is_operator(uid):
-        return True
-    extra = os.environ.get('MINIAPP_ROLE_SWITCH_IDS', '')
-    allowed = {part.strip() for part in extra.split(',') if part.strip()}
-    return uid in allowed
+    # مشتری ↔ کانال‌دار در مینی‌اپ برای همهٔ کاربران واردشده
+    return True
 
 
 def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, Any]:
