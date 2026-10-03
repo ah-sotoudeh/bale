@@ -620,7 +620,7 @@ export type MarketState = Data & {
   archiveChannel: (channelId: number, listed?: boolean) => string | null;
   loadCalendar: (tariffId: number, asCustomer?: boolean) => Promise<string | null>;
   calendarDays: (tariffId: number) => CalDay[];
-  searchCatalog: (q: string) => Promise<string | null>;
+  searchCatalog: (q: string, readyOnly?: boolean) => Promise<string | null>;
   addGroup: (name: string, channelIds: number[]) => string | null;
   updateGroup: (groupId: number, name: string, channelIds: number[]) => string | null;
   removeGroup: (groupId: number) => string | null;
@@ -962,7 +962,7 @@ export const useMarket = create<MarketState>()(
         return null;
       },
       calendarDays: (tariffId) => (get().calendarByTariff || {})[tariffId] ?? [],
-      searchCatalog: async (_q) => null,
+      searchCatalog: async (_q, _readyOnly) => null,
       addGroup: (name, channelIds) => {
         const n = name.trim();
         if (!n || !channelIds.length) return t().error.groupFields ?? "نام و کانال‌ها لازم است";

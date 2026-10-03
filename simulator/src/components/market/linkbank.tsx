@@ -1833,23 +1833,23 @@ function chargeViaBale(amount: number, toast: (m: string) => void) {
 }
 
 function payOrderViaBale(orderId: number, amount: number, toast: (m: string) => void) {
-  const apply = () =>
-    run(
-      toast,
-      copy().toast.paidHold,
-      useMarket.getState().payOrder(orderId, "bale"),
-    );
-  const sim = window.__baleSim;
-  if (!sim) {
-    apply();
+  // در پروداکشن فاکتور فقط در چت بازو می‌آید؛ درگاه داخل مینی‌اپ نیست.
+  const err = useMarket.getState().payOrder(orderId, "bale");
+  if (err) {
+    toast(err);
     return;
   }
-  sim.openInvoice({ title: fill(copy().common.orderNo, { n: faNum(orderId) }), amountToman: amount }, (status) => {
-    if (status === "paid") apply();
-    else if (status === "cancelled") toast(copy().toast.payCancel);
-    else if (status === "failed") toast(copy().toast.payFail);
-    else toast(copy().toast.payPending);
-  });
+  toast(copy().toast.payGoBot ?? "فاکتور در گفتگوی بازو فرستاده شد. بعد از پرداخت برگردید.");
+  const sim = window.__baleSim;
+  if (sim?.openInvoice) {
+    sim.openInvoice({ title: fill(copy().common.orderNo, { n: faNum(orderId) }), amountToman: amount }, (status) => {
+      if (status === "paid") {
+        useMarket.getState().payOrder(orderId, "wallet");
+        toast(copy().toast.paidHold);
+      } else if (status === "cancelled") toast(copy().toast.payCancel);
+      else if (status === "failed") toast(copy().toast.payFail);
+    });
+  }
 }
 
 function orderTone(status: string) {

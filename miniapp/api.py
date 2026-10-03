@@ -943,18 +943,93 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_invoice(request: HttpRequest) -> JsonResponse:
-    """شناسه createInvoiceLink برای openInvoice داخل مینی‌اپ."""
+    """فاکتور را در گفتگوی بازو می‌فرستد تا کاربر در بله پرداخت کند و به مینی‌اپ برگردد.
+
+    درگاه داخل مینی‌اپ در دسترس نیست؛ مسیر اصلی sendInvoice در چت بازو است.
+    """
     user, err = _auth_user(request)
     if err:
         return err
     assert user is not None
     body = _json_body(request)
-    from orders.bale_pay import invoice_for_order
+    from orders.bale_pay import (
+        announce_invoices,
+        invoice_for_order,
+        order_is_fully_paid,
+        send_order_invoices,
+    )
     from orders.models import Order
+    from orders.services import process_payment_paid
 
     order = Order.objects.filter(id=body.get('order_id'), customer=user).first()
     if not order:
         return _fail('not_found', 404)
+    if order.status == 'paid' or order_is_fully_paid(order):
+        if order.status == 'waiting_payment' and order_is_fully_paid(order):
+            process_payment_paid(order.id)
+        return JsonResponse({
+            'ok': False,
+            'error': 'already_paid',
+            'message': 'این سفارش قبلاً پرداخت شده.',
+        }, status=400)
+    if order.status != 'waiting_payment':
+        return JsonResponse({
+            'ok': False,
+            'error': 'not_waiting_payment',
+            'message': 'این سفارش الان قابل پرداخت نیست.',
+        }, status=400)
+
+    chat_id = str(user.bale_user_id or '').strip()
+    if not chat_id:
+        return JsonResponse({
+            'ok': False,
+            'error': 'no_chat',
+            'message': 'شناسه بله شما پیدا نشد. یک‌بار از بازو وارد مینی‌اپ شوید.',
+        }, status=400)
+
+    via = str(body.get('via') or 'bot').strip().lower()
+    # مسیر اصلی: فاکتور در چت بازو
+    if via in ('bot', 'chat', 'reopen', ''):
+        payment = send_order_invoices(order, chat_id)
+        announce_invoices(chat_id, payment)
+        sent = int(payment.get('sent') or 0)
+        failed = int(payment.get('failed') or 0)
+        skipped = int(payment.get('skipped') or 0)
+        if sent == 0 and failed > 0:
+            return JsonResponse({
+                'ok': False,
+                'error': payment.get('error') or 'invoice_failed',
+                'message': 'فاکتور در گفتگوی بازو فرستاده نشد. یک‌بار دیگر تلاش کنید.',
+            }, status=400)
+        if sent == 0 and skipped == 0:
+            return JsonResponse({
+                'ok': False,
+                'error': 'invoice_failed',
+                'message': 'فاکتور ساخته نشد. مبلغ یا وضعیت سفارش را بررسی کنید.',
+            }, status=400)
+        if sent:
+            bc_msg = (
+                'فاکتور در گفتگوی بازو (لینک‌بان) فرستاده شد. '
+                'به چت بازو بروید، با کیف پول بله پرداخت کنید و بعد به مینی‌اپ برگردید.'
+            )
+        else:
+            bc_msg = (
+                'فاکتور همین الان در گفتگوی بازو هست. '
+                'همان‌جا پرداخت کنید و بعد به مینی‌اپ برگردید تا وضعیت به‌روز شود.'
+            )
+        return JsonResponse({
+            'ok': True,
+            'via': 'bot',
+            'order_id': order.id,
+            'sent': sent,
+            'skipped': skipped,
+            'parts': payment.get('parts') or 0,
+            'failed': failed,
+            'message': bc_msg,
+            'open_bot': True,
+        })
+
+    # مسیر اختیاری: لینک فاکتور (اگر کلاینت openInvoice داشته باشد)
     result = invoice_for_order(order)
     status = 200 if result.get('ok') else 400
     return JsonResponse(_with_message(result), status=status)

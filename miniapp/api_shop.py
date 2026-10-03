@@ -354,6 +354,11 @@ def api_banners(request: HttpRequest) -> JsonResponse:
             'caption': b.caption or '',
             'from_linkbank': stage == 'ready',
             'stage': stage,
+            'reject_reason': (
+                'متن یا محتوای بنر تأیید نشد. متن را اصلاح کنید و دوباره بفرستید.'
+                if stage == 'rejected'
+                else ''
+            ),
             'media_kind': b.media_kind,
             'media_url': media_url,
             'poster_url': '' if b.media_kind in ('video', 'animation') else media_url,
