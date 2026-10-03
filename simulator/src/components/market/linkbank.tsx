@@ -517,19 +517,7 @@ function Manager({ screen, toast }: { screen: Screen; toast: (m: string) => void
         <p className="mb-2 px-1 text-xs leading-relaxed text-muted">
           {copy().manager.channelLead}
         </p>
-        {s.groups.length ? (
-          <>
-            <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.groups}</h2>
-            <ul className="mb-3 overflow-hidden rounded-2xl bg-surface">
-              {s.groups.map((g) => (
-                <li key={g.id} className="border-b border-line px-3 py-3 last:border-b-0">
-                  <span className="block text-sm font-semibold">{fill(copy().common.groupTitle, { name: g.name })}</span>
-                  <span className="block text-[11px] text-muted">{fill(copy().common.groupCount, { n: faNum(g.channelIds.length) })}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
+        <GroupDesk toast={toast} />
         <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.yourChannels}</h2>
         <ul className="overflow-hidden rounded-2xl bg-surface">
           {s.channels.map((ch) => (
@@ -815,6 +803,93 @@ function ChannelPulse({ channels }: { channels: Channel[] }) {
         {copy().stats.updated}: {pulse.statsAt ? formatJalali(new Date(pulse.statsAt)) : copy().stats.empty}
       </p>
     </section>
+  );
+}
+
+
+function GroupDesk({ toast }: { toast: (m: string) => void }) {
+  const groups = useMarket((s) => s.groups);
+  const channels = useMarket((s) => s.channels);
+  const addGroup = useMarket((s) => s.addGroup);
+  const updateGroup = useMarket((s) => s.updateGroup);
+  const removeGroup = useMarket((s) => s.removeGroup);
+  const [name, setName] = useState("");
+  const [selected, setSelected] = useState<number[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const toggle = (id: number) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const reset = () => {
+    setEditingId(null);
+    setName("");
+    setSelected([]);
+  };
+
+  return (
+    <>
+      <h2 className="mb-1 px-1 text-[11px] text-muted">{copy().manager.groups}</h2>
+      <Card>
+        <Field label={copy().manager.groupName}>
+          <input className={control} value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <p className="mb-1 text-[11px] text-muted">{copy().manager.groupChannels}</p>
+        <div className="mb-2 flex flex-wrap gap-1">
+          {channels.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => toggle(c.id)}
+              className={`min-h-9 rounded-full px-3 text-xs ${selected.includes(c.id) ? "bg-link text-on" : "bg-header text-muted"}`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Btn
+            onClick={() => {
+              const err = editingId
+                ? updateGroup(editingId, name, selected)
+                : addGroup(name, selected);
+              if (!err) reset();
+              run(toast, copy().toast.groupSaved, err);
+            }}
+          >
+            {editingId ? copy().manager.saveTariffEdit : copy().manager.addGroup}
+          </Btn>
+          {editingId ? <Btn onClick={reset}>{copy().manager.cancelTariffEdit}</Btn> : null}
+        </div>
+      </Card>
+      {groups.length ? (
+        <ul className="mb-3 overflow-hidden rounded-2xl bg-surface">
+          {groups.map((g) => (
+            <li key={g.id} className="flex items-center gap-2 border-b border-line px-3 py-3 last:border-b-0">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-start"
+                onClick={() => {
+                  setEditingId(g.id);
+                  setName(g.name);
+                  setSelected([...g.channelIds]);
+                }}
+              >
+                <span className="block text-sm font-semibold">{fill(copy().common.groupTitle, { name: g.name })}</span>
+                <span className="block text-[11px] text-muted">{fill(copy().common.groupCount, { n: faNum(g.channelIds.length) })}</span>
+              </button>
+              <button
+                type="button"
+                className="min-h-9 shrink-0 rounded-full px-3 text-xs text-danger"
+                onClick={() => run(toast, copy().toast.groupDeleted, removeGroup(g.id))}
+              >
+                {copy().manager.deleteGroup}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
   );
 }
 
@@ -1465,9 +1540,16 @@ function WalletPanel({ owner, toast }: { owner: "manager" | "customer"; toast: (
 
 function CatalogBoard() {
   const s = useMarket();
+  const searchCatalog = useMarket((st) => st.searchCatalog);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState(copy().common.all);
   const [sort, setSort] = useState<"price" | "cpm" | "views" | "err" | "growth">("views");
+  useEffect(() => {
+    const h = window.setTimeout(() => {
+      void searchCatalog(q.trim());
+    }, 320);
+    return () => window.clearTimeout(h);
+  }, [q, searchCatalog]);
   const cats = [copy().common.all, ...new Set(s.channels.map((c) => c.category || copy().common.general))];
   const list = s.tariffs
     .filter((t) => t.isActive)

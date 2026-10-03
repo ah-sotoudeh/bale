@@ -241,6 +241,23 @@ class MiniappManagerFlowTests(TestCase):
         self.assertTrue(body.get('ok'))
         self.assertTrue(len(body.get('days') or []) >= 7)
 
+    
+    def test_group_add_and_delete(self):
+        r = self.client.post(
+            '/miniapp/api/groups/add',
+            data={'debug_bale_id': self.mgr_id, 'name': 'بسته تست', 'channel_ids': [self.ch.id]},
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        gid = r.json()['group']['id']
+        r2 = self.client.post(
+            '/miniapp/api/groups/delete',
+            data={'debug_bale_id': self.mgr_id, 'group_id': gid},
+            content_type='application/json',
+        )
+        self.assertEqual(r2.status_code, 200, r2.content)
+        self.assertTrue(r2.json().get('deleted'))
+
     def test_channel_update_name(self):
         r = self.client.post(
             '/miniapp/api/channels/update',

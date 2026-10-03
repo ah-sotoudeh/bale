@@ -433,6 +433,85 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'ok': True, 'channel_id': cid, 'deleted': True})
 
 
+def _group_payload(g: ChannelGroup) -> dict:
+    return {
+        'id': g.id,
+        'name': g.name,
+        'channel_ids': list(g.channels.values_list('id', flat=True)),
+    }
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_group_add(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    name = str(body.get('name') or '').strip()[:200]
+    if not name:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=400)
+    raw_ids = body.get('channel_ids') or body.get('channels') or []
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال انتخاب کنید.'}, status=400)
+    chans = list(Channel.objects.filter(id__in=raw_ids, manager=user))
+    if len(chans) != len(set(int(x) for x in raw_ids)):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
+    g = ChannelGroup.objects.create(name=name, manager=user)
+    g.channels.set(chans)
+    return JsonResponse({'ok': True, 'group': _group_payload(g)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_group_update(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    g = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
+    if not g:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=404)
+    if 'name' in body and str(body.get('name') or '').strip():
+        g.name = str(body.get('name')).strip()[:200]
+        g.save(update_fields=['name'])
+    if 'channel_ids' in body or 'channels' in body:
+        raw_ids = body.get('channel_ids') or body.get('channels') or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال لازم است.'}, status=400)
+        chans = list(Channel.objects.filter(id__in=raw_ids, manager=user))
+        if len(chans) != len(set(int(x) for x in raw_ids)):
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
+        g.channels.set(chans)
+    return JsonResponse({'ok': True, 'group': _group_payload(g)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_group_delete(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    g = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
+    if not g:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=404)
+    from orders.models import OrderItem
+    if OrderItem.objects.filter(tariff__group=g).exists():
+        return JsonResponse({
+            'ok': False,
+            'error': 'has_orders',
+            'message': 'این مجموعه سفارش دارد؛ حذف ممکن نیست.',
+        }, status=400)
+    gid = g.id
+    Tariff.objects.filter(group=g).delete()
+    g.delete()
+    return JsonResponse({'ok': True, 'group_id': gid, 'deleted': True})
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_set_publish_mode(request: HttpRequest) -> JsonResponse:

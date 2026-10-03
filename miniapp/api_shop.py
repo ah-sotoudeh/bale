@@ -405,6 +405,101 @@ def api_banner_hide(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['POST'])
+def api_banner_revise(request: HttpRequest) -> JsonResponse:
+    """ویرایش عنوان/کپشن بنر خود کاربر."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    b = CustomerBanner.objects.filter(id=body.get('banner_id'), customer=user, is_active=True).first()
+    if not b:
+        return _err('not_found', 404)
+    from bot_flow.banned_words import is_allowed
+    from orders.banner_publish import banner_stage
+
+    title = body.get('title')
+    caption = body.get('caption')
+    fields = []
+    if title is not None:
+        title_s = str(title).strip()[:120]
+        if len(title_s) < 2:
+            return _err('bad_fields', 400, 'عنوان کوتاه است.')
+        ok, _ = is_allowed(title_s)
+        if not ok:
+            return _err('banned', 400)
+        b.title = title_s
+        fields.append('title')
+    if caption is not None:
+        cap = str(caption).strip()
+        if len(cap) < 12:
+            return _err('bad_fields', 400, 'کپشن کوتاه است.')
+        ok, _ = is_allowed(cap)
+        if not ok:
+            return _err('banned', 400)
+        b.caption = cap[:2000]
+        fields.append('caption')
+    if not fields:
+        return _err('bad_fields')
+    b.save(update_fields=fields)
+    return JsonResponse({'ok': True, 'banner_id': b.id, 'stage': banner_stage(b)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_banner_resubmit(request: HttpRequest) -> JsonResponse:
+    """ارسال دوباره بنر ردشده برای بررسی پشتیبانی."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    b = CustomerBanner.objects.filter(id=body.get('banner_id'), customer=user, is_active=True).first()
+    if not b:
+        return _err('not_found', 404)
+    from bot_flow.banned_words import is_allowed
+    from orders.banner_publish import banner_stage, create_publish_request
+
+    if banner_stage(b) != 'rejected':
+        return _err('bad_fields', 400, 'فقط بنر ردشده را می‌توان دوباره فرستاد.')
+    caption = str(body.get('caption') if body.get('caption') is not None else b.caption or '').strip()
+    if len(caption) < 12:
+        return _err('bad_fields', 400, 'کپشن کوتاه است.')
+    ok, _ = is_allowed(caption)
+    if not ok:
+        return _err('banned', 400)
+    if body.get('title') is not None:
+        title_s = str(body.get('title') or '').strip()[:120]
+        if title_s:
+            ok, _ = is_allowed(title_s)
+            if not ok:
+                return _err('banned', 400)
+            b.title = title_s
+    b.caption = caption[:2000]
+    b.save(update_fields=['title', 'caption'] if body.get('title') is not None else ['caption'])
+    if not b.storage_chat_id or not b.storage_message_id:
+        return _err('bad_fields', 400, 'فایل بنر ناقص است؛ از بازو دوباره بفرستید.')
+    result = create_publish_request(
+        user,
+        storage_chat_id=b.storage_chat_id,
+        storage_message_id=b.storage_message_id,
+        caption=b.caption,
+        media_kind=b.media_kind or '',
+        banner=b,
+    )
+    if not result.get('ok'):
+        return _err(result.get('error') or 'error', 400)
+    return JsonResponse({
+        'ok': True,
+        'banner_id': b.id,
+        'request_id': result['request'].id,
+        'stage': 'pending',
+        'fee': result.get('fee', 0),
+    })
+
+
+@csrf_exempt
 @require_http_methods(['GET'])
 def api_cart(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)

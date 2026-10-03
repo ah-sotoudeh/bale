@@ -615,6 +615,11 @@ export type MarketState = Data & {
   removeChannel: (channelId: number) => string | null;
   loadCalendar: (tariffId: number, asCustomer?: boolean) => Promise<string | null>;
   calendarDays: (tariffId: number) => CalDay[];
+  searchCatalog: (q: string) => Promise<string | null>;
+  addGroup: (name: string, channelIds: number[]) => string | null;
+  updateGroup: (groupId: number, name: string, channelIds: number[]) => string | null;
+  removeGroup: (groupId: number) => string | null;
+
   toggleTariff: (id: number) => string | null;
   decideItem: (itemId: number, approve: boolean) => string | null;
   toggleBusy: (tariffId: number, date: string) => string | null;
@@ -945,6 +950,37 @@ export const useMarket = create<MarketState>()(
         return null;
       },
       calendarDays: (tariffId) => (get().calendarByTariff || {})[tariffId] ?? [],
+      searchCatalog: async (_q) => null,
+      addGroup: (name, channelIds) => {
+        const n = name.trim();
+        if (!n || !channelIds.length) return t().error.groupFields ?? "نام و کانال‌ها لازم است";
+        const id = get().nextId;
+        set({
+          nextId: id + 1,
+          groups: [{ id, name: n.slice(0, 200), channelIds: [...channelIds] }, ...get().groups],
+        });
+        return null;
+      },
+      updateGroup: (groupId, name, channelIds) => {
+        const n = name.trim();
+        if (!get().groups.some((g) => g.id === groupId)) return t().error.groupMissing;
+        if (!n || !channelIds.length) return t().error.groupFields ?? "نام و کانال‌ها لازم است";
+        set({
+          groups: get().groups.map((g) =>
+            g.id === groupId ? { ...g, name: n.slice(0, 200), channelIds: [...channelIds] } : g,
+          ),
+        });
+        return null;
+      },
+      removeGroup: (groupId) => {
+        if (!get().groups.some((g) => g.id === groupId)) return t().error.groupMissing;
+        set({
+          groups: get().groups.filter((g) => g.id !== groupId),
+          tariffs: get().tariffs.filter((x) => x.groupId !== groupId),
+        });
+        return null;
+      },
+
       toggleTariff: (id) => {
         set({
           tariffs: get().tariffs.map((t) => (t.id === id ? { ...t, isActive: !t.isActive } : t)),
