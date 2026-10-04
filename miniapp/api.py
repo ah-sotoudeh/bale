@@ -1555,21 +1555,33 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
     from orders.models import CustomerBanner
     rows = []
-    for bn in CustomerBanner.objects.filter(from_linkbank=True).order_by('-id')[:30]:
+    # اولویت با بنرهای لینک‌بانک؛ در غیر این صورت بنرهای فعال با storage
+    qs = CustomerBanner.objects.filter(is_active=True).order_by('-id')[:50]
+    for bn in qs:
+        has = bool(bn.linkbank_message_id or bn.storage_message_id)
         rows.append({
             'id': bn.id,
             'title': bn.display_title(),
             'caption': (bn.caption or '')[:80],
-            'has_source': bool(bn.linkbank_message_id or bn.storage_message_id),
+            'has_source': has,
+            'from_linkbank': bool(bn.from_linkbank),
         })
+    # بنرهای لینک‌بانک را اول لیست نگه دار
+    rows.sort(key=lambda r: (0 if r.get('from_linkbank') else 1, -r['id']))
     channels = []
-    for ch in Channel.objects.order_by('-id')[:80]:
+    for ch in Channel.objects.order_by('-id')[:100]:
         channels.append({
             'id': ch.id,
-            'name': ch.name,
+            'name': ch.name or ch.link or f'#{ch.id}',
             'link': ch.link,
-            'publish_mode': ch.publish_mode,
+            'publish_mode': ch.publish_mode or 'manual',
             'bot_is_admin': bool(ch.bot_is_admin),
             'linkyar_is_admin': bool(ch.linkyar_is_admin),
+            'is_listed': bool(getattr(ch, 'is_listed', True)),
         })
-    return JsonResponse({'ok': True, 'banners': rows, 'channels': channels})
+    return JsonResponse({
+        'ok': True,
+        'banners': rows,
+        'channels': channels,
+        'counts': {'banners': len(rows), 'channels': len(channels)},
+    })
