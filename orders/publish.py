@@ -467,24 +467,43 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد از لینک‌بانک؛ اگر AH/فوروارد نشد → همان file_id یا فایل محلی."""
+    """ارسال بنر با لینک‌یار.
+
+    فوروارد داخلی بله (aiobale ForwardMessages) روی این حساب پایدار نیست
+    و InvalidArgument می‌دهد. مسیر اصلی: آپلود فایل محلی بنر (یا file_id سرور).
+    """
     from orders.banner_publish import linkbank_channel
 
     ref = channel_ref(ch)
+    cap = caption or ''
     src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
-    ly_peer = int(src.get('ly_peer_id') or 0)
-    ly_mid = int(src.get('ly_message_id') or 0)
-    ly_date = int(message_date or src.get('ly_message_date') or 0)
-    ly_ah = src.get('ly_access_hash')
-    src_ref = str(src.get('linkbank_ref') or linkbank_channel())
-    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
-        src_ref = '@' + str(src_ref).lstrip('@')
-    cap = caption or src.get('caption') or ''
+    if not cap:
+        cap = src.get('caption') or ''
     fm = src.get('file_meta') or {}
+    errors: List[str] = []
 
-    def _try_server_file() -> Optional[Dict[str, Any]]:
-        if not (fm.get('file_id') and fm.get('file_access_hash')):
-            return None
+    # ۱) فایل محلی بنر (قابل اعتماد)
+    path, kind, bcap = _local_banner_path(banner_id)
+    if path is not None and path.exists():
+        up = ly.send_local_file_to_channel(
+            ref, str(path), caption=cap or bcap or '', kind=kind or 'photo'
+        )
+        if up.get('ok'):
+            return {
+                'api': up,
+                'channel_ref': ref,
+                'ok': True,
+                'method': 'upload_local',
+                'message_id': up.get('message_id'),
+                'message_date': up.get('date'),
+                'file': path.name,
+            }
+        errors.append(f'upload_local: {(up or {}).get("error")}')
+    else:
+        errors.append('no_local_banner_file')
+
+    # ۲) همان file_id روی سرور بله از تاریخچه لینک‌بانک
+    if fm.get('file_id') and fm.get('file_access_hash'):
         up = ly.send_existing_file_to_channel(
             ref,
             file_id=fm['file_id'],
@@ -504,28 +523,16 @@ def _post_via_linkyar(
                 'message_id': up.get('message_id'),
                 'message_date': up.get('date'),
             }
-        return None
+        errors.append(f'server_file: {(up or {}).get("error")}')
 
-    def _try_local_file() -> Optional[Dict[str, Any]]:
-        path, kind, bcap = _local_banner_path(banner_id)
-        if path is None or not path.exists():
-            return None
-        up = ly.send_local_file_to_channel(
-            ref, str(path), caption=cap or bcap or '', kind=kind or 'photo'
-        )
-        if up.get('ok'):
-            return {
-                'api': up,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'upload_local',
-                'message_id': up.get('message_id'),
-                'message_date': up.get('date'),
-                'file': path.name,
-            }
-        return None
-
-    # 1) فوروارد اگر peer+date+امکان AH
+    # ۳) فوروارد (اختیاری — اغلب InvalidArgument)
+    ly_peer = int(src.get('ly_peer_id') or 0)
+    ly_mid = int(src.get('ly_message_id') or 0)
+    ly_date = int(message_date or src.get('ly_message_date') or 0)
+    ly_ah = src.get('ly_access_hash')
+    src_ref = str(src.get('linkbank_ref') or linkbank_channel())
+    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
+        src_ref = '@' + str(src_ref).lstrip('@')
     if ly_peer and ly_mid and ly_date:
         result = ly.forward_to_channel(
             ref,
@@ -539,53 +546,25 @@ def _post_via_linkyar(
         if result.get('ok'):
             out = dict(result)
             out['message_date'] = int(result.get('message_date') or ly_date)
-            out['message_id'] = ly_mid
             return {
                 'api': out,
                 'channel_ref': ref,
                 'ok': True,
                 'method': 'forward',
-                'from_peer_id': ly_peer,
                 'message_id': ly_mid,
                 'message_date': out['message_date'],
             }
-        # فوروارد نشد → فایل سرور / محلی
-        for attempt in (_try_server_file, _try_local_file):
-            got = attempt()
-            if got:
-                got['forward_error'] = str((result or {}).get('error') or '')[:120]
-                return got
-        err = str((result or {}).get('error') or 'فوروارد لینک‌یار ناموفق')
-        tries = (result or {}).get('tries') or []
-        if tries:
-            err = f'{err} | {tries[0]}'[:400]
-        return {
-            'api': result if isinstance(result, dict) else {'ok': False},
-            'channel_ref': ref,
-            'ok': False,
-            'method': 'failed',
-            'error': err[:400],
-        }
-
-    # 2) بدون mid/date — مستقیم فایل
-    for attempt in (_try_server_file, _try_local_file):
-        got = attempt()
-        if got:
-            return got
+        errors.append(f'forward: {(result or {}).get("error")}')
 
     return {
         'ok': False,
         'method': 'failed',
         'channel_ref': ref,
-        'api': {
-            'error': 'need_from_peer_and_date',
-            'hist_error': src.get('hist_error'),
-            'resolved': {'peer': ly_peer, 'mid': ly_mid, 'date': ly_date, 'ah': ly_ah},
-        },
+        'api': {'error': 'linkyar_all_paths_failed', 'tries': errors},
         'error': (
-            f'لینک‌یار: نه فوروارد ممکن بود نه فایل بنر '
-            f'(peer={ly_peer}, mid={ly_mid}, date={ly_date}, ah={ly_ah})'
-            + (f' — {src.get("hist_error")}' if src.get('hist_error') else '')
+            'لینک‌یار نتوانست بنر را بفرستد. '
+            + (errors[0] if errors else 'مسیر موجود نیست')
+            + (' — فایل بنر روی سرور نیست؛ یک‌بار از بازو بنر را دوباره ثبت کنید.' if 'no_local_banner_file' in errors else '')
         )[:400],
     }
 

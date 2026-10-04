@@ -96,9 +96,64 @@ def ensure_local_file(banner: CustomerBanner) -> Path | None:
     found = stored_banner_file(banner.id)
     if found is not None:
         return found
-    if (banner.media_kind or '') not in ('photo', 'video', 'animation', 'document'):
+    if (banner.media_kind or '') not in ('photo', 'video', 'animation', 'document', ''):
+        # allow empty media_kind for linkbank banners
+        if not (banner.from_linkbank and banner.linkbank_message_id):
+            return None
+    path = _pull_stored_message(banner)
+    if path is not None:
+        return path
+    return _pull_linkbank_message(banner)
+
+
+def _pull_linkbank_message(banner: CustomerBanner) -> Path | None:
+    """دانلود بنر از کانال مرجع لینک‌بانک با بات (برای ارسال لینک‌یار)."""
+    mid = str(banner.linkbank_message_id or '').strip()
+    if not mid.isdigit():
         return None
-    return _pull_stored_message(banner)
+    chat = str(banner.linkbank_chat_id or '').strip()
+    if not chat:
+        try:
+            from orders.banner_publish import linkbank_channel
+            chat = linkbank_channel()
+        except Exception:
+            return None
+    from integrations import bale_client as bc
+    if not bc._token():
+        return None
+    root = banner_dir()
+    miss = root / f'{int(banner.id)}.lb.miss'
+    if miss.is_file() and time.time() - miss.stat().st_mtime < _MISS_TTL:
+        return None
+    # فوروارد به خود بات برای گرفتن file_id
+    me = bc.get_me()
+    bot_id = (me.get('result') or me).get('id') if isinstance(me, dict) else None
+    target = str(bot_id or chat)
+    sent = bc.forward_message(target, chat, int(mid))
+    message = sent.get('result') if isinstance(sent, dict) else None
+    if not isinstance(message, dict):
+        # امتحان مستقیم به storage_chat
+        if banner.storage_chat_id:
+            sent = bc.forward_message(str(banner.storage_chat_id), chat, int(mid))
+            message = sent.get('result') if isinstance(sent, dict) else None
+    if not isinstance(message, dict):
+        miss.write_bytes(b'')
+        return None
+    saved = None
+    try:
+        file_id, kind = file_from_message(message)
+        saved = _download(banner.id, file_id, kind or banner.media_kind or 'photo')
+    finally:
+        del_mid = message.get('message_id')
+        del_chat = str(message.get('chat', {}).get('id') or target)
+        if del_mid:
+            try:
+                bc.delete_message(del_chat, int(del_mid))
+            except Exception:
+                pass
+    if saved is None:
+        miss.write_bytes(b'')
+    return saved
 
 
 def _looks_like_media(data: bytes, kind: str) -> str:
