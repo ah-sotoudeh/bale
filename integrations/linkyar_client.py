@@ -774,12 +774,11 @@ def forward_banner_from_linkbank(
     bot_from_chat_id: str = '',
     bot_message_id: int = 0,
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول — مسیر پایدار:
+    """فوروارد با نقل‌قول.
 
-    1) بات پیام لینک‌بانک را به چت خصوصی لینک‌یار فوروارد می‌کند (Bot API)
-    2) لینک‌یار همان پیام را از چت خصوصی (PeerType.PRIVATE) به کانال فوروارد می‌کند
-
-    فوروارد مستقیم کانال→کانال با حساب کاربری اغلب InvalidArgument می‌دهد.
+    مسیرها:
+    A) بات پیام را به DM لینک‌یار می‌فرستد → فوروارد از PRIVATE
+    B) فوروارد مستقیم از کانال لینک‌بانک (peer کانال + sender_id)
     """
     async def _fn(client):
         import asyncio
@@ -790,16 +789,78 @@ def forward_banner_from_linkbank(
         from aiobale.utils import generate_id
         from integrations import bale_client as bc
 
+        errors: List[str] = []
+
         tgt = await _resolve_peer(client, target_channel_ref)
         if not tgt.get('ok'):
             return {'ok': False, 'error': f'target_resolve: {tgt.get("error")}'}
         tgt_id = int(tgt['peer_id'])
+        tgt_ah = tgt.get('access_hash')
         try:
             await client.join_public_chat(tgt_id)
         except Exception:
             pass
+        if tgt_ah in (None, 0, '0'):
+            try:
+                tgt_ah = await _enrich_access_hash(client, tgt_id, None)
+            except Exception:
+                pass
 
-        # --- شناسه بات و لینک‌یار ---
+        async def _try_forward(info: InfoMessage, tag: str) -> Optional[Dict[str, Any]]:
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    resp = await client.forward_message(
+                        message=info, chat_id=tgt_id, chat_type=ctype
+                    )
+                    return {
+                        'ok': True,
+                        'result': str(resp),
+                        'method': f'forward:{tag}',
+                        'chat_type': str(ctype),
+                        'message_id': int(info.message_id),
+                        'message_date': int(
+                            getattr(info.date, 'value', None) or info.date or 0
+                        ),
+                    }
+                except Exception as e:
+                    errors.append(f'{tag}/{ctype}: {type(e).__name__}: {e}')
+            # raw ForwardMessages
+            for with_ah in (True, False):
+                tkw: Dict[str, Any] = {'type': PeerType.GROUP, 'id': tgt_id}
+                if with_ah and tgt_ah not in (None, 0, '0'):
+                    tkw['access_hash'] = int(tgt_ah)
+                try:
+                    call = ForwardMessages(
+                        peer=Peer(**tkw),
+                        message_ids=[generate_id()],
+                        forwarded_messages=[info],
+                    )
+                    resp = await client(call)
+                    return {
+                        'ok': True,
+                        'result': str(resp),
+                        'method': f'ForwardMessages:{tag}',
+                        'message_id': int(info.message_id),
+                        'message_date': int(
+                            getattr(info.date, 'value', None) or info.date or 0
+                        ),
+                    }
+                except Exception as e:
+                    errors.append(f'{tag}/raw/ah={with_ah}: {type(e).__name__}: {e}')
+            return None
+
+        def _mk_info(peer_type, peer_id, mid, date, access_hash=None):
+            kw: Dict[str, Any] = {'type': peer_type, 'id': int(peer_id)}
+            if access_hash not in (None, 0, '0'):
+                kw['access_hash'] = int(access_hash)
+            infos = []
+            for d in (IntValue(value=int(date)), int(date)):
+                infos.append(
+                    InfoMessage(peer=Peer(**kw), message_id=int(mid), date=d)
+                )
+            return infos
+
+        # ---------- A) hop بات → DM لینک‌یار ----------
         bot_me = bc.get_me()
         bot_uid = None
         if isinstance(bot_me, dict):
@@ -808,167 +869,160 @@ def forward_banner_from_linkbank(
             bot_uid = int(bot_uid) if bot_uid is not None else None
         except (TypeError, ValueError):
             bot_uid = None
-        if not bot_uid:
-            return {'ok': False, 'error': 'bot_id_unknown'}
 
         ly_uid = int(client.id)
-
-        # --- مبدأ بات: لینک‌بانک ---
         from_chat = str(bot_from_chat_id or source_channel_ref or '').strip()
         mid_bot = int(bot_message_id or 0)
-        if not from_chat or not mid_bot:
-            # از تاریخچه کانال message_id بات نداریم؛ سعی کن از username
-            from_chat = str(source_channel_ref or from_chat).strip()
-            if not mid_bot:
-                return {
-                    'ok': False,
-                    'error': 'need_bot_message_id',
-                    'hint': 'شناسه پیام بات روی لینک‌بانک لازم است',
-                }
 
-        # ۱) بات → چت خصوصی لینک‌یار
-        hop = bc.forward_message(str(ly_uid), str(from_chat), int(mid_bot))
-        hop_ok = isinstance(hop, dict) and (
-            hop.get('ok') is True or hop.get('result') or ('ok' not in hop and not hop.get('error'))
-        )
-        if not hop_ok:
-            return {
-                'ok': False,
-                'error': 'bot_forward_to_linkyar_failed',
-                'hop': hop,
-                'from_chat': from_chat,
-                'mid': mid_bot,
-                'ly_uid': ly_uid,
-            }
+        hop_result = None
+        if bot_uid and from_chat and mid_bot:
+            hop = bc.forward_message(str(ly_uid), str(from_chat), int(mid_bot))
+            hop_ok = isinstance(hop, dict) and (
+                hop.get('ok') is True
+                or hop.get('result')
+                or ('ok' not in hop and not hop.get('error'))
+            )
+            hop_result = hop
+            if hop_ok:
+                await asyncio.sleep(1.5)
+                # A1) شناسه از پاسخ بات
+                msg = (hop.get('result') if isinstance(hop, dict) else None) or {}
+                if isinstance(msg, dict):
+                    try:
+                        hmid = int(msg.get('message_id') or 0)
+                        hdate = msg.get('date')
+                        if hdate is not None:
+                            hdate = int(hdate)
+                            if 0 < hdate < 10_000_000_000:
+                                hdate = hdate * 1000
+                        else:
+                            hdate = 0
+                    except (TypeError, ValueError):
+                        hmid, hdate = 0, 0
+                    if hmid and hdate:
+                        for info in _mk_info(PeerType.PRIVATE, bot_uid, hmid, hdate):
+                            got = await _try_forward(info, 'hop_bot_ids')
+                            if got:
+                                got['bot_hop'] = True
+                                return got
 
-        # کمی صبر تا پیام در اینباکس بنشیند
-        await asyncio.sleep(1.2)
+                # A2) تاریخچه خصوصی با بات
+                for ptype in (int(PeerType.PRIVATE), int(PeerType.GROUP)):
+                    raw = await _load_history_raw(
+                        client, int(bot_uid), None, limit=int(limit), peer_type=ptype
+                    )
+                    if not raw.get('ok'):
+                        errors.append(f'priv_hist/{ptype}: {raw.get("error")}')
+                        continue
+                    posts = []
+                    for it in raw.get('items') or []:
+                        parsed = _parse_raw_message_item(it, '')
+                        if parsed and parsed.get('message_id') and parsed.get('date'):
+                            posts.append(parsed)
+                    if not posts:
+                        errors.append(f'priv_hist/{ptype}: empty')
+                        continue
+                    posts.sort(key=lambda p: int(p.get('date') or 0), reverse=True)
+                    key = (caption_match or '').strip()[:40]
+                    chosen = None
+                    if key:
+                        for p in posts:
+                            if key in str(p.get('preview') or ''):
+                                chosen = p
+                                break
+                    if chosen is None:
+                        for p in posts:
+                            if p.get('kind') in ('photo', 'video', 'document'):
+                                chosen = p
+                                break
+                    if chosen is None:
+                        chosen = posts[0]
+                    mid = int(chosen['message_id'])
+                    date = int(chosen['date'])
+                    sender = chosen.get('sender_id')
+                    # peer = bot / sender
+                    candidates = [(PeerType.PRIVATE, bot_uid, None)]
+                    if sender:
+                        candidates.append((PeerType.PRIVATE, int(sender), None))
+                        candidates.append((PeerType.GROUP, int(sender), None))
+                    for ptype, pid, ah in candidates:
+                        for info in _mk_info(ptype, pid, mid, date, ah):
+                            got = await _try_forward(info, f'hop_hist/{ptype}/{pid}')
+                            if got:
+                                got['bot_hop'] = True
+                                got['preview'] = str(chosen.get('preview') or '')[:80]
+                                return got
+            else:
+                errors.append(f'hop_failed: {(hop or {}).get("error") or hop}')
 
-        # ۲) تاریخچه چت خصوصی با بات
-        raw = await _load_history_raw(
-            client,
-            int(bot_uid),
-            None,
-            limit=int(limit),
-            peer_type=int(PeerType.PRIVATE),
-        )
-        if not raw.get('ok'):
-            return {
-                'ok': False,
-                'error': f'private_history: {raw.get("error")}',
-                'hop_ok': True,
-            }
-
-        posts = []
-        for it in raw.get('items') or []:
-            parsed = _parse_raw_message_item(it, '')
-            if parsed and parsed.get('message_id') and parsed.get('date'):
-                posts.append(parsed)
-        if not posts:
-            return {
-                'ok': False,
-                'error': 'private_history_empty',
-                'raw_count': raw.get('raw_count'),
-                'hop_ok': True,
-            }
-
-        posts.sort(key=lambda p: int(p.get('date') or 0), reverse=True)
-        key = (caption_match or '').strip()[:40]
-        chosen = None
-        if key:
-            for p in posts:
-                if key in str(p.get('preview') or ''):
-                    chosen = p
-                    break
-        if chosen is None:
-            for p in posts:
-                if p.get('kind') in ('photo', 'video', 'document'):
-                    chosen = p
-                    break
-        if chosen is None:
-            chosen = posts[0]
-
-        mid = int(chosen['message_id'])
-        date = int(chosen['date'])
-
-        # Peer مبدأ = چت خصوصی با بات
-        src_peer = Peer(type=PeerType.PRIVATE, id=int(bot_uid))
-        info = InfoMessage(
-            peer=src_peer,
-            message_id=mid,
-            date=IntValue(value=date),
-        )
-
-        errors = []
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        # ---------- B) مستقیم از کانال لینک‌بانک ----------
+        src = await _resolve_peer(client, source_channel_ref)
+        if src.get('ok'):
+            src_id = int(src['peer_id'])
+            src_ah = src.get('access_hash')
             try:
-                resp = await client.forward_message(
-                    message=info, chat_id=tgt_id, chat_type=ctype
-                )
-                return {
-                    'ok': True,
-                    'result': str(resp),
-                    'method': 'forward_via_private_hop',
-                    'chat_type': str(ctype),
-                    'message_id': mid,
-                    'message_date': date,
-                    'bot_hop': True,
-                    'preview': str(chosen.get('preview') or '')[:80],
-                }
-            except Exception as e:
-                errors.append(f'high/{ctype}: {type(e).__name__}: {e}')
-
-        # int date هم
-        info2 = InfoMessage(peer=src_peer, message_id=mid, date=date)
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
-            try:
-                resp = await client.forward_message(
-                    message=info2, chat_id=tgt_id, chat_type=ctype
-                )
-                return {
-                    'ok': True,
-                    'result': str(resp),
-                    'method': 'forward_via_private_hop_int_date',
-                    'chat_type': str(ctype),
-                    'message_id': mid,
-                    'message_date': date,
-                    'bot_hop': True,
-                }
-            except Exception as e:
-                errors.append(f'high_int/{ctype}: {type(e).__name__}: {e}')
-
-        # ForwardMessages خام
-        for with_ah in (True, False):
-            tkw = {'type': PeerType.GROUP, 'id': tgt_id}
-            if with_ah and tgt.get('access_hash') not in (None, 0, '0'):
-                tkw['access_hash'] = int(tgt['access_hash'])
-            try:
-                call = ForwardMessages(
-                    peer=Peer(**tkw),
-                    message_ids=[generate_id()],
-                    forwarded_messages=[info],
-                )
-                resp = await client(call)
-                return {
-                    'ok': True,
-                    'result': str(resp),
-                    'method': 'ForwardMessages_private_hop',
-                    'message_id': mid,
-                    'message_date': date,
-                    'bot_hop': True,
-                }
-            except Exception as e:
-                errors.append(f'raw/ah={with_ah}: {type(e).__name__}: {e}')
+                await client.join_public_chat(src_id)
+            except Exception:
+                pass
+            if src_ah in (None, 0, '0'):
+                try:
+                    src_ah = await _enrich_access_hash(client, src_id, None)
+                except Exception:
+                    pass
+            raw = await _load_history_raw(
+                client, src_id, src_ah if src_ah not in (None, 0) else None, limit=int(limit)
+            )
+            if not raw.get('ok'):
+                raw = await _load_history_raw(client, src_id, None, limit=int(limit))
+            if raw.get('ok'):
+                uname = str(source_channel_ref).lstrip('@')
+                posts = []
+                for it in raw.get('items') or []:
+                    parsed = _parse_raw_message_item(it, uname)
+                    if parsed and parsed.get('message_id') and parsed.get('date'):
+                        posts.append(parsed)
+                posts.sort(key=lambda p: int(p.get('date') or 0), reverse=True)
+                key = (caption_match or '').strip()[:40]
+                chosen = None
+                if key:
+                    for p in posts:
+                        if key in str(p.get('preview') or ''):
+                            chosen = p
+                            break
+                if chosen is None:
+                    for p in posts:
+                        if p.get('kind') in ('photo', 'video', 'document'):
+                            chosen = p
+                            break
+                if chosen is None and posts:
+                    chosen = posts[0]
+                if chosen:
+                    mid = int(chosen['message_id'])
+                    date = int(chosen['date'])
+                    sender = chosen.get('sender_id')
+                    candidates = [
+                        (PeerType.GROUP, src_id, src_ah),
+                        (PeerType.GROUP, src_id, None),
+                    ]
+                    if sender:
+                        candidates.append((PeerType.GROUP, int(sender), None))
+                        candidates.append((PeerType.PRIVATE, int(sender), None))
+                    for ptype, pid, ah in candidates:
+                        for info in _mk_info(ptype, pid, mid, date, ah):
+                            got = await _try_forward(info, f'ch/{ptype}/{pid}')
+                            if got:
+                                got['preview'] = str(chosen.get('preview') or '')[:80]
+                                got['source'] = 'channel_direct'
+                                return got
+            else:
+                errors.append(f'channel_hist: {raw.get("error")}')
 
         return {
             'ok': False,
-            'error': 'forward_failed_after_hop',
-            'tries': errors[:12],
-            'message_id': mid,
-            'message_date': date,
-            'bot_uid': bot_uid,
-            'ly_uid': ly_uid,
-            'posts_found': len(posts),
+            'error': 'forward_failed_after_hop' if hop_result else 'forward_failed',
+            'tries': errors[:16],
+            'hop': bool(hop_result),
+            'target': tgt_id,
         }
 
     return _run(_with_client(_fn))
