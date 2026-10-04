@@ -358,8 +358,8 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
     title = str(info.get('title') or '').strip()
     if title and title != '(no title)':
-        name = name or title
-    if not name:
+        name = title  # همیشه نام واقعی کانال از بله/دستیار
+    elif not name:
         name = link.lstrip('@') or link
 
     bio = str(info.get('bio') or info.get('description') or '')
@@ -831,8 +831,14 @@ def api_orders(request: HttpRequest) -> JsonResponse:
     items = []
     # مدیر فقط درخواست کانال خودش را می‌بیند. مشتری خط سفارش خودش را هم می‌گیرد
     # تا زمان پیشنهادی و لینک انتشار در مینی‌اپ گم نشود.
+    # اگر manager روی آیتم خالی باشد ولی کانال مال این کاربر است، باز هم ببیند
     for it in (
-        OrderItem.objects.filter(Q(manager=user) | Q(order__customer=user))
+        OrderItem.objects.filter(
+            Q(manager=user)
+            | Q(channel__manager=user)
+            | Q(tariff__group__manager=user)
+            | Q(order__customer=user)
+        )
         .select_related('order', 'channel', 'tariff', 'tariff__group', 'tariff__channel')
         .order_by('-id')[:80]
     ):
@@ -840,7 +846,11 @@ def api_orders(request: HttpRequest) -> JsonResponse:
         items.append({
             'id': it.id,
             'order_id': it.order_id,
-            'inbox': _item_in_manager_inbox(it, user) and it.order.status != 'waiting_banner',
+            'inbox': (
+                _item_in_manager_inbox(it, user)
+                or (it.channel_id and it.channel and it.channel.manager_id == user.id)
+                or (it.tariff_id and it.tariff and it.tariff.group_id and it.tariff.group and it.tariff.group.manager_id == user.id)
+            ) and it.order.status not in ('waiting_banner', 'draft', 'cancelled'),
             'owner': (
                 it.tariff.group.name
                 if it.tariff.group_id
@@ -1307,12 +1317,31 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
     )
 
     created, updated, pending = [], [], []
+    from integrations.bale_client import get_channel_info
+
     for ref in refs:
         key = _channel_ref_key(ref)
         if not key:
             continue
         link = f'ble.ir/{key}'
-        # match existing by link suffix or name
+        # نام واقعی از دستیار / API بله
+        display_name = key
+        peer = None
+        about = ''
+        try:
+            info = get_channel_info(link)
+            title = str(info.get('title') or '').strip()
+            if title and title not in ('(no title)',):
+                display_name = title[:200]
+            if info.get('id'):
+                try:
+                    peer = int(info['id'])
+                except (TypeError, ValueError):
+                    peer = None
+            about = str(info.get('bio') or info.get('description') or '')[:4000]
+        except Exception:
+            logger.exception('channel info on assign %s', key)
+
         ch = (
             Channel.objects.filter(link__icontains=key).order_by('-id').first()
             or Channel.objects.filter(name__iexact=key).first()
@@ -1320,14 +1349,24 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
         )
         if ch is None:
             ch = Channel(
-                name=key,
+                name=display_name,
                 link=link,
                 publish_mode=Channel.PUBLISH_MANUAL,
                 ownership_verified=True,
+                bale_peer_id=peer,
+                about=about,
             )
             created.append(key)
         else:
             updated.append(key)
+            # اگر هنوز فقط شناسه است، با عنوان واقعی عوض کن
+            if not ch.name or ch.name.lower() in (key, '@' + key, link):
+                ch.name = display_name
+            if peer and not ch.bale_peer_id:
+                ch.bale_peer_id = peer
+            if about and not ch.about:
+                ch.about = about
+        ch.link = link
         ch.ownership_verified = True
         if manager is not None:
             ch.manager = manager
@@ -1340,6 +1379,11 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
         try:
             from integrations.channel_stats import refresh_channel
             refresh_channel(ch)
+            ch.refresh_from_db()
+            # بعد از آمار، اگر عنوان بهتری در DB نبود همان display_name بماند
+            if ch.name in (key, '@' + key) and display_name != key:
+                ch.name = display_name
+                ch.save(update_fields=['name'])
         except Exception:
             logger.exception('stats after operator assign')
 
@@ -1371,11 +1415,13 @@ def api_operator_assignments(request: HttpRequest) -> JsonResponse:
     rows = []
     qs = Channel.objects.filter(ownership_verified=True).select_related('manager').order_by('-id')[:200]
     for ch in qs:
+        uname = (ch.manager.bale_username if ch.manager_id else '') or ch.pending_manager_username
         rows.append({
             'id': ch.id,
             'name': ch.name,
             'link': ch.link,
-            'manager_username': (ch.manager.bale_username if ch.manager_id else '') or ch.pending_manager_username,
+            'manager_username': uname,
+            'manager_label': (f'@{str(uname).lstrip("@")}' if uname else '—'),
             'pending': bool(ch.pending_manager_username and not ch.manager_id),
             'is_listed': bool(ch.is_listed),
         })

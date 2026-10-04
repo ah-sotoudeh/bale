@@ -176,7 +176,15 @@ def checkout(order: Order) -> Dict[str, Any]:
 
     for it in items:
         it.manager_status = 'pending'
-        it.save(update_fields=['manager_status'])
+        # مالک کانال را تازه از DB بخوان (انتساب پشتیبان / claim)
+        if it.channel_id:
+            try:
+                it.channel.refresh_from_db()
+            except Exception:
+                pass
+            if it.channel and it.channel.manager_id and it.manager_id != it.channel.manager_id:
+                it.manager_id = it.channel.manager_id
+        it.save(update_fields=['manager_status', 'manager'] if it.manager_id else ['manager_status'])
 
     banner = order.customer_banner
     ready = bool(banner and banner.from_linkbank)
@@ -194,21 +202,44 @@ def checkout(order: Order) -> Dict[str, Any]:
             )
         return {'ok': True, 'order': order, 'count': len(items), 'held_for_banner': True}
 
+    # اتصال کانال‌های ازپیش‌انتساب‌شده قبل از نوتیف
+    try:
+        from miniapp.api import claim_pending_channels
+        for it in items:
+            ch = it.channel
+            if ch and ch.pending_manager_username and not ch.manager_id:
+                # هنوز claim نشده — نوتیف بعداً با ورود مدیر
+                pass
+            if it.manager_id is None and ch and ch.manager_id:
+                it.manager = ch.manager
+                it.save(update_fields=['manager'])
+    except Exception:
+        logger.exception('claim before notify')
+
     deadline = timezone.now() + timedelta(hours=MANAGER_HOURS)
     order.status = 'waiting_managers'
     order.managers_deadline = deadline
-    order.save()
+    order.save(update_fields=['status', 'managers_deadline'])
 
     for it in items:
+        if it.manager_id is None and it.channel_id and it.channel and it.channel.manager_id:
+            it.manager = it.channel.manager
+            it.save(update_fields=['manager'])
         _notify_manager(order, it)
 
     return {'ok': True, 'order': order, 'deadline': deadline, 'count': len(items)}
 
 
 def _notify_manager(order: Order, item: OrderItem) -> None:
-    if not item.manager or not item.manager.bale_user_id:
+    manager = item.manager
+    if manager is None and item.channel_id and item.channel and item.channel.manager_id:
+        manager = item.channel.manager
+        if manager and not item.manager_id:
+            item.manager = manager
+            item.save(update_fields=['manager'])
+    if not manager or not manager.bale_user_id:
         return
-    mid = item.manager.bale_user_id
+    mid = manager.bale_user_id
     if order.banner_message_id and order.banner_from_chat_id:
         try:
             bc.forward_message(mid, order.banner_from_chat_id, int(order.banner_message_id))
