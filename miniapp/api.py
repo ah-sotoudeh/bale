@@ -1447,3 +1447,115 @@ def api_operator_unassign(request: HttpRequest) -> JsonResponse:
     ch.pending_manager_username = ''
     ch.save(update_fields=['manager', 'ownership_verified', 'pending_manager_username'])
     return JsonResponse({'ok': True})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: تست ارسال بنر به کانال بدون سفارش/پرداخت."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=403)
+    body = _json_body(request)
+    ch_raw = body.get('channel') or body.get('channel_id') or body.get('link') or ''
+    ch = None
+    if str(ch_raw).isdigit():
+        ch = Channel.objects.filter(id=int(ch_raw)).first()
+    if ch is None:
+        key = _channel_ref_key(str(ch_raw))
+        if key:
+            ch = (
+                Channel.objects.filter(link__icontains=key).order_by('-id').first()
+                or Channel.objects.filter(name__iexact=key).first()
+            )
+    if ch is None:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+
+    from_chat = str(body.get('from_chat_id') or '').strip()
+    msg_id = body.get('message_id')
+    caption = str(body.get('caption') or '')
+    banner_id = body.get('banner_id')
+
+    if banner_id:
+        from orders.models import CustomerBanner
+        bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+        if not bn:
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'بنر پیدا نشد.'}, status=404)
+        if bn.from_linkbank and bn.linkbank_message_id:
+            from_chat = str(bn.linkbank_chat_id or from_chat)
+            msg_id = bn.linkbank_message_id
+        else:
+            from_chat = str(bn.storage_chat_id or from_chat)
+            msg_id = bn.storage_message_id
+        caption = caption or (bn.caption or '')
+
+    if not from_chat or not msg_id:
+        from orders.models import CustomerBanner
+        bn = (
+            CustomerBanner.objects.filter(from_linkbank=True)
+            .exclude(linkbank_message_id='')
+            .order_by('-id')
+            .first()
+        )
+        if bn:
+            from_chat = str(bn.linkbank_chat_id or '')
+            msg_id = bn.linkbank_message_id
+            caption = caption or (bn.caption or '')
+            banner_id = bn.id
+
+    if not from_chat or not msg_id:
+        return JsonResponse({
+            'ok': False,
+            'error': 'bad_fields',
+            'message': 'منبع بنر لازم است: banner_id یا from_chat_id + message_id',
+        }, status=400)
+
+    mode = str(body.get('mode') or '').strip().lower() or None
+    if mode and mode not in ('bot', 'linkyar', 'manual'):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'mode باید bot یا linkyar باشد.'}, status=400)
+
+    from orders.publish import test_publish_to_channel
+    try:
+        result = test_publish_to_channel(ch, from_chat, int(msg_id), mode=mode, caption=caption)
+    except Exception as e:
+        logger.exception('test_publish')
+        return JsonResponse({'ok': False, 'error': 'exception', 'message': str(e)[:200]}, status=500)
+    result['banner_id'] = banner_id
+    result['from_chat_id'] = from_chat
+    result['message_id'] = int(msg_id)
+    return JsonResponse(result)
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
+    """بنرهای تأییدشده و کانال‌ها برای تست ارسال پشتیبان."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+    from orders.models import CustomerBanner
+    rows = []
+    for bn in CustomerBanner.objects.filter(from_linkbank=True).order_by('-id')[:30]:
+        rows.append({
+            'id': bn.id,
+            'title': bn.display_title(),
+            'caption': (bn.caption or '')[:80],
+            'has_source': bool(bn.linkbank_message_id or bn.storage_message_id),
+        })
+    channels = []
+    for ch in Channel.objects.order_by('-id')[:80]:
+        channels.append({
+            'id': ch.id,
+            'name': ch.name,
+            'link': ch.link,
+            'publish_mode': ch.publish_mode,
+            'bot_is_admin': bool(ch.bot_is_admin),
+            'linkyar_is_admin': bool(ch.linkyar_is_admin),
+        })
+    return JsonResponse({'ok': True, 'banners': rows, 'channels': channels})

@@ -65,4 +65,6 @@ urlpatterns = [
     path('api/operator/assign-manager', api.api_operator_assign_manager),
     path('api/operator/assignments', api.api_operator_assignments),
     path('api/operator/unassign', api.api_operator_unassign),
+    path('api/operator/test-publish', api.api_operator_test_publish),
+    path('api/operator/test-banners', api.api_operator_test_banners),
 ]

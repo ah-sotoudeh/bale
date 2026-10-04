@@ -51,8 +51,22 @@ def _linkyar_numeric_id() -> Optional[int]:
 
 
 def channel_ref(ch: Channel) -> str:
+    """مرجع مناسب برای Bot API: ترجیح @username، بعد chat_id عددی، بعد link."""
     link = (ch.link or '').strip()
-    return link or str(ch.id)
+    if link:
+        s = link.replace('https://', '').replace('http://', '')
+        for prefix in ('ble.ir/', 'bale.ai/'):
+            if s.lower().startswith(prefix):
+                s = s[len(prefix):].lstrip('/')
+                break
+        s = s.split('/')[0].strip()
+        if s:
+            if not s.startswith('@') and not s.lstrip('-').isdigit():
+                s = '@' + s
+            return s
+    if getattr(ch, 'bale_peer_id', None):
+        return str(ch.bale_peer_id)
+    return str(ch.id)
 
 
 def check_linkyar_admin(ch: Channel) -> str:
@@ -305,7 +319,10 @@ def publish_due_items() -> Dict[str, int]:
                     if order.customer.bale_user_id:
                         bc.send_message(order.customer.bale_user_id, f'✅ بنر در «{ch.name}» ارسال شد.')
                 else:
-                    _fail_one_channel(item, ch, 'ارسال ناموفق')
+                    api_err = (res.get('api') or {})
+                    reason = str(api_err.get('description') or api_err.get('error') or 'ارسال ناموفق')[:200]
+                    logger.warning('bot publish fail item=%s ch=%s api=%s', item.id, ch.id, api_err)
+                    _fail_one_channel(item, ch, reason)
                     failed += 1
                 continue
 
@@ -318,7 +335,7 @@ def publish_due_items() -> Dict[str, int]:
                     _fail_one_channel(item, ch, 'لینک‌یار مدیر کانال نیست')
                     failed += 1
                     continue
-                _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '')
+                ly_res = _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '')
                 time.sleep(2)
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [ly_id] if x])
                 if not (meta and meta.get('permalink')):
@@ -326,8 +343,16 @@ def publish_due_items() -> Dict[str, int]:
                 if meta and meta.get('permalink'):
                     any_ok = True
                     _finalize_channel_ok(item, ch, meta, posts)
+                elif ly_res.get('ok'):
+                    any_ok = True
+                    posts.append({'channel_id': ch.id, 'ref': channel_ref(ch), 'permalink': ''})
+                    if order.customer.bale_user_id:
+                        bc.send_message(order.customer.bale_user_id, f'✅ بنر در «{ch.name}» ارسال شد.')
                 else:
-                    _fail_one_channel(item, ch, 'تأیید لینک‌یار ناموفق')
+                    api_err = (ly_res.get('api') or {})
+                    reason = str(api_err.get('description') or api_err.get('error') or 'تأیید لینک‌یار ناموفق')[:200]
+                    logger.warning('linkyar publish fail item=%s ch=%s api=%s', item.id, ch.id, api_err)
+                    _fail_one_channel(item, ch, reason)
                     failed += 1
 
         if retry_later and not any_ok and not any_manual:
@@ -455,3 +480,66 @@ def delete_expired_posts() -> int:
         item.channel_message_id = ''
         item.save(update_fields=['channel_message_id'])
     return n
+
+
+def test_publish_to_channel(
+    channel: Channel,
+    from_chat_id: str,
+    message_id: int,
+    mode: str | None = None,
+    caption: str = '',
+) -> Dict[str, Any]:
+    """ارسال تستی بنر به یک کانال — بدون سفارش/پرداخت. برای پشتیبان."""
+    mode = mode or (channel.publish_mode or Channel.PUBLISH_BOT)
+    ref = channel_ref(channel)
+    result: Dict[str, Any] = {
+        'ok': False,
+        'mode': mode,
+        'channel_id': channel.id,
+        'channel_name': channel.name,
+        'channel_ref': ref,
+    }
+    if mode == Channel.PUBLISH_MANUAL:
+        result['error'] = 'حالت انتشار این کانال دستی است؛ ارسال خودکار ندارد.'
+        return result
+
+    if mode == Channel.PUBLISH_BOT:
+        state = check_bot_admin(channel)
+        result['admin_state'] = state
+        if state != 'admin':
+            result['error'] = (
+                'لینک‌ساز مدیر کانال نیست' if state == 'not_admin'
+                else 'وضعیت ادمین لینک‌ساز مشخص نشد (شبکه؟)'
+            )
+            return result
+        res = _post_via_bot(channel, str(from_chat_id), int(message_id), caption or '')
+        result['api'] = res.get('api')
+        result['ok'] = bool(res.get('ok'))
+        if not result['ok']:
+            api = res.get('api') or {}
+            result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
+        else:
+            result['message'] = f'ارسال با لینک‌ساز به «{channel.name}» انجام شد.'
+        return result
+
+    if mode == Channel.PUBLISH_LINKYAR:
+        state = check_linkyar_admin(channel)
+        result['admin_state'] = state
+        if state != 'admin':
+            result['error'] = (
+                'لینک‌یار مدیر کانال نیست' if state == 'not_admin'
+                else 'وضعیت ادمین لینک‌یار مشخص نشد'
+            )
+            return result
+        res = _post_via_linkyar(channel, str(from_chat_id), int(message_id), caption or '')
+        result['api'] = res.get('api')
+        result['ok'] = bool(res.get('ok'))
+        if not result['ok']:
+            api = res.get('api') or {}
+            result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
+        else:
+            result['message'] = f'ارسال با لینک‌یار به «{channel.name}» انجام شد.'
+        return result
+
+    result['error'] = f'حالت انتشار ناشناخته: {mode}'
+    return result

@@ -178,7 +178,19 @@ def refresh_channel(channel) -> Dict[str, Any]:
         if not channel.description:
             channel.description = channel.about
     title = (reading.get('title') or '').strip()
-    if title and (not channel.name or channel.name == '(no title)'):
+    link = (channel.link or '').strip().lower()
+    bare = link.replace('https://', '').replace('http://', '')
+    for prefix in ('ble.ir/', 'bale.ai/'):
+        if bare.startswith(prefix):
+            bare = bare[len(prefix):]
+            break
+    bare = bare.split('/')[0].lstrip('@').strip()
+    name_looks_like_id = (
+        not channel.name
+        or channel.name == '(no title)'
+        or (bare and channel.name.lstrip('@').lower() == bare)
+    )
+    if title and name_looks_like_id:
         channel.name = title[:200]
     lang_src = f"{about} {title}"
     channel.language = _guess_lang(lang_src)
