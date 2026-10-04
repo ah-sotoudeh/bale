@@ -188,12 +188,99 @@ def _notify_customer_executed(item: OrderItem, ch: Channel, permalink: str) -> N
         bc.send_message(cust, f'✅ بنر شما در «{ch.name}» منتشر شد.\n🔗 {permalink}')
 
 
-def _post_via_bot(ch: Channel, from_chat_id: str, message_id: int, caption: str = '') -> Dict[str, Any]:
-    ref = channel_ref(ch)
-    result = bc.forward_message(ref, from_chat_id, int(message_id))
-    if not result.get('ok'):
-        result = bc.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
-    return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
+def _bot_chat_refs(ch: Channel) -> List[str]:
+    """ترتیب امتحان chat_id برای Bot API."""
+    refs: List[str] = []
+    primary = channel_ref(ch)
+    if primary:
+        refs.append(primary)
+    if getattr(ch, 'bale_peer_id', None):
+        refs.append(str(ch.bale_peer_id))
+    link = (ch.link or '').strip()
+    if link and link not in refs:
+        refs.append(link)
+    # unique preserve order
+    seen = set()
+    out = []
+    for r in refs:
+        if r and r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def _local_banner_path(banner_id: int | None) -> tuple:
+    """(path, kind, caption) یا (None, '', '')."""
+    if not banner_id:
+        return None, '', ''
+    try:
+        from orders.banner_media import ensure_local_file, stored_banner_file
+        from orders.models import CustomerBanner
+
+        bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+        if not bn:
+            return None, '', ''
+        path = ensure_local_file(bn) or stored_banner_file(bn.id)
+        mk = (bn.media_kind or 'photo').lower()
+        if mk in ('video', 'animation'):
+            kind = 'video'
+        elif mk == 'document':
+            kind = 'document'
+        else:
+            kind = 'photo'
+        return path, kind, (bn.caption or '')
+    except Exception:
+        logger.exception('local banner path')
+        return None, '', ''
+
+
+def _post_via_bot(
+    ch: Channel,
+    from_chat_id: str,
+    message_id: int,
+    caption: str = '',
+    banner_id: int | None = None,
+) -> Dict[str, Any]:
+    """ارسال با لینک‌ساز: forward → (اختیاری copy) → آپلود فایل محلی."""
+    last: Dict[str, Any] = {'ok': False, 'error': 'send_failed'}
+    used_ref = channel_ref(ch)
+
+    for ref in _bot_chat_refs(ch):
+        used_ref = ref
+        result = bc.forward_message(ref, str(from_chat_id), int(message_id))
+        if result.get('ok'):
+            return {'api': result, 'channel_ref': ref, 'ok': True, 'method': 'forward'}
+        last = result if isinstance(result, dict) else last
+        # copyMessage در بله اغلب 404 است — فقط اگر forward شکست خورد امتحان نرم
+        copied = bc.copy_message(ref, str(from_chat_id), int(message_id), caption=caption or None)
+        if copied.get('ok'):
+            return {'api': copied, 'channel_ref': ref, 'ok': True, 'method': 'copy'}
+        if copied.get('error') and 'not_supported' not in str(copied.get('error')):
+            last = copied
+
+    # Fallback: فایل محلی بنر
+    path, kind, cap = _local_banner_path(banner_id)
+    if not caption and cap:
+        caption = cap
+    if path is not None and path.exists():
+        for ref in _bot_chat_refs(ch):
+            if kind == 'video':
+                up = bc.send_video(ref, str(path), caption=caption or '')
+            elif kind == 'document':
+                up = bc.send_document(ref, str(path), caption=caption or '')
+            else:
+                up = bc.send_photo(ref, str(path), caption=caption or '')
+            if up.get('ok'):
+                return {
+                    'api': up,
+                    'channel_ref': ref,
+                    'ok': True,
+                    'method': 'upload_local',
+                    'file': path.name,
+                }
+            last = up if isinstance(up, dict) else last
+
+    return {'api': last, 'channel_ref': used_ref, 'ok': False, 'method': 'failed'}
 
 
 def _post_via_linkyar(
@@ -204,11 +291,29 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """ارسال با لینک‌یار: اول فوروارد؛ اگر date/peer نبود از فایل محلی بنر آپلود."""
+    """ارسال با لینک‌یار: اولویت با آپلود فایل محلی بنر (قابل اعتماد)، بعد فوروارد."""
     ref = channel_ref(ch)
+    path, kind, cap = _local_banner_path(banner_id)
+    if not caption and cap:
+        caption = cap
+
+    # 1) آپلود فایل محلی — مطمئن‌ترین راه برای رسانه
+    if path is not None and path.exists():
+        up = ly.send_local_file_to_channel(ref, str(path), caption=caption or '', kind=kind)
+        if up.get('ok'):
+            return {
+                'api': up,
+                'channel_ref': ref,
+                'ok': True,
+                'method': 'upload_local',
+                'file': path.name,
+            }
+        logger.warning('linkyar upload_local failed: %s', up)
+
+    # 2) فوروارد از کانال مبدأ (نیاز به peer+date داخلی)
     result = ly.copy_message(
         ref,
-        from_chat_id,
+        str(from_chat_id),
         int(message_id),
         caption=caption or None,
         message_date=int(message_date or 0),
@@ -216,44 +321,15 @@ def _post_via_linkyar(
     if result.get('ok'):
         return {'api': result, 'channel_ref': ref, 'ok': True, 'method': 'forward'}
 
-    # Fallback: آپلود فایل بنر از دیسک
-    path = None
-    kind = 'photo'
-    if banner_id:
-        try:
-            from orders.banner_media import ensure_local_file, stored_banner_file
-            from orders.models import CustomerBanner
-
-            bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
-            if bn:
-                path = ensure_local_file(bn) or stored_banner_file(bn.id)
-                mk = (bn.media_kind or 'photo').lower()
-                if mk in ('video', 'animation'):
-                    kind = 'video'
-                elif mk == 'document':
-                    kind = 'document'
-                else:
-                    kind = 'photo'
-                if not caption and bn.caption:
-                    caption = bn.caption
-        except Exception:
-            logger.exception('linkyar local banner load')
-
-    if path is not None and path.exists():
-        up = ly.send_local_file_to_channel(ref, str(path), caption=caption or '', kind=kind)
-        return {
-            'api': up,
-            'channel_ref': ref,
-            'ok': bool(up.get('ok')),
-            'method': 'upload_local',
-            'file': str(path.name),
-        }
-
+    err = str((result or {}).get('error') or (result or {}).get('hint') or 'ارسال لینک‌یار ناموفق')
+    if path is None:
+        err = err + ' — فایل محلی بنر هم موجود نیست؛ بنر را یک‌بار در مینی‌اپ باز کنید.'
     return {
         'api': result,
         'channel_ref': ref,
         'ok': False,
-        'method': 'forward_failed',
+        'method': 'failed',
+        'error': err[:300],
     }
 
 
@@ -357,7 +433,7 @@ def publish_due_items() -> Dict[str, int]:
                     _fail_one_channel(item, ch, 'لینک‌ساز مدیر کانال نیست')
                     failed += 1
                     continue
-                res = _post_via_bot(ch, from_chat, msg_id, order.banner_caption or '')
+                res = _post_via_bot(ch, from_chat, msg_id, order.banner_caption or '', banner_id=(order.customer_banner_id or None))
                 bot_mid = ((res.get('api') or {}).get('result') or {}).get('message_id')
                 time.sleep(1.5)
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [bot_id] if x])
@@ -578,9 +654,10 @@ def test_publish_to_channel(
                 else 'وضعیت ادمین لینک‌ساز مشخص نشد (شبکه؟)'
             )
             return result
-        res = _post_via_bot(channel, str(from_chat_id), int(message_id), caption or '')
+        res = _post_via_bot(channel, str(from_chat_id), int(message_id), caption or '', banner_id=banner_id)
         result['api'] = res.get('api')
         result['ok'] = bool(res.get('ok'))
+        result['method'] = res.get('method')
         if not result['ok']:
             api = res.get('api') or {}
             result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
@@ -610,7 +687,7 @@ def test_publish_to_channel(
         if not result['ok']:
             api = res.get('api') or {}
             result['error'] = str(
-                api.get('description') or api.get('error') or api.get('hint') or 'ارسال ناموفق'
+                res.get('error') or api.get('description') or api.get('error') or api.get('hint') or 'ارسال ناموفق'
             )[:300]
             return result
         api = res.get('api') or {}

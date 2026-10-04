@@ -260,22 +260,141 @@ def copy_message(
     message_id: int,
     caption: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Bale may not support copyMessage (404). Caller should prefer forward_message."""
     url = _bot_url('copyMessage')
     payload: Dict[str, Any] = {
         'chat_id': to_chat_id,
         'from_chat_id': from_chat_id,
-        'message_id': message_id,
+        'message_id': int(message_id),
     }
-    if caption is not None:
+    if caption:
         payload['caption'] = caption
     try:
         r = requests.post(url, json=payload, timeout=30)
-        r.raise_for_status()
-        return r.json()
+        if r.status_code == 404:
+            return {'ok': False, 'error': 'copyMessage_not_supported', '_http': 404}
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return {
+                'ok': False,
+                'error': str((body or {}).get('description') or f'http_{r.status_code}')[:200],
+                '_http': r.status_code,
+            }
+        data = r.json() if r.content else {}
+        if isinstance(data, dict) and 'ok' not in data:
+            data['ok'] = True
+        return data if isinstance(data, dict) else {'ok': False, 'error': 'bad_response'}
     except requests.RequestException as e:
-        logger.exception('copy_message failed')
+        logger.warning('copy_message failed: %s', e)
         return {'error': _redact(str(e)), 'ok': False}
 
+
+
+
+def send_photo(
+    chat_id: str,
+    file_path: str,
+    caption: str = '',
+) -> Dict[str, Any]:
+    """ارسال عکس از فایل محلی با Bot API."""
+    url = _bot_url('sendPhoto')
+    path = Path(file_path)
+    if not path.is_file():
+        return {'ok': False, 'error': 'file_missing'}
+    try:
+        with path.open('rb') as fh:
+            files = {'photo': (path.name, fh)}
+            data: Dict[str, Any] = {'chat_id': str(chat_id)}
+            if caption:
+                data['caption'] = caption
+            r = requests.post(url, data=data, files=files, timeout=120)
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return {
+                'ok': False,
+                'error': str((body or {}).get('description') or f'http_{r.status_code}')[:200],
+            }
+        data = r.json() if r.content else {}
+        if isinstance(data, dict) and 'ok' not in data:
+            data['ok'] = True
+        return data if isinstance(data, dict) else {'ok': False, 'error': 'bad_response'}
+    except requests.RequestException as e:
+        logger.exception('send_photo failed')
+        return {'ok': False, 'error': _redact(str(e))}
+
+
+def send_document(
+    chat_id: str,
+    file_path: str,
+    caption: str = '',
+) -> Dict[str, Any]:
+    url = _bot_url('sendDocument')
+    path = Path(file_path)
+    if not path.is_file():
+        return {'ok': False, 'error': 'file_missing'}
+    try:
+        with path.open('rb') as fh:
+            files = {'document': (path.name, fh)}
+            data: Dict[str, Any] = {'chat_id': str(chat_id)}
+            if caption:
+                data['caption'] = caption
+            r = requests.post(url, data=data, files=files, timeout=180)
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return {
+                'ok': False,
+                'error': str((body or {}).get('description') or f'http_{r.status_code}')[:200],
+            }
+        data = r.json() if r.content else {}
+        if isinstance(data, dict) and 'ok' not in data:
+            data['ok'] = True
+        return data if isinstance(data, dict) else {'ok': False, 'error': 'bad_response'}
+    except requests.RequestException as e:
+        logger.exception('send_document failed')
+        return {'ok': False, 'error': _redact(str(e))}
+
+
+def send_video(
+    chat_id: str,
+    file_path: str,
+    caption: str = '',
+) -> Dict[str, Any]:
+    url = _bot_url('sendVideo')
+    path = Path(file_path)
+    if not path.is_file():
+        return {'ok': False, 'error': 'file_missing'}
+    try:
+        with path.open('rb') as fh:
+            files = {'video': (path.name, fh)}
+            data: Dict[str, Any] = {'chat_id': str(chat_id)}
+            if caption:
+                data['caption'] = caption
+            r = requests.post(url, data=data, files=files, timeout=180)
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return {
+                'ok': False,
+                'error': str((body or {}).get('description') or f'http_{r.status_code}')[:200],
+            }
+        data = r.json() if r.content else {}
+        if isinstance(data, dict) and 'ok' not in data:
+            data['ok'] = True
+        return data if isinstance(data, dict) else {'ok': False, 'error': 'bad_response'}
+    except requests.RequestException as e:
+        logger.exception('send_video failed')
+        return {'ok': False, 'error': _redact(str(e))}
 
 def edit_message_caption(
     chat_id: str,
