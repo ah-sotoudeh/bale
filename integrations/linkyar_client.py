@@ -775,33 +775,67 @@ def copy_message(
     caption: Optional[str] = None,
     message_date: int = 0,
 ) -> Dict[str, Any]:
-    """کپی/فوروارد کامل پیام (رسانه + متن). هرگز فقط caption متنی نفرست.
+    """کپی/فوروارد کامل پیام (رسانه + متن).
 
-    اگر message_date نباشد از تاریخچه کانال مبدأ بازیابی می‌شود.
+    شناسه Bot API با شناسه داخلی لینک‌یار یکی نیست؛ اگر date نباشد از تاریخچه
+    مبدأ با تطبیق id یا نزدیک‌ترین پست رسانه‌ای بازیابی می‌شود.
     """
     try:
         from_peer = int(str(from_chat_id)) if str(from_chat_id).lstrip('-').isdigit() else 0
     except ValueError:
         from_peer = 0
     md = int(message_date or 0)
+    resolved_mid = int(message_id)
 
     if not from_peer or not md:
-        # بازیابی peer و date از تاریخچه مبدأ
         try:
-            hist = load_channel_history(str(from_chat_id), limit=80)
+            hist = load_channel_history(str(from_chat_id), limit=100)
             if hist.get('ok'):
                 if not from_peer and hist.get('peer_id'):
                     try:
                         from_peer = int(hist['peer_id'])
                     except (TypeError, ValueError):
                         pass
-                for post in (hist.get('posts') or []):
+                posts = list(hist.get('posts') or [])
+                # 1) تطبیق دقیق message_id
+                for post in posts:
                     try:
                         if int(post.get('message_id') or 0) == int(message_id):
                             md = int(post.get('date') or 0) or md
+                            resolved_mid = int(post.get('message_id') or message_id)
                             break
                     except (TypeError, ValueError):
                         continue
+                # 2) اگر id بات با داخلی یکی نبود: آخرین پست دارای رسانه
+                if not md and posts:
+                    for post in posts:
+                        try:
+                            pmid = int(post.get('message_id') or 0)
+                            pdate = int(post.get('date') or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if not pmid or not pdate:
+                            continue
+                        # اولویت به پست‌هایی که عکس/ویدیو دارند
+                        kind = str(post.get('kind') or post.get('type') or post.get('media') or '')
+                        has_media = bool(post.get('has_media') or post.get('photo') or post.get('video') or 'photo' in kind.lower() or 'video' in kind.lower())
+                        if has_media or not any(p.get('has_media') or p.get('photo') for p in posts if isinstance(p, dict)):
+                            md = pdate
+                            resolved_mid = pmid
+                            if has_media:
+                                break
+                    # اگر هنوز هیچ: اولین پست معتبر
+                    if not md:
+                        for post in posts:
+                            try:
+                                pmid = int(post.get('message_id') or 0)
+                                pdate = int(post.get('date') or 0)
+                            except (TypeError, ValueError):
+                                continue
+                            if pmid and pdate:
+                                md = pdate
+                                resolved_mid = pmid
+                                break
         except Exception as e:
             logger.warning('copy_message history resolve failed: %s', e)
 
@@ -809,25 +843,27 @@ def copy_message(
         return {
             'ok': False,
             'error': 'need_from_peer_and_date',
-            'hint': 'تاریخ/شناسه مبدأ برای فوروارد رسانه لازم است؛ فقط متن ارسال نمی‌شود.',
+            'hint': 'تاریخ/شناسه مبدأ برای فوروارد پیدا نشد.',
             'from_chat_id': str(from_chat_id),
             'message_id': int(message_id),
         }
 
-    # GROUP source (کانال لینک‌بانک) معمولاً peer type 2
+    last: Dict[str, Any] = {'ok': False, 'error': 'forward_failed'}
     for ptype in (2, 1):
         result = forward_to_channel(
             str(to_chat_id),
             from_peer_id=from_peer,
-            message_id=int(message_id),
+            message_id=int(resolved_mid),
             message_date=int(md),
             from_peer_type=ptype,
         )
+        last = result if isinstance(result, dict) else last
         if result.get('ok'):
             result['message_date'] = int(md)
             result['from_peer_id'] = from_peer
+            result['resolved_message_id'] = int(resolved_mid)
             return result
-    return result if isinstance(result, dict) else {'ok': False, 'error': 'forward_failed'}
+    return last
 
 
 def forward_message(

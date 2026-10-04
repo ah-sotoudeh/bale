@@ -1532,6 +1532,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
             mode=mode,
             caption=caption,
             delete_after_minutes=delete_after,
+            banner_id=int(banner_id) if banner_id else None,
         )
     except Exception as e:
         logger.exception('test_publish')

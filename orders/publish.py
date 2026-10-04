@@ -202,7 +202,9 @@ def _post_via_linkyar(
     message_id: int,
     caption: str = '',
     message_date: int = 0,
+    banner_id: int | None = None,
 ) -> Dict[str, Any]:
+    """ارسال با لینک‌یار: اول فوروارد؛ اگر date/peer نبود از فایل محلی بنر آپلود."""
     ref = channel_ref(ch)
     result = ly.copy_message(
         ref,
@@ -211,7 +213,48 @@ def _post_via_linkyar(
         caption=caption or None,
         message_date=int(message_date or 0),
     )
-    return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
+    if result.get('ok'):
+        return {'api': result, 'channel_ref': ref, 'ok': True, 'method': 'forward'}
+
+    # Fallback: آپلود فایل بنر از دیسک
+    path = None
+    kind = 'photo'
+    if banner_id:
+        try:
+            from orders.banner_media import ensure_local_file, stored_banner_file
+            from orders.models import CustomerBanner
+
+            bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+            if bn:
+                path = ensure_local_file(bn) or stored_banner_file(bn.id)
+                mk = (bn.media_kind or 'photo').lower()
+                if mk in ('video', 'animation'):
+                    kind = 'video'
+                elif mk == 'document':
+                    kind = 'document'
+                else:
+                    kind = 'photo'
+                if not caption and bn.caption:
+                    caption = bn.caption
+        except Exception:
+            logger.exception('linkyar local banner load')
+
+    if path is not None and path.exists():
+        up = ly.send_local_file_to_channel(ref, str(path), caption=caption or '', kind=kind)
+        return {
+            'api': up,
+            'channel_ref': ref,
+            'ok': bool(up.get('ok')),
+            'method': 'upload_local',
+            'file': str(path.name),
+        }
+
+    return {
+        'api': result,
+        'channel_ref': ref,
+        'ok': False,
+        'method': 'forward_failed',
+    }
 
 
 def _fail_one_channel(item: OrderItem, ch: Channel, reason: str) -> None:
@@ -348,7 +391,7 @@ def publish_due_items() -> Dict[str, int]:
                     _fail_one_channel(item, ch, 'لینک‌یار مدیر کانال نیست')
                     failed += 1
                     continue
-                ly_res = _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '')
+                ly_res = _post_via_linkyar(ch, from_chat, msg_id, order.banner_caption or '', banner_id=(order.customer_banner_id or None))
                 time.sleep(2)
                 meta = recover_permalink(ch, min_date_ms=t0_ms, preferred_senders=[x for x in [ly_id] if x])
                 if not (meta and meta.get('permalink')):
@@ -503,6 +546,7 @@ def test_publish_to_channel(
     caption: str = '',
     message_date: int = 0,
     delete_after_minutes: int = 0,
+    banner_id: int | None = None,
 ) -> Dict[str, Any]:
     """ارسال تستی بنر به یک کانال — بدون سفارش/پرداخت. برای پشتیبان.
 
@@ -559,6 +603,7 @@ def test_publish_to_channel(
             int(message_id),
             caption or '',
             message_date=int(message_date or 0),
+            banner_id=banner_id,
         )
         result['api'] = res.get('api')
         result['ok'] = bool(res.get('ok'))
@@ -569,11 +614,15 @@ def test_publish_to_channel(
             )[:300]
             return result
         api = res.get('api') or {}
-        posted_ly_mid = api.get('message_id') or (api.get('result') if isinstance(api.get('result'), int) else None)
+        posted_ly_mid = api.get('message_id')
+        if posted_ly_mid is None and isinstance(api.get('result'), int):
+            posted_ly_mid = api.get('result')
         posted_ly_date = int(api.get('message_date') or api.get('date') or 0)
         result['linkyar_message_id'] = posted_ly_mid
         result['linkyar_message_date'] = posted_ly_date
-        result['message'] = f'ارسال با لینک‌یار به «{channel.name}» انجام شد (رسانه + متن).'
+        result['method'] = res.get('method')
+        method_fa = 'فوروارد' if res.get('method') == 'forward' else 'آپلود فایل'
+        result['message'] = f'ارسال با لینک‌یار به «{channel.name}» انجام شد ({method_fa}).'
     else:
         result['error'] = f'حالت انتشار ناشناخته: {mode}'
         return result
