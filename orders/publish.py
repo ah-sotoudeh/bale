@@ -274,9 +274,9 @@ def _resolve_linkbank_forward_source(
     ly_mid = 0
     ly_date = 0
     hist_err = ''
+    hist = None
     try:
         # لینک‌بانک را با چند شکل امتحان کن
-        hist = None
         for ref_try in (src_chat, lb, str(lb).lstrip('@'), '@' + str(lb).lstrip('@')):
             if not ref_try:
                 continue
@@ -343,15 +343,23 @@ def _resolve_linkbank_forward_source(
         logger.exception('resolve linkbank history')
         hist_err = str(e)[:120]
 
+    ly_ah = None
+    if hist and hist.get('ok') and hist.get('access_hash') is not None:
+        try:
+            ly_ah = int(hist['access_hash'])
+        except (TypeError, ValueError):
+            ly_ah = None
     return {
         'linkbank_ref': lb,
         'bot_from_chat_id': bot_from or lb,
         'bot_message_id': src_mid,
         'ly_peer_id': ly_peer,
+        'ly_access_hash': ly_ah,
         'ly_message_id': ly_mid,
         'ly_message_date': ly_date,
         'caption': caption,
         'hist_error': hist_err,
+        'source_channel_ref': str(src_chat or lb),
     }
 
 
@@ -437,12 +445,14 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد یک‌بار از لینک‌بانک با لینک‌یار (peer+date از history.messages)."""
+    """فوروارد واقعی از لینک‌بانک با لینک‌یار (peer + access_hash + date)."""
     ref = channel_ref(ch)
     src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
     ly_peer = int(src.get('ly_peer_id') or 0)
     ly_mid = int(src.get('ly_message_id') or 0)
     ly_date = int(message_date or src.get('ly_message_date') or 0)
+    ly_ah = src.get('ly_access_hash')
+    src_ref = str(src.get('source_channel_ref') or src.get('linkbank_ref') or '')
 
     if not ly_peer or not ly_mid or not ly_date:
         return {
@@ -452,49 +462,48 @@ def _post_via_linkyar(
             'api': {
                 'error': 'need_from_peer_and_date',
                 'hist_error': src.get('hist_error'),
-                'resolved': {
-                    'peer': ly_peer,
-                    'mid': ly_mid,
-                    'date': ly_date,
-                },
+                'resolved': {'peer': ly_peer, 'mid': ly_mid, 'date': ly_date, 'ah': ly_ah},
             },
             'error': (
-                'فوروارد لینک‌یار: پیام در تاریخچه لینک‌بانک پیدا نشد '
+                f'فوروارد لینک‌یار: پیام در تاریخچه لینک‌بانک پیدا نشد '
                 f'(peer={ly_peer}, mid={ly_mid}, date={ly_date})'
                 + (f' — {src.get("hist_error")}' if src.get('hist_error') else '')
             )[:300],
         }
 
-    last: Dict[str, Any] = {'ok': False, 'error': 'forward_failed'}
-    for ptype in (2, 1):
-        result = ly.forward_to_channel(
-            ref,
-            from_peer_id=ly_peer,
-            message_id=int(ly_mid),
-            message_date=int(ly_date),
-            from_peer_type=ptype,
-        )
-        last = result if isinstance(result, dict) else last
-        if result.get('ok'):
-            out = dict(result)
-            out['message_date'] = ly_date
-            out['message_id'] = ly_mid
-            return {
-                'api': out,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'forward',
-                'from_peer_id': ly_peer,
-                'message_id': ly_mid,
-                'message_date': ly_date,
-            }
+    result = ly.forward_to_channel(
+        ref,
+        from_peer_id=ly_peer,
+        message_id=int(ly_mid),
+        message_date=int(ly_date),
+        from_peer_type=2,
+        from_access_hash=int(ly_ah) if ly_ah is not None else None,
+        source_channel_ref=src_ref or None,
+    )
+    if result.get('ok'):
+        out = dict(result)
+        out['message_date'] = int(result.get('message_date') or ly_date)
+        out['message_id'] = ly_mid
+        return {
+            'api': out,
+            'channel_ref': ref,
+            'ok': True,
+            'method': 'forward',
+            'from_peer_id': ly_peer,
+            'message_id': ly_mid,
+            'message_date': out['message_date'],
+        }
 
+    err = str((result or {}).get('error') or 'فوروارد لینک‌یار ناموفق')
+    tries = (result or {}).get('tries') or []
+    if tries:
+        err = f'{err} | {tries[0]}'[:400]
     return {
-        'api': last,
+        'api': result if isinstance(result, dict) else {'ok': False},
         'channel_ref': ref,
         'ok': False,
         'method': 'failed',
-        'error': str((last or {}).get('error') or 'فوروارد لینک‌یار ناموفق')[:300],
+        'error': err[:400],
     }
 
 

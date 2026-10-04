@@ -709,68 +709,135 @@ def forward_to_channel(
     message_id: int,
     message_date: int,
     from_peer_type: int = 2,
+    from_access_hash: int | None = None,
+    source_channel_ref: str | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد پیام کانال مبدأ به کانال مقصد. چند ترکیب peer/chat را امتحان می‌کند."""
+    """فوروارد واقعی پیام از کانال مبدأ به مقصد با aiobale ForwardMessages.
+
+    نکته: Peer مبدأ باید access_hash داشته باشد و type=GROUP برای کانال‌ها.
+    """
     async def _fn(client):
         from aiobale.enums import ChatType, PeerType
         from aiobale.types import InfoMessage, Peer
+        from aiobale.methods.messaging.forward_message import ForwardMessages
+        from aiobale.utils import generate_id
 
+        # مقصد
         resolved = await _resolve_peer(client, channel_ref)
         if not resolved.get('ok'):
-            return {'ok': False, 'error': resolved.get('error')}
-        peer_id = int(resolved['peer_id'])
+            return {'ok': False, 'error': resolved.get('error'), 'where': 'resolve_target'}
+        target_id = int(resolved['peer_id'])
+        target_ah = resolved.get('access_hash')
+        try:
+            await client.join_public_chat(target_id)
+        except Exception:
+            pass
 
-        # peer type مبدأ: کانال‌ها معمولاً GROUP
-        peer_types = []
-        for name in ('GROUP', 'CHANNEL', 'PRIVATE'):
-            if hasattr(PeerType, name):
-                peer_types.append(getattr(PeerType, name))
-        if not peer_types:
-            peer_types = [2]
+        # مبدأ: peer_id + access_hash
+        src_id = int(from_peer_id)
+        src_ah = from_access_hash
+        if src_ah is None and source_channel_ref:
+            src_res = await _resolve_peer(client, source_channel_ref)
+            if src_res.get('ok'):
+                src_id = int(src_res.get('peer_id') or src_id)
+                src_ah = src_res.get('access_hash')
+                try:
+                    await client.join_public_chat(src_id)
+                except Exception:
+                    pass
+        if src_ah is None:
+            # آخرین تلاش: resolve از روی peer_id عددی ممکن نیست؛ history باید ah داده باشد
+            pass
 
-        chat_types = []
-        for name in ('GROUP', 'CHANNEL'):
-            if hasattr(ChatType, name):
-                chat_types.append(getattr(ChatType, name))
-        if not chat_types:
-            chat_types = [ChatType.GROUP]
-
-        # تاریخ: هم ms هم sec (اگر خیلی بزرگ بود)
-        dates = [int(message_date)]
         md = int(message_date or 0)
-        if md > 10_000_000_000:  # ms
+        dates = [md]
+        if md > 10_000_000_000:
             dates.append(md // 1000)
         elif md > 0:
             dates.append(md * 1000)
 
-        errors = []
-        for ptype in peer_types:
-            for ctype in chat_types:
-                for d in dates:
+        errors: List[str] = []
+
+        def _src_peer(with_ah: bool):
+            kwargs = {'type': PeerType.GROUP, 'id': src_id}
+            if with_ah and src_ah is not None:
+                kwargs['access_hash'] = int(src_ah)
+            return Peer(**kwargs)
+
+        def _tgt_peer(ctype, with_ah: bool):
+            # target peer type از chat type
+            ptype = PeerType.PRIVATE if ctype in (ChatType.PRIVATE, ChatType.BOT) else PeerType.GROUP
+            kwargs = {'type': ptype, 'id': target_id}
+            if with_ah and target_ah is not None:
+                kwargs['access_hash'] = int(target_ah)
+            return Peer(**kwargs)
+
+        for d in dates:
+            for with_src_ah in (True, False):
+                if with_src_ah and src_ah is None:
+                    continue
+                info = InfoMessage(
+                    peer=_src_peer(with_src_ah),
+                    message_id=int(message_id),
+                    date=int(d),
+                )
+                # مسیر ۱: client.forward_message سطح بالا
+                for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
                     try:
-                        info = InfoMessage(
-                            peer=Peer(id=int(from_peer_id), type=ptype),
-                            message_id=int(message_id),
-                            date=int(d),
-                        )
                         resp = await client.forward_message(
-                            message=info, chat_id=peer_id, chat_type=ctype
+                            message=info, chat_id=target_id, chat_type=ctype
                         )
                         return {
                             'ok': True,
                             'result': str(resp),
-                            'from_peer_type': str(ptype),
+                            'method': 'client.forward_message',
                             'chat_type': str(ctype),
                             'date_used': int(d),
                             'message_id': int(message_id),
                             'message_date': int(d),
+                            'src_access_hash': bool(with_src_ah and src_ah is not None),
                         }
                     except Exception as e:
-                        errors.append(f'{ptype}/{ctype}/d={d}: {type(e).__name__}: {e}')
+                        errors.append(f'high/{ctype}/d={d}/ah={with_src_ah}: {type(e).__name__}: {e}')
+
+                # مسیر ۲: ForwardMessages خام با peer مقصد
+                for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                    for with_tgt_ah in (True, False):
+                        if with_tgt_ah and target_ah is None:
+                            continue
+                        try:
+                            call = ForwardMessages(
+                                peer=_tgt_peer(ctype, with_tgt_ah),
+                                message_ids=[generate_id()],
+                                forwarded_messages=[info],
+                            )
+                            resp = await client(call)
+                            return {
+                                'ok': True,
+                                'result': str(resp),
+                                'method': 'ForwardMessages',
+                                'chat_type': str(ctype),
+                                'date_used': int(d),
+                                'message_id': int(message_id),
+                                'message_date': int(d),
+                                'src_access_hash': bool(with_src_ah and src_ah is not None),
+                                'tgt_access_hash': bool(with_tgt_ah and target_ah is not None),
+                            }
+                        except Exception as e:
+                            errors.append(
+                                f'raw/{ctype}/d={d}/sah={with_src_ah}/tah={with_tgt_ah}: {type(e).__name__}: {e}'
+                            )
+
         return {
             'ok': False,
             'error': 'InvalidArgument' if any('InvalidArgument' in x for x in errors) else 'forward_failed',
-            'tries': errors[:12],
+            'tries': errors[:16],
+            'src_peer': src_id,
+            'src_ah': src_ah,
+            'target': target_id,
+            'target_ah': target_ah,
+            'mid': int(message_id),
+            'dates_tried': dates,
         }
 
     return _run(_with_client(_fn))
