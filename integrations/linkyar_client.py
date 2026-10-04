@@ -168,24 +168,69 @@ async def _search_contact_raw(client, uname: str) -> Dict[str, Any]:
     return {'ok': False, 'error': 'channel_not_found', 'raw': raw}
 
 
+async def _enrich_access_hash(client, peer_id: int, access_hash: Any = None) -> Optional[int]:
+    """اگر AH نبود از get_full_group / dialogs بگیر."""
+    try:
+        ah = int(access_hash) if access_hash not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        ah = None
+    if ah:
+        return ah
+    try:
+        await client.join_public_chat(int(peer_id))
+    except Exception:
+        pass
+    try:
+        full = await client.get_full_group(int(peer_id))
+        ah2 = getattr(full, 'access_hash', None)
+        if ah2 not in (None, 0, '0'):
+            return int(ah2)
+    except Exception as e:
+        logger.info('get_full_group ah: %s', e)
+    try:
+        dialogs = await client.load_dialogs(limit=80)
+        for d in dialogs or []:
+            peer = getattr(d, 'peer', None) or (d.get('peer') if isinstance(d, dict) else None)
+            if peer is None:
+                continue
+            pid = getattr(peer, 'id', None) if not isinstance(peer, dict) else peer.get('id') or peer.get('2')
+            try:
+                if int(pid) != int(peer_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            pah = getattr(peer, 'access_hash', None) if not isinstance(peer, dict) else peer.get('access_hash') or peer.get('3')
+            if pah not in (None, 0, '0'):
+                return int(pah)
+    except Exception as e:
+        logger.info('load_dialogs ah: %s', e)
+    return None
+
+
 async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
     ref = str(channel_ref).strip()
     if ref.lstrip('-').isdigit():
-        return {'ok': True, 'peer_id': int(ref), 'access_hash': None, 'source': 'numeric'}
+        pid = int(ref)
+        ah = await _enrich_access_hash(client, pid, None)
+        return {'ok': True, 'peer_id': pid, 'access_hash': ah, 'source': 'numeric'}
 
     uname = ref.lstrip('@')
     sc = await _search_contact_raw(client, uname)
-    if sc.get('ok'):
+    if sc.get('ok') and sc.get('peer_id'):
+        ah = await _enrich_access_hash(client, int(sc['peer_id']), sc.get('access_hash'))
+        sc['access_hash'] = ah
         return sc
 
     try:
         resp = await client.search_username(uname)
         g = getattr(resp, 'group', None)
         if g is not None and getattr(g, 'id', None):
+            pid = int(g.id)
+            ah = await _enrich_access_hash(client, pid, getattr(g, 'access_hash', None))
             return {
                 'ok': True,
-                'peer_id': int(g.id),
-                'access_hash': int(getattr(g, 'access_hash', 0) or 0) or None,
+                'peer_id': pid,
+                'access_hash': ah,
                 'title': getattr(g, 'title', '') or '',
                 'source': 'search_username',
             }

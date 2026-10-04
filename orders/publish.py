@@ -467,7 +467,7 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد از لینک‌بانک با لینک‌یار؛ اگر شکست → ارسال همان file_id سرور."""
+    """فوروارد از لینک‌بانک؛ اگر AH/فوروارد نشد → همان file_id یا فایل محلی."""
     from orders.banner_publish import linkbank_channel
 
     ref = channel_ref(ch)
@@ -476,56 +476,15 @@ def _post_via_linkyar(
     ly_mid = int(src.get('ly_message_id') or 0)
     ly_date = int(message_date or src.get('ly_message_date') or 0)
     ly_ah = src.get('ly_access_hash')
-    # همیشه @username مرجع
     src_ref = str(src.get('linkbank_ref') or linkbank_channel())
     if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
         src_ref = '@' + str(src_ref).lstrip('@')
     cap = caption or src.get('caption') or ''
-
-    if not ly_peer or not ly_mid or not ly_date:
-        return {
-            'ok': False,
-            'method': 'failed',
-            'channel_ref': ref,
-            'api': {
-                'error': 'need_from_peer_and_date',
-                'hist_error': src.get('hist_error'),
-                'resolved': {'peer': ly_peer, 'mid': ly_mid, 'date': ly_date, 'ah': ly_ah},
-            },
-            'error': (
-                f'فوروارد لینک‌یار: پیام در تاریخچه لینک‌بانک پیدا نشد '
-                f'(peer={ly_peer}, mid={ly_mid}, date={ly_date})'
-                + (f' — {src.get("hist_error")}' if src.get('hist_error') else '')
-            )[:300],
-        }
-
-    # 1) فوروارد واقعی با access_hash اجباری از @username
-    result = ly.forward_to_channel(
-        ref,
-        from_peer_id=ly_peer,
-        message_id=int(ly_mid),
-        message_date=int(ly_date),
-        from_peer_type=2,
-        from_access_hash=int(ly_ah) if ly_ah not in (None, 0) else None,
-        source_channel_ref=src_ref,
-    )
-    if result.get('ok'):
-        out = dict(result)
-        out['message_date'] = int(result.get('message_date') or ly_date)
-        out['message_id'] = ly_mid
-        return {
-            'api': out,
-            'channel_ref': ref,
-            'ok': True,
-            'method': 'forward',
-            'from_peer_id': ly_peer,
-            'message_id': ly_mid,
-            'message_date': out['message_date'],
-        }
-
-    # 2) همان فایل روی سرور بله (بدون دانلود) — مثل copy بدون نقل‌قول
     fm = src.get('file_meta') or {}
-    if fm.get('file_id') and fm.get('file_access_hash'):
+
+    def _try_server_file() -> Optional[Dict[str, Any]]:
+        if not (fm.get('file_id') and fm.get('file_access_hash')):
+            return None
         up = ly.send_existing_file_to_channel(
             ref,
             file_id=fm['file_id'],
@@ -544,21 +503,90 @@ def _post_via_linkyar(
                 'method': 'server_file_copy',
                 'message_id': up.get('message_id'),
                 'message_date': up.get('date'),
-                'forward_error': str((result or {}).get('error') or '')[:120],
             }
+        return None
 
-    err = str((result or {}).get('error') or 'فوروارد لینک‌یار ناموفق')
-    tries = (result or {}).get('tries') or []
-    if tries:
-        err = f'{err} | {tries[0]}'[:400]
-    if result.get('src_ah'):
-        err = f'{err} | src_ah={result.get("src_ah")}'
+    def _try_local_file() -> Optional[Dict[str, Any]]:
+        path, kind, bcap = _local_banner_path(banner_id)
+        if path is None or not path.exists():
+            return None
+        up = ly.send_local_file_to_channel(
+            ref, str(path), caption=cap or bcap or '', kind=kind or 'photo'
+        )
+        if up.get('ok'):
+            return {
+                'api': up,
+                'channel_ref': ref,
+                'ok': True,
+                'method': 'upload_local',
+                'message_id': up.get('message_id'),
+                'message_date': up.get('date'),
+                'file': path.name,
+            }
+        return None
+
+    # 1) فوروارد اگر peer+date+امکان AH
+    if ly_peer and ly_mid and ly_date:
+        result = ly.forward_to_channel(
+            ref,
+            from_peer_id=ly_peer,
+            message_id=int(ly_mid),
+            message_date=int(ly_date),
+            from_peer_type=2,
+            from_access_hash=int(ly_ah) if ly_ah not in (None, 0) else None,
+            source_channel_ref=src_ref,
+        )
+        if result.get('ok'):
+            out = dict(result)
+            out['message_date'] = int(result.get('message_date') or ly_date)
+            out['message_id'] = ly_mid
+            return {
+                'api': out,
+                'channel_ref': ref,
+                'ok': True,
+                'method': 'forward',
+                'from_peer_id': ly_peer,
+                'message_id': ly_mid,
+                'message_date': out['message_date'],
+            }
+        # فوروارد نشد → فایل سرور / محلی
+        for attempt in (_try_server_file, _try_local_file):
+            got = attempt()
+            if got:
+                got['forward_error'] = str((result or {}).get('error') or '')[:120]
+                return got
+        err = str((result or {}).get('error') or 'فوروارد لینک‌یار ناموفق')
+        tries = (result or {}).get('tries') or []
+        if tries:
+            err = f'{err} | {tries[0]}'[:400]
+        return {
+            'api': result if isinstance(result, dict) else {'ok': False},
+            'channel_ref': ref,
+            'ok': False,
+            'method': 'failed',
+            'error': err[:400],
+        }
+
+    # 2) بدون mid/date — مستقیم فایل
+    for attempt in (_try_server_file, _try_local_file):
+        got = attempt()
+        if got:
+            return got
+
     return {
-        'api': result if isinstance(result, dict) else {'ok': False},
-        'channel_ref': ref,
         'ok': False,
         'method': 'failed',
-        'error': err[:400],
+        'channel_ref': ref,
+        'api': {
+            'error': 'need_from_peer_and_date',
+            'hist_error': src.get('hist_error'),
+            'resolved': {'peer': ly_peer, 'mid': ly_mid, 'date': ly_date, 'ah': ly_ah},
+        },
+        'error': (
+            f'لینک‌یار: نه فوروارد ممکن بود نه فایل بنر '
+            f'(peer={ly_peer}, mid={ly_mid}, date={ly_date}, ah={ly_ah})'
+            + (f' — {src.get("hist_error")}' if src.get('hist_error') else '')
+        )[:400],
     }
 
 
@@ -804,6 +832,10 @@ def verify_manager_published(
 
 def delete_expired_posts() -> int:
     """حذف پست کانال پس از پایان مدت — یا TEST_AD_TTL_MINUTES برای تست کوتاه."""
+    try:
+        process_pending_test_deletes()
+    except Exception:
+        logger.exception('process_pending_test_deletes')
     now = timezone.now()
     ttl_min = int(os.environ.get('TEST_AD_TTL_MINUTES', '0') or '0')
     if ttl_min > 0:
@@ -906,6 +938,10 @@ def test_publish_to_channel(
 
     اگر delete_after_minutes > 0 باشد، پس از آن مدت پست تستی حذف می‌شود.
     """
+    try:
+        process_pending_test_deletes()
+    except Exception:
+        logger.exception('process_pending_test_deletes on test')
     mode = mode or (channel.publish_mode or Channel.PUBLISH_BOT)
     ref = channel_ref(channel)
     result: Dict[str, Any] = {
@@ -940,8 +976,19 @@ def test_publish_to_channel(
             api = res.get('api') or {}
             result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
             return result
-        posted_bot_mid = ((res.get('api') or {}).get('result') or {}).get('message_id')
+        api_res = res.get('api') or {}
+        result_obj = api_res.get('result') if isinstance(api_res.get('result'), dict) else api_res
+        posted_bot_mid = None
+        if isinstance(result_obj, dict):
+            posted_bot_mid = result_obj.get('message_id')
+            if not posted_bot_mid and isinstance(result_obj.get('message'), dict):
+                posted_bot_mid = result_obj['message'].get('message_id')
+        try:
+            posted_bot_mid = int(posted_bot_mid) if posted_bot_mid is not None else None
+        except (TypeError, ValueError):
+            posted_bot_mid = None
         result['bot_message_id'] = posted_bot_mid
+        result['channel_ref'] = res.get('channel_ref') or ref
         result['message'] = f'ارسال با لینک‌ساز به «{channel.name}» انجام شد.'
     elif mode == Channel.PUBLISH_LINKYAR:
         state = check_linkyar_admin(channel)
@@ -985,16 +1032,30 @@ def test_publish_to_channel(
     mins = int(delete_after_minutes or 0)
     if mins > 0:
         result['delete_after_minutes'] = mins
-        result['message'] = (result.get('message') or '') + f' — حذف خودکار تا {mins} دقیقه دیگر.'
-        _schedule_test_delete(
-            ref=ref,
-            mode=mode,
-            bot_message_id=int(posted_bot_mid) if posted_bot_mid else None,
-            ly_message_id=int(posted_ly_mid) if posted_ly_mid else None,
-            ly_message_date=int(posted_ly_date or 0),
-            minutes=mins,
-        )
+        del_ref = str(result.get('channel_ref') or ref)
+        if mode == Channel.PUBLISH_BOT and not posted_bot_mid:
+            result['message'] = (result.get('message') or '') + ' — حذف خودکار ثبت نشد (message_id نیامد).'
+            logger.warning('test publish bot ok but no message_id for delete')
+        else:
+            result['message'] = (result.get('message') or '') + f' — حذف خودکار تا {mins} دقیقه دیگر.'
+            _schedule_test_delete(
+                ref=del_ref,
+                mode=mode,
+                bot_message_id=int(posted_bot_mid) if posted_bot_mid else None,
+                ly_message_id=int(posted_ly_mid) if posted_ly_mid else None,
+                ly_message_date=int(posted_ly_date or 0),
+                minutes=mins,
+            )
     return result
+
+
+def _pending_deletes_path():
+    from pathlib import Path
+    from django.conf import settings
+    root = Path(getattr(settings, 'BASE_DIR', Path(__file__).resolve().parent.parent))
+    path = root / 'tmp' / 'pending_test_deletes.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _schedule_test_delete(
@@ -1006,30 +1067,86 @@ def _schedule_test_delete(
     ly_message_date: int,
     minutes: int,
 ) -> None:
-    """حذف پست تستی بعد از N دقیقه در thread پس‌زمینه."""
-
-    def _run() -> None:
-        try:
-            time.sleep(max(1, int(minutes)) * 60)
-            if mode == Channel.PUBLISH_BOT and bot_message_id:
-                r = bc.delete_message(str(ref), int(bot_message_id))
-                logger.info('test delete bot ref=%s mid=%s r=%s', ref, bot_message_id, r)
-            if mode == Channel.PUBLISH_LINKYAR and ly_message_id:
-                r = ly.delete_message(str(ref), int(ly_message_id), message_date=int(ly_message_date or 0))
-                logger.info('test delete ly ref=%s mid=%s r=%s', ref, ly_message_id, r)
-            # اگر هر دو شناسه داشتیم هر دو را امتحان کن
-            if bot_message_id and mode != Channel.PUBLISH_BOT:
-                try:
+    """حذف تستی پایدار — در فایل صف می‌شود (Passenger نخ را می‌کشد)."""
+    import time as _t
+    due = _t.time() + max(1, int(minutes)) * 60
+    entry = {
+        'due': due,
+        'ref': str(ref),
+        'mode': str(mode),
+        'bot_message_id': int(bot_message_id) if bot_message_id else None,
+        'ly_message_id': int(ly_message_id) if ly_message_id else None,
+        'ly_message_date': int(ly_message_date or 0),
+    }
+    path = _pending_deletes_path()
+    try:
+        rows = []
+        if path.exists():
+            rows = json.loads(path.read_text(encoding='utf-8') or '[]')
+            if not isinstance(rows, list):
+                rows = []
+        rows.append(entry)
+        path.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+        logger.info('scheduled test delete due=%s ref=%s mid=%s', due, ref, bot_message_id or ly_message_id)
+    except Exception:
+        logger.exception('schedule test delete file')
+        # fallback thread (ممکن است در Passenger زنده نماند)
+        def _run() -> None:
+            try:
+                time.sleep(max(1, int(minutes)) * 60)
+                if mode == Channel.PUBLISH_BOT and bot_message_id:
                     bc.delete_message(str(ref), int(bot_message_id))
-                except Exception:
-                    pass
-            if ly_message_id and mode != Channel.PUBLISH_LINKYAR:
-                try:
+                if mode == Channel.PUBLISH_LINKYAR and ly_message_id:
                     ly.delete_message(str(ref), int(ly_message_id), message_date=int(ly_message_date or 0))
-                except Exception:
-                    pass
-        except Exception:
-            logger.exception('test delete failed ref=%s', ref)
+            except Exception:
+                logger.exception('test delete thread failed')
+        threading.Thread(target=_run, daemon=True, name=f'test-del-{ref}').start()
 
-    threading.Thread(target=_run, daemon=True, name=f'test-del-{ref}').start()
+
+def process_pending_test_deletes() -> int:
+    """حذف‌های تستی سررسیدشده — از poll_bot / delete_expired صدا زده شود."""
+    import time as _t
+    path = _pending_deletes_path()
+    if not path.exists():
+        return 0
+    try:
+        rows = json.loads(path.read_text(encoding='utf-8') or '[]')
+        if not isinstance(rows, list):
+            return 0
+    except Exception:
+        logger.exception('read pending test deletes')
+        return 0
+    now = _t.time()
+    keep = []
+    n = 0
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        if float(entry.get('due') or 0) > now:
+            keep.append(entry)
+            continue
+        ref = str(entry.get('ref') or '')
+        mode = str(entry.get('mode') or '')
+        try:
+            if entry.get('bot_message_id'):
+                r = bc.delete_message(ref, int(entry['bot_message_id']))
+                logger.info('pending test delete bot ref=%s mid=%s r=%s', ref, entry['bot_message_id'], r)
+                n += 1
+            if entry.get('ly_message_id'):
+                r = ly.delete_message(
+                    ref,
+                    int(entry['ly_message_id']),
+                    message_date=int(entry.get('ly_message_date') or 0),
+                )
+                logger.info('pending test delete ly ref=%s mid=%s r=%s', ref, entry['ly_message_id'], r)
+                n += 1
+        except Exception:
+            logger.exception('pending test delete failed')
+            keep.append(entry)  # retry later
+    try:
+        path.write_text(json.dumps(keep, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        logger.exception('write pending test deletes')
+    return n
+
 
