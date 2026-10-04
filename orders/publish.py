@@ -349,6 +349,27 @@ def _resolve_linkbank_forward_source(
             ly_ah = int(hist['access_hash'])
         except (TypeError, ValueError):
             ly_ah = None
+    # فایل همان پیام برای ارسال بدون دانلود (اگر فوروارد شکست خورد)
+    file_meta: Dict[str, Any] = {}
+    if hist and hist.get('ok') and ly_mid:
+        for post in list(hist.get('messages') or []):
+            try:
+                if int(post.get('message_id') or 0) == int(ly_mid):
+                    if post.get('file_id') and post.get('file_access_hash'):
+                        file_meta = {
+                            'file_id': post.get('file_id'),
+                            'file_access_hash': post.get('file_access_hash'),
+                            'file_size': post.get('file_size') or 0,
+                            'file_name': post.get('file_name') or 'banner.jpg',
+                            'mime_type': post.get('mime_type') or 'image/jpeg',
+                            'kind': post.get('kind') or 'photo',
+                            'preview': post.get('preview') or '',
+                        }
+                    break
+            except (TypeError, ValueError):
+                continue
+    # همیشه username مرجع برای AH — نه شناسه عددی بات
+    src_ref_uname = lb
     return {
         'linkbank_ref': lb,
         'bot_from_chat_id': bot_from or lb,
@@ -359,7 +380,8 @@ def _resolve_linkbank_forward_source(
         'ly_message_date': ly_date,
         'caption': caption,
         'hist_error': hist_err,
-        'source_channel_ref': str(src_chat or lb),
+        'source_channel_ref': src_ref_uname,
+        'file_meta': file_meta,
     }
 
 
@@ -445,14 +467,20 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد واقعی از لینک‌بانک با لینک‌یار (peer + access_hash + date)."""
+    """فوروارد از لینک‌بانک با لینک‌یار؛ اگر شکست → ارسال همان file_id سرور."""
+    from orders.banner_publish import linkbank_channel
+
     ref = channel_ref(ch)
     src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
     ly_peer = int(src.get('ly_peer_id') or 0)
     ly_mid = int(src.get('ly_message_id') or 0)
     ly_date = int(message_date or src.get('ly_message_date') or 0)
     ly_ah = src.get('ly_access_hash')
-    src_ref = str(src.get('source_channel_ref') or src.get('linkbank_ref') or '')
+    # همیشه @username مرجع
+    src_ref = str(src.get('linkbank_ref') or linkbank_channel())
+    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
+        src_ref = '@' + str(src_ref).lstrip('@')
+    cap = caption or src.get('caption') or ''
 
     if not ly_peer or not ly_mid or not ly_date:
         return {
@@ -471,14 +499,15 @@ def _post_via_linkyar(
             )[:300],
         }
 
+    # 1) فوروارد واقعی با access_hash اجباری از @username
     result = ly.forward_to_channel(
         ref,
         from_peer_id=ly_peer,
         message_id=int(ly_mid),
         message_date=int(ly_date),
         from_peer_type=2,
-        from_access_hash=int(ly_ah) if ly_ah is not None else None,
-        source_channel_ref=src_ref or None,
+        from_access_hash=int(ly_ah) if ly_ah not in (None, 0) else None,
+        source_channel_ref=src_ref,
     )
     if result.get('ok'):
         out = dict(result)
@@ -494,10 +523,36 @@ def _post_via_linkyar(
             'message_date': out['message_date'],
         }
 
+    # 2) همان فایل روی سرور بله (بدون دانلود) — مثل copy بدون نقل‌قول
+    fm = src.get('file_meta') or {}
+    if fm.get('file_id') and fm.get('file_access_hash'):
+        up = ly.send_existing_file_to_channel(
+            ref,
+            file_id=fm['file_id'],
+            file_access_hash=int(fm['file_access_hash']),
+            file_size=int(fm.get('file_size') or 0),
+            file_name=str(fm.get('file_name') or 'banner.jpg'),
+            mime_type=str(fm.get('mime_type') or 'image/jpeg'),
+            caption=cap or str(fm.get('preview') or ''),
+            kind=str(fm.get('kind') or 'photo'),
+        )
+        if up.get('ok'):
+            return {
+                'api': up,
+                'channel_ref': ref,
+                'ok': True,
+                'method': 'server_file_copy',
+                'message_id': up.get('message_id'),
+                'message_date': up.get('date'),
+                'forward_error': str((result or {}).get('error') or '')[:120],
+            }
+
     err = str((result or {}).get('error') or 'فوروارد لینک‌یار ناموفق')
     tries = (result or {}).get('tries') or []
     if tries:
         err = f'{err} | {tries[0]}'[:400]
+    if result.get('src_ah'):
+        err = f'{err} | src_ah={result.get("src_ah")}'
     return {
         'api': result if isinstance(result, dict) else {'ok': False},
         'channel_ref': ref,
