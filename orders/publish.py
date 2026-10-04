@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+import threading
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Set
 
@@ -195,9 +196,21 @@ def _post_via_bot(ch: Channel, from_chat_id: str, message_id: int, caption: str 
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
 
-def _post_via_linkyar(ch: Channel, from_chat_id: str, message_id: int, caption: str = '') -> Dict[str, Any]:
+def _post_via_linkyar(
+    ch: Channel,
+    from_chat_id: str,
+    message_id: int,
+    caption: str = '',
+    message_date: int = 0,
+) -> Dict[str, Any]:
     ref = channel_ref(ch)
-    result = ly.copy_message(ref, from_chat_id, int(message_id), caption=caption or None)
+    result = ly.copy_message(
+        ref,
+        from_chat_id,
+        int(message_id),
+        caption=caption or None,
+        message_date=int(message_date or 0),
+    )
     return {'api': result, 'channel_ref': ref, 'ok': bool(result.get('ok'))}
 
 
@@ -488,8 +501,13 @@ def test_publish_to_channel(
     message_id: int,
     mode: str | None = None,
     caption: str = '',
+    message_date: int = 0,
+    delete_after_minutes: int = 0,
 ) -> Dict[str, Any]:
-    """ارسال تستی بنر به یک کانال — بدون سفارش/پرداخت. برای پشتیبان."""
+    """ارسال تستی بنر به یک کانال — بدون سفارش/پرداخت. برای پشتیبان.
+
+    اگر delete_after_minutes > 0 باشد، پس از آن مدت پست تستی حذف می‌شود.
+    """
     mode = mode or (channel.publish_mode or Channel.PUBLISH_BOT)
     ref = channel_ref(channel)
     result: Dict[str, Any] = {
@@ -502,6 +520,10 @@ def test_publish_to_channel(
     if mode == Channel.PUBLISH_MANUAL:
         result['error'] = 'حالت انتشار این کانال دستی است؛ ارسال خودکار ندارد.'
         return result
+
+    posted_bot_mid = None
+    posted_ly_mid = None
+    posted_ly_date = 0
 
     if mode == Channel.PUBLISH_BOT:
         state = check_bot_admin(channel)
@@ -518,11 +540,11 @@ def test_publish_to_channel(
         if not result['ok']:
             api = res.get('api') or {}
             result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
-        else:
-            result['message'] = f'ارسال با لینک‌ساز به «{channel.name}» انجام شد.'
-        return result
-
-    if mode == Channel.PUBLISH_LINKYAR:
+            return result
+        posted_bot_mid = ((res.get('api') or {}).get('result') or {}).get('message_id')
+        result['bot_message_id'] = posted_bot_mid
+        result['message'] = f'ارسال با لینک‌ساز به «{channel.name}» انجام شد.'
+    elif mode == Channel.PUBLISH_LINKYAR:
         state = check_linkyar_admin(channel)
         result['admin_state'] = state
         if state != 'admin':
@@ -531,15 +553,79 @@ def test_publish_to_channel(
                 else 'وضعیت ادمین لینک‌یار مشخص نشد'
             )
             return result
-        res = _post_via_linkyar(channel, str(from_chat_id), int(message_id), caption or '')
+        res = _post_via_linkyar(
+            channel,
+            str(from_chat_id),
+            int(message_id),
+            caption or '',
+            message_date=int(message_date or 0),
+        )
         result['api'] = res.get('api')
         result['ok'] = bool(res.get('ok'))
         if not result['ok']:
             api = res.get('api') or {}
-            result['error'] = str(api.get('description') or api.get('error') or 'ارسال ناموفق')[:300]
-        else:
-            result['message'] = f'ارسال با لینک‌یار به «{channel.name}» انجام شد.'
+            result['error'] = str(
+                api.get('description') or api.get('error') or api.get('hint') or 'ارسال ناموفق'
+            )[:300]
+            return result
+        api = res.get('api') or {}
+        posted_ly_mid = api.get('message_id') or (api.get('result') if isinstance(api.get('result'), int) else None)
+        posted_ly_date = int(api.get('message_date') or api.get('date') or 0)
+        result['linkyar_message_id'] = posted_ly_mid
+        result['linkyar_message_date'] = posted_ly_date
+        result['message'] = f'ارسال با لینک‌یار به «{channel.name}» انجام شد (رسانه + متن).'
+    else:
+        result['error'] = f'حالت انتشار ناشناخته: {mode}'
         return result
 
-    result['error'] = f'حالت انتشار ناشناخته: {mode}'
+    mins = int(delete_after_minutes or 0)
+    if mins > 0:
+        result['delete_after_minutes'] = mins
+        result['message'] = (result.get('message') or '') + f' — حذف خودکار تا {mins} دقیقه دیگر.'
+        _schedule_test_delete(
+            ref=ref,
+            mode=mode,
+            bot_message_id=int(posted_bot_mid) if posted_bot_mid else None,
+            ly_message_id=int(posted_ly_mid) if posted_ly_mid else None,
+            ly_message_date=int(posted_ly_date or 0),
+            minutes=mins,
+        )
     return result
+
+
+def _schedule_test_delete(
+    *,
+    ref: str,
+    mode: str,
+    bot_message_id: Optional[int],
+    ly_message_id: Optional[int],
+    ly_message_date: int,
+    minutes: int,
+) -> None:
+    """حذف پست تستی بعد از N دقیقه در thread پس‌زمینه."""
+
+    def _run() -> None:
+        try:
+            time.sleep(max(1, int(minutes)) * 60)
+            if mode == Channel.PUBLISH_BOT and bot_message_id:
+                r = bc.delete_message(str(ref), int(bot_message_id))
+                logger.info('test delete bot ref=%s mid=%s r=%s', ref, bot_message_id, r)
+            if mode == Channel.PUBLISH_LINKYAR and ly_message_id:
+                r = ly.delete_message(str(ref), int(ly_message_id), message_date=int(ly_message_date or 0))
+                logger.info('test delete ly ref=%s mid=%s r=%s', ref, ly_message_id, r)
+            # اگر هر دو شناسه داشتیم هر دو را امتحان کن
+            if bot_message_id and mode != Channel.PUBLISH_BOT:
+                try:
+                    bc.delete_message(str(ref), int(bot_message_id))
+                except Exception:
+                    pass
+            if ly_message_id and mode != Channel.PUBLISH_LINKYAR:
+                try:
+                    ly.delete_message(str(ref), int(ly_message_id), message_date=int(ly_message_date or 0))
+                except Exception:
+                    pass
+        except Exception:
+            logger.exception('test delete failed ref=%s', ref)
+
+    threading.Thread(target=_run, daemon=True, name=f'test-del-{ref}').start()
+

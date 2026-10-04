@@ -775,21 +775,59 @@ def copy_message(
     caption: Optional[str] = None,
     message_date: int = 0,
 ) -> Dict[str, Any]:
+    """کپی/فوروارد کامل پیام (رسانه + متن). هرگز فقط caption متنی نفرست.
+
+    اگر message_date نباشد از تاریخچه کانال مبدأ بازیابی می‌شود.
+    """
     try:
         from_peer = int(str(from_chat_id)) if str(from_chat_id).lstrip('-').isdigit() else 0
     except ValueError:
         from_peer = 0
-    if not from_peer or not message_date:
-        if caption:
-            return send_text_to_channel(str(to_chat_id), caption)
-        return {'ok': False, 'error': 'need_from_peer_and_date'}
-    return forward_to_channel(
-        str(to_chat_id),
-        from_peer_id=from_peer,
-        message_id=int(message_id),
-        message_date=int(message_date),
-        from_peer_type=1,
-    )
+    md = int(message_date or 0)
+
+    if not from_peer or not md:
+        # بازیابی peer و date از تاریخچه مبدأ
+        try:
+            hist = load_channel_history(str(from_chat_id), limit=80)
+            if hist.get('ok'):
+                if not from_peer and hist.get('peer_id'):
+                    try:
+                        from_peer = int(hist['peer_id'])
+                    except (TypeError, ValueError):
+                        pass
+                for post in (hist.get('posts') or []):
+                    try:
+                        if int(post.get('message_id') or 0) == int(message_id):
+                            md = int(post.get('date') or 0) or md
+                            break
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.warning('copy_message history resolve failed: %s', e)
+
+    if not from_peer or not md:
+        return {
+            'ok': False,
+            'error': 'need_from_peer_and_date',
+            'hint': 'تاریخ/شناسه مبدأ برای فوروارد رسانه لازم است؛ فقط متن ارسال نمی‌شود.',
+            'from_chat_id': str(from_chat_id),
+            'message_id': int(message_id),
+        }
+
+    # GROUP source (کانال لینک‌بانک) معمولاً peer type 2
+    for ptype in (2, 1):
+        result = forward_to_channel(
+            str(to_chat_id),
+            from_peer_id=from_peer,
+            message_id=int(message_id),
+            message_date=int(md),
+            from_peer_type=ptype,
+        )
+        if result.get('ok'):
+            result['message_date'] = int(md)
+            result['from_peer_id'] = from_peer
+            return result
+    return result if isinstance(result, dict) else {'ok': False, 'error': 'forward_failed'}
 
 
 def forward_message(

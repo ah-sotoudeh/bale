@@ -1517,9 +1517,22 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
     if mode and mode not in ('bot', 'linkyar', 'manual'):
         return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'mode باید bot یا linkyar باشد.'}, status=400)
 
+    delete_after = body.get('delete_after_minutes')
+    try:
+        delete_after = int(delete_after or 0)
+    except (TypeError, ValueError):
+        delete_after = 0
+
     from orders.publish import test_publish_to_channel
     try:
-        result = test_publish_to_channel(ch, from_chat, int(msg_id), mode=mode, caption=caption)
+        result = test_publish_to_channel(
+            ch,
+            from_chat,
+            int(msg_id),
+            mode=mode,
+            caption=caption,
+            delete_after_minutes=delete_after,
+        )
     except Exception as e:
         logger.exception('test_publish')
         return JsonResponse({'ok': False, 'error': 'exception', 'message': str(e)[:200]}, status=500)
