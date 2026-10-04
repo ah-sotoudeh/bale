@@ -467,7 +467,7 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول از لینک‌بانک با API رسمی aiobale (Message واقعی)."""
+    """فوروارد با نقل‌قول: بات→لینک‌یار (خصوصی)→کانال."""
     from orders.banner_publish import linkbank_channel
 
     ref = channel_ref(ch)
@@ -475,22 +475,35 @@ def _post_via_linkyar(
     if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
         src_ref = '@' + str(src_ref).lstrip('@')
 
+    # مبدأ بات (لینک‌بانک)
+    bot_from = str(from_chat_id or src_ref)
+    bot_mid = int(message_id or 0)
     cap = caption or ''
-    if banner_id and not cap:
+    if banner_id:
         try:
             from orders.models import CustomerBanner
             bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
-            if bn and bn.caption:
-                cap = bn.caption
+            if bn:
+                if bn.linkbank_chat_id and bn.linkbank_message_id:
+                    bot_from = str(bn.linkbank_chat_id).strip() or bot_from
+                    try:
+                        bot_mid = int(str(bn.linkbank_message_id).strip())
+                    except (TypeError, ValueError):
+                        pass
+                if not cap and bn.caption:
+                    cap = bn.caption
         except Exception:
             pass
+    if bot_from and not str(bot_from).startswith('@') and not str(bot_from).lstrip('-').isdigit() and 'ble.ir' not in bot_from:
+        bot_from = '@' + str(bot_from).lstrip('@')
 
-    # مسیر اصلی: load_history رسمی + forward_message(Message)
     result = ly.forward_banner_from_linkbank(
         ref,
         src_ref,
         caption_match=cap,
-        limit=50,
+        limit=40,
+        bot_from_chat_id=bot_from,
+        bot_message_id=bot_mid,
     )
     if result.get('ok'):
         return {
@@ -502,35 +515,16 @@ def _post_via_linkyar(
             'message_date': result.get('message_date'),
         }
 
-    errors = [str(result.get('error') or 'forward_failed')]
-    tries = result.get('tries') or result.get('load_errors') or []
+    err = str(result.get('error') or 'forward_failed')
+    tries = result.get('tries') or []
     if tries:
-        errors.append(str(tries[0])[:150])
-
-    # پشتیبان: آپلود محلی فقط اگر فوروارد ممکن نبود
-    path, kind, bcap = _local_banner_path(banner_id)
-    if path is not None and path.exists():
-        up = ly.send_local_file_to_channel(
-            ref, str(path), caption=cap or bcap or '', kind=kind or 'photo'
-        )
-        if up.get('ok'):
-            return {
-                'api': up,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'upload_local_fallback',
-                'message_id': up.get('message_id'),
-                'message_date': up.get('date'),
-                'forward_error': ' | '.join(errors)[:200],
-            }
-        errors.append(f'upload: {(up or {}).get("error")}')
-
+        err = f'{err} | {tries[0]}'[:400]
     return {
         'ok': False,
         'method': 'failed',
         'channel_ref': ref,
         'api': result if isinstance(result, dict) else {'ok': False},
-        'error': ('فوروارد لینک‌یار ناموفق: ' + ' | '.join(errors))[:400],
+        'error': f'فوروارد لینک‌یار ناموفق: {err}'[:400],
     }
 
 
