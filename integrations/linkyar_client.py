@@ -763,6 +763,176 @@ def send_local_file_to_channel(
     return _run(_with_client(_fn))
 
 
+def forward_banner_from_linkbank(
+    target_channel_ref: str,
+    source_channel_ref: str,
+    *,
+    caption_match: str = '',
+    limit: int = 40,
+) -> Dict[str, Any]:
+    """فوروارد با نقل‌قول از تاریخچه رسمی aiobale (Message واقعی).
+
+    مستندات: client.load_history → List[Message] سپس
+    client.forward_message(message, chat_id, chat_type).
+
+    پارسر خام فیلدها را جابه‌جا می‌خواند (message_id≠sender_id) و InvalidArgument می‌دهد.
+    """
+    async def _fn(client):
+        from aiobale.enums import ChatType, ListLoadMode
+
+        src = await _resolve_peer(client, source_channel_ref)
+        if not src.get('ok'):
+            return {'ok': False, 'error': f'source_resolve: {src.get("error")}', 'where': 'source'}
+        src_id = int(src['peer_id'])
+        try:
+            await client.join_public_chat(src_id)
+        except Exception:
+            pass
+
+        tgt = await _resolve_peer(client, target_channel_ref)
+        if not tgt.get('ok'):
+            return {'ok': False, 'error': f'target_resolve: {tgt.get("error")}', 'where': 'target'}
+        tgt_id = int(tgt['peer_id'])
+        try:
+            await client.join_public_chat(tgt_id)
+        except Exception:
+            pass
+
+        # بارگذاری تاریخچه با API رسمی → Message با message_id/date درست
+        loaded = []
+        load_errors = []
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                msgs = await client.load_history(
+                    src_id,
+                    ctype,
+                    limit=int(limit),
+                    offset_date=-1,
+                    load_mode=ListLoadMode.BACKWARD,
+                )
+                if msgs:
+                    loaded = list(msgs)
+                    break
+            except Exception as e:
+                load_errors.append(f'{ctype}: {type(e).__name__}: {e}')
+
+        if not loaded:
+            return {
+                'ok': False,
+                'error': 'history_empty',
+                'load_errors': load_errors[:6],
+                'src_peer': src_id,
+            }
+
+        def _preview(msg) -> str:
+            try:
+                content = getattr(msg, 'content', None)
+                if content is None:
+                    return ''
+                text = getattr(content, 'text', None)
+                if text is not None:
+                    return str(getattr(text, 'text', None) or getattr(text, 'content', None) or text or '')[:200]
+                doc = getattr(content, 'document', None)
+                if doc is not None:
+                    cap = getattr(doc, 'caption', None)
+                    if cap is not None:
+                        return str(getattr(cap, 'content', None) or getattr(cap, 'text', None) or '')[:200]
+                    return str(getattr(doc, 'name', None) or '')[:200]
+            except Exception:
+                return ''
+            return ''
+
+        def _is_media(msg) -> bool:
+            try:
+                content = getattr(msg, 'content', None)
+                return bool(content is not None and getattr(content, 'document', None) is not None)
+            except Exception:
+                return False
+
+        # انتخاب پیام: تطبیق کپشن، وگرنه آخرین رسانه، وگرنه آخرین پیام
+        chosen = None
+        key = (caption_match or '').strip()[:40]
+        if key:
+            for msg in loaded:
+                if key in _preview(msg):
+                    chosen = msg
+                    break
+        if chosen is None:
+            for msg in loaded:
+                if _is_media(msg):
+                    chosen = msg
+                    break
+        if chosen is None:
+            chosen = loaded[0]
+
+        mid = int(getattr(chosen, 'message_id'))
+        date = int(getattr(chosen, 'date'))
+
+        # فوروارد با خود آبجکت Message — _ensure_info_message درست می‌سازد
+        fwd_errors = []
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                resp = await client.forward_message(
+                    message=chosen,
+                    chat_id=tgt_id,
+                    chat_type=ctype,
+                )
+                return {
+                    'ok': True,
+                    'result': str(resp),
+                    'method': 'forward_message_official',
+                    'chat_type': str(ctype),
+                    'message_id': mid,
+                    'message_date': date,
+                    'source_peer': src_id,
+                    'target_peer': tgt_id,
+                    'preview': _preview(chosen)[:80],
+                }
+            except Exception as e:
+                fwd_errors.append(f'{ctype}: {type(e).__name__}: {e}')
+
+        # مسیر دوم: InfoMessage از روی Message (date به‌صورت int خام)
+        from aiobale.types import InfoMessage, Peer
+        from aiobale.enums import PeerType
+
+        chat = getattr(chosen, 'chat', None)
+        peer_id = getattr(chat, 'id', None) if chat is not None else src_id
+        info = InfoMessage(
+            peer=Peer(type=PeerType.GROUP, id=int(peer_id)),
+            message_id=mid,
+            date=date,
+        )
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                resp = await client.forward_message(
+                    message=info,
+                    chat_id=tgt_id,
+                    chat_type=ctype,
+                )
+                return {
+                    'ok': True,
+                    'result': str(resp),
+                    'method': 'forward_info_from_message',
+                    'chat_type': str(ctype),
+                    'message_id': mid,
+                    'message_date': date,
+                }
+            except Exception as e:
+                fwd_errors.append(f'info/{ctype}: {type(e).__name__}: {e}')
+
+        return {
+            'ok': False,
+            'error': 'forward_failed',
+            'tries': fwd_errors[:10],
+            'message_id': mid,
+            'message_date': date,
+            'src_peer': src_id,
+            'target': tgt_id,
+        }
+
+    return _run(_with_client(_fn))
+
+
 def forward_to_channel(
     channel_ref: str,
     from_peer_id: int,

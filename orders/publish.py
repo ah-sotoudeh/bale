@@ -467,22 +467,47 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """ارسال بنر با لینک‌یار.
-
-    فوروارد داخلی بله (aiobale ForwardMessages) روی این حساب پایدار نیست
-    و InvalidArgument می‌دهد. مسیر اصلی: آپلود فایل محلی بنر (یا file_id سرور).
-    """
+    """فوروارد با نقل‌قول از لینک‌بانک با API رسمی aiobale (Message واقعی)."""
     from orders.banner_publish import linkbank_channel
 
     ref = channel_ref(ch)
-    cap = caption or ''
-    src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
-    if not cap:
-        cap = src.get('caption') or ''
-    fm = src.get('file_meta') or {}
-    errors: List[str] = []
+    src_ref = linkbank_channel()
+    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
+        src_ref = '@' + str(src_ref).lstrip('@')
 
-    # ۱) فایل محلی بنر (قابل اعتماد)
+    cap = caption or ''
+    if banner_id and not cap:
+        try:
+            from orders.models import CustomerBanner
+            bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+            if bn and bn.caption:
+                cap = bn.caption
+        except Exception:
+            pass
+
+    # مسیر اصلی: load_history رسمی + forward_message(Message)
+    result = ly.forward_banner_from_linkbank(
+        ref,
+        src_ref,
+        caption_match=cap,
+        limit=50,
+    )
+    if result.get('ok'):
+        return {
+            'api': result,
+            'channel_ref': ref,
+            'ok': True,
+            'method': 'forward',
+            'message_id': result.get('message_id'),
+            'message_date': result.get('message_date'),
+        }
+
+    errors = [str(result.get('error') or 'forward_failed')]
+    tries = result.get('tries') or result.get('load_errors') or []
+    if tries:
+        errors.append(str(tries[0])[:150])
+
+    # پشتیبان: آپلود محلی فقط اگر فوروارد ممکن نبود
     path, kind, bcap = _local_banner_path(banner_id)
     if path is not None and path.exists():
         up = ly.send_local_file_to_channel(
@@ -493,79 +518,19 @@ def _post_via_linkyar(
                 'api': up,
                 'channel_ref': ref,
                 'ok': True,
-                'method': 'upload_local',
+                'method': 'upload_local_fallback',
                 'message_id': up.get('message_id'),
                 'message_date': up.get('date'),
-                'file': path.name,
+                'forward_error': ' | '.join(errors)[:200],
             }
-        errors.append(f'upload_local: {(up or {}).get("error")}')
-    else:
-        errors.append('no_local_banner_file')
-
-    # ۲) همان file_id روی سرور بله از تاریخچه لینک‌بانک
-    if fm.get('file_id') and fm.get('file_access_hash'):
-        up = ly.send_existing_file_to_channel(
-            ref,
-            file_id=fm['file_id'],
-            file_access_hash=int(fm['file_access_hash']),
-            file_size=int(fm.get('file_size') or 0),
-            file_name=str(fm.get('file_name') or 'banner.jpg'),
-            mime_type=str(fm.get('mime_type') or 'image/jpeg'),
-            caption=cap or str(fm.get('preview') or ''),
-            kind=str(fm.get('kind') or 'photo'),
-        )
-        if up.get('ok'):
-            return {
-                'api': up,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'server_file_copy',
-                'message_id': up.get('message_id'),
-                'message_date': up.get('date'),
-            }
-        errors.append(f'server_file: {(up or {}).get("error")}')
-
-    # ۳) فوروارد (اختیاری — اغلب InvalidArgument)
-    ly_peer = int(src.get('ly_peer_id') or 0)
-    ly_mid = int(src.get('ly_message_id') or 0)
-    ly_date = int(message_date or src.get('ly_message_date') or 0)
-    ly_ah = src.get('ly_access_hash')
-    src_ref = str(src.get('linkbank_ref') or linkbank_channel())
-    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
-        src_ref = '@' + str(src_ref).lstrip('@')
-    if ly_peer and ly_mid and ly_date:
-        result = ly.forward_to_channel(
-            ref,
-            from_peer_id=ly_peer,
-            message_id=int(ly_mid),
-            message_date=int(ly_date),
-            from_peer_type=2,
-            from_access_hash=int(ly_ah) if ly_ah not in (None, 0) else None,
-            source_channel_ref=src_ref,
-        )
-        if result.get('ok'):
-            out = dict(result)
-            out['message_date'] = int(result.get('message_date') or ly_date)
-            return {
-                'api': out,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'forward',
-                'message_id': ly_mid,
-                'message_date': out['message_date'],
-            }
-        errors.append(f'forward: {(result or {}).get("error")}')
+        errors.append(f'upload: {(up or {}).get("error")}')
 
     return {
         'ok': False,
         'method': 'failed',
         'channel_ref': ref,
-        'api': {'error': 'linkyar_all_paths_failed', 'tries': errors},
-        'error': (
-            'لینک‌یار نتوانست بنر را بفرستد. '
-            + (errors[0] if errors else 'مسیر موجود نیست')
-            + (' — فایل بنر روی سرور نیست؛ یک‌بار از بازو بنر را دوباره ثبت کنید.' if 'no_local_banner_file' in errors else '')
-        )[:400],
+        'api': result if isinstance(result, dict) else {'ok': False},
+        'error': ('فوروارد لینک‌یار ناموفق: ' + ' | '.join(errors))[:400],
     }
 
 
