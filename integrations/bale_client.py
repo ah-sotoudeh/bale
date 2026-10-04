@@ -229,8 +229,23 @@ def forward_message(to_chat_id: str, from_chat_id: str, message_id: int) -> Dict
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
-        r.raise_for_status()
-        return r.json()
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {}
+            return {
+                'ok': False,
+                'error': str((body or {}).get('description') or f'http_{r.status_code}')[:200],
+                '_http': r.status_code,
+            }
+        data = r.json() if r.content else {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'error': 'bad_response'}
+        # بله گاهی ok نمی‌فرستد ولی result دارد — یک‌بار ارسال شده
+        if 'ok' not in data:
+            data['ok'] = True
+        return data
     except requests.RequestException as e:
         logger.exception('forward_message failed')
         return {'error': _redact(str(e)), 'ok': False}

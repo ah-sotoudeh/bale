@@ -796,7 +796,7 @@ def copy_message(
                         from_peer = int(hist['peer_id'])
                     except (TypeError, ValueError):
                         pass
-                posts = list(hist.get('posts') or [])
+                posts = list(hist.get('messages') or hist.get('posts') or [])
                 # 1) تطبیق دقیق message_id
                 for post in posts:
                     try:

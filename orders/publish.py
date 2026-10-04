@@ -240,10 +240,11 @@ def _resolve_linkbank_forward_source(
     caption: str = '',
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """منبع فوروارد = کانال مرجع لینک‌بانک (نه storage خصوصی، نه آپلود مجدد).
+    """منبع فوروارد = کانال مرجع لینک‌بانک.
 
-    برای بات: chat_id + message_id بات کافی است.
-    برای لینک‌یار: peer داخلی + message_id داخلی + date لازم است.
+    بات: from_chat + message_id بات.
+    لینک‌یار: peer داخلی + message_id داخلی + date از history.messages
+    (کلید posts اشتباه بود و همیشه خالی می‌ماند).
     """
     from orders.banner_publish import linkbank_channel
     from orders.models import CustomerBanner
@@ -251,7 +252,6 @@ def _resolve_linkbank_forward_source(
     lb = linkbank_channel()
     src_chat = str(from_chat_id or '').strip() or lb
     src_mid = int(message_id or 0)
-    src_date = 0
     caption = caption or ''
 
     if banner_id:
@@ -260,56 +260,75 @@ def _resolve_linkbank_forward_source(
             if bn.linkbank_chat_id and bn.linkbank_message_id:
                 src_chat = str(bn.linkbank_chat_id).strip() or lb
                 try:
-                    src_mid = int(bn.linkbank_message_id)
+                    src_mid = int(str(bn.linkbank_message_id).strip())
                 except (TypeError, ValueError):
                     pass
             if not caption and bn.caption:
                 caption = bn.caption
 
-    # نرمال‌سازی ref کانال مرجع برای بات
-    bot_from = src_chat
-    if bot_from and not bot_from.startswith('@') and 'ble.ir' not in bot_from and not bot_from.lstrip('-').isdigit():
-        bot_from = '@' + bot_from.lstrip('@')
+    bot_from = src_chat or lb
+    if bot_from and not str(bot_from).startswith('@') and 'ble.ir' not in str(bot_from) and not str(bot_from).lstrip('-').isdigit():
+        bot_from = '@' + str(bot_from).lstrip('@')
 
-    # بازیابی peer+date داخلی لینک‌یار از تاریخچه کانال مرجع
     ly_peer = 0
-    ly_mid = src_mid
+    ly_mid = 0
     ly_date = 0
+    hist_err = ''
     try:
-        hist = ly.load_channel_history(str(src_chat if src_chat else lb), limit=80)
-        if not hist.get('ok'):
-            hist = ly.load_channel_history(str(lb), limit=80)
-        if hist.get('ok'):
+        # لینک‌بانک را با چند شکل امتحان کن
+        hist = None
+        for ref_try in (src_chat, lb, str(lb).lstrip('@'), '@' + str(lb).lstrip('@')):
+            if not ref_try:
+                continue
+            hist = ly.load_channel_history(str(ref_try), limit=50)
+            if hist and hist.get('ok'):
+                break
+        if not hist or not hist.get('ok'):
+            hist_err = str((hist or {}).get('error') or 'history_failed')
+        else:
             if hist.get('peer_id'):
                 try:
                     ly_peer = int(hist['peer_id'])
                 except (TypeError, ValueError):
                     ly_peer = 0
-            posts = list(hist.get('posts') or [])
-            # 1) تطبیق message_id
-            for post in posts:
+            # کلید درست: messages (نه posts)
+            posts = list(hist.get('messages') or hist.get('posts') or [])
+            # مرتب بر اساس date نزولی
+            def _date(p):
                 try:
-                    pmid = int(post.get('message_id') or 0)
-                    pdate = int(post.get('date') or 0)
+                    return int(p.get('date') or 0)
                 except (TypeError, ValueError):
-                    continue
-                if pmid and pmid == src_mid and pdate:
-                    ly_mid, ly_date = pmid, pdate
-                    break
-            # 2) تطبیق کپشن
-            if not ly_date and caption:
-                cap_key = caption.strip()[:40]
+                    return 0
+            posts = sorted(posts, key=_date, reverse=True)
+
+            # 1) تطبیق preview/کپشن
+            if caption.strip():
+                cap_key = caption.strip()[:30]
                 for post in posts:
-                    pcap = str(post.get('caption') or post.get('text') or '').strip()
+                    prev = str(post.get('preview') or post.get('caption') or post.get('text') or '')
                     try:
                         pmid = int(post.get('message_id') or 0)
                         pdate = int(post.get('date') or 0)
                     except (TypeError, ValueError):
                         continue
-                    if pmid and pdate and cap_key and cap_key in pcap:
+                    if pmid and pdate and cap_key and cap_key in prev:
                         ly_mid, ly_date = pmid, pdate
                         break
-            # 3) آخرین پست دارای رسانه
+
+            # 2) آخرین رسانه (عکس/ویدیو)
+            if not ly_date:
+                for post in posts:
+                    kind = str(post.get('kind') or '')
+                    try:
+                        pmid = int(post.get('message_id') or 0)
+                        pdate = int(post.get('date') or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if pmid and pdate and kind in ('photo', 'video', 'document'):
+                        ly_mid, ly_date = pmid, pdate
+                        break
+
+            # 3) هر پیام معتبر
             if not ly_date:
                 for post in posts:
                     try:
@@ -317,20 +336,12 @@ def _resolve_linkbank_forward_source(
                         pdate = int(post.get('date') or 0)
                     except (TypeError, ValueError):
                         continue
-                    if not pmid or not pdate:
-                        continue
-                    kind = str(post.get('kind') or post.get('type') or '')
-                    if post.get('has_media') or post.get('photo') or 'photo' in kind.lower() or 'video' in kind.lower():
+                    if pmid and pdate:
                         ly_mid, ly_date = pmid, pdate
                         break
-                if not ly_date and posts:
-                    try:
-                        ly_mid = int(posts[0].get('message_id') or 0)
-                        ly_date = int(posts[0].get('date') or 0)
-                    except (TypeError, ValueError):
-                        pass
-    except Exception:
+    except Exception as e:
         logger.exception('resolve linkbank history')
+        hist_err = str(e)[:120]
 
     return {
         'linkbank_ref': lb,
@@ -340,7 +351,19 @@ def _resolve_linkbank_forward_source(
         'ly_message_id': ly_mid,
         'ly_message_date': ly_date,
         'caption': caption,
+        'hist_error': hist_err,
     }
+
+
+def _bot_success(result: Dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get('ok') is True:
+        return True
+    if result.get('ok') is False:
+        return False
+    # پاسخ بدون ok ولی با result
+    return bool(result.get('result') or result.get('message_id'))
 
 
 def _post_via_bot(
@@ -350,7 +373,7 @@ def _post_via_bot(
     caption: str = '',
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد بنر از کانال مرجع لینک‌بانک با لینک‌ساز — بدون آپلود مجدد."""
+    """فوروارد یک‌بار از لینک‌بانک با لینک‌ساز."""
     src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
     from_chat = src['bot_from_chat_id']
     mid = int(src['bot_message_id'] or 0)
@@ -363,12 +386,30 @@ def _post_via_bot(
             'error': 'منبع بنر در لینک‌بانک مشخص نیست.',
         }
 
-    last: Dict[str, Any] = {'ok': False, 'error': 'forward_failed'}
-    used_ref = channel_ref(ch)
-    for ref in _bot_chat_refs(ch):
-        used_ref = ref
+    # فقط یک chat_id اصلی — جلوگیری از ارسال دوبل
+    refs = _bot_chat_refs(ch)
+    primary = refs[0] if refs else channel_ref(ch)
+    result = bc.forward_message(primary, str(from_chat), int(mid))
+    if _bot_success(result):
+        if isinstance(result, dict) and 'ok' not in result:
+            result = dict(result)
+            result['ok'] = True
+        return {
+            'api': result,
+            'channel_ref': primary,
+            'ok': True,
+            'method': 'forward',
+            'from_chat_id': from_chat,
+            'message_id': mid,
+        }
+
+    # فقط اگر primary شکست خورد، یک ref جایگزین (بدون تکرار موفق)
+    for ref in refs[1:]:
         result = bc.forward_message(ref, str(from_chat), int(mid))
-        if result.get('ok'):
+        if _bot_success(result):
+            if isinstance(result, dict) and 'ok' not in result:
+                result = dict(result)
+                result['ok'] = True
             return {
                 'api': result,
                 'channel_ref': ref,
@@ -377,27 +418,14 @@ def _post_via_bot(
                 'from_chat_id': from_chat,
                 'message_id': mid,
             }
-        last = result if isinstance(result, dict) else last
-        # copyMessage فقط اگر واقعاً پشتیبانی شود (اغلب 404)
-        copied = bc.copy_message(ref, str(from_chat), int(mid), caption=None)
-        if copied.get('ok'):
-            return {
-                'api': copied,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'copy',
-                'from_chat_id': from_chat,
-                'message_id': mid,
-            }
-        if copied.get('error') and 'not_supported' not in str(copied.get('error')):
-            last = copied
 
+    err = str((result or {}).get('description') or (result or {}).get('error') or 'فوروارد بات ناموفق')[:300]
     return {
-        'api': last,
-        'channel_ref': used_ref,
+        'api': result if isinstance(result, dict) else {'ok': False},
+        'channel_ref': primary,
         'ok': False,
         'method': 'failed',
-        'error': str((last or {}).get('description') or (last or {}).get('error') or 'فوروارد بات ناموفق')[:300],
+        'error': err,
     }
 
 
@@ -409,45 +437,34 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد بنر از کانال مرجع لینک‌بانک با لینک‌یار — بدون آپلود مجدد."""
+    """فوروارد یک‌بار از لینک‌بانک با لینک‌یار (peer+date از history.messages)."""
     ref = channel_ref(ch)
     src = _resolve_linkbank_forward_source(from_chat_id, message_id, caption, banner_id)
     ly_peer = int(src.get('ly_peer_id') or 0)
-    ly_mid = int(src.get('ly_message_id') or message_id or 0)
+    ly_mid = int(src.get('ly_message_id') or 0)
     ly_date = int(message_date or src.get('ly_message_date') or 0)
-    from_chat = str(src.get('bot_from_chat_id') or from_chat_id or src.get('linkbank_ref') or '')
 
-    if not ly_date or not ly_peer:
-        # یک بار دیگر مستقیم از linkbank_channel
-        result = ly.copy_message(
-            ref,
-            from_chat,
-            int(ly_mid or message_id),
-            caption=None,
-            message_date=int(ly_date or 0),
-        )
-        if result.get('ok'):
-            return {
-                'api': result,
-                'channel_ref': ref,
-                'ok': True,
-                'method': 'forward',
-                'from_chat_id': from_chat,
-                'message_id': ly_mid,
-            }
+    if not ly_peer or not ly_mid or not ly_date:
         return {
-            'api': result,
-            'channel_ref': ref,
             'ok': False,
             'method': 'failed',
-            'error': str(
-                (result or {}).get('error')
-                or (result or {}).get('hint')
-                or 'فوروارد لینک‌یار: شناسه/تاریخ پیام در لینک‌بانک پیدا نشد'
+            'channel_ref': ref,
+            'api': {
+                'error': 'need_from_peer_and_date',
+                'hist_error': src.get('hist_error'),
+                'resolved': {
+                    'peer': ly_peer,
+                    'mid': ly_mid,
+                    'date': ly_date,
+                },
+            },
+            'error': (
+                'فوروارد لینک‌یار: پیام در تاریخچه لینک‌بانک پیدا نشد '
+                f'(peer={ly_peer}, mid={ly_mid}, date={ly_date})'
+                + (f' — {src.get("hist_error")}' if src.get('hist_error') else '')
             )[:300],
         }
 
-    # فوروارد مستقیم با peer داخلی
     last: Dict[str, Any] = {'ok': False, 'error': 'forward_failed'}
     for ptype in (2, 1):
         result = ly.forward_to_channel(
@@ -459,11 +476,11 @@ def _post_via_linkyar(
         )
         last = result if isinstance(result, dict) else last
         if result.get('ok'):
-            result = dict(result)
-            result['message_date'] = ly_date
-            result['message_id'] = ly_mid
+            out = dict(result)
+            out['message_date'] = ly_date
+            out['message_id'] = ly_mid
             return {
-                'api': result,
+                'api': out,
                 'channel_ref': ref,
                 'ok': True,
                 'method': 'forward',
