@@ -222,11 +222,17 @@ def _is_linkbank_chat(uname: str, title: str) -> bool:
     lb = _folded(linkbank_username().lstrip('@'))
     folded_name = _folded(uname)
     folded_title = _folded(title)
-    if folded_name and (folded_name == lb or folded_name in ('linkbank', 'linktest')):
+    aliases = {'linkbank', 'linktest', 'لينكبانك'}
+    if lb:
+        aliases.add(lb)
+    # Persian without hamza variants
+    if 'لینکبانک' in folded_title or 'لینک بانک' in (title or ''):
+        return True
+    if folded_name and (folded_name == lb or folded_name in aliases):
         return True
     if lb and lb in folded_title:
         return True
-    return 'لینکبانک' in folded_title or 'linkbank' in folded_title or 'linktest' in folded_title
+    return any(a and a in folded_title for a in aliases)
 
 
 def _forward_meta(message: dict) -> Tuple[bool, str, str]:
@@ -241,8 +247,19 @@ def _forward_meta(message: dict) -> Tuple[bool, str, str]:
     origin = message.get('forward_origin') or {}
     if isinstance(origin, dict) and origin:
         chat = origin.get('chat') or {}
-        if _is_linkbank_chat(chat.get('username') or '', chat.get('title') or origin.get('sender_user_name') or ''):
-            return True, str(chat.get('id') or linkbank_username()), str(origin.get('message_id') or '')
+        uname = ''
+        title = ''
+        cid = ''
+        if isinstance(chat, dict):
+            uname = chat.get('username') or ''
+            title = chat.get('title') or ''
+            cid = str(chat.get('id') or '')
+        title = title or origin.get('sender_user_name') or ''
+        if _is_linkbank_chat(uname, title):
+            return True, cid or linkbank_username(), str(origin.get('message_id') or '')
+    sender = message.get('sender_chat') or {}
+    if isinstance(sender, dict) and _is_linkbank_chat(sender.get('username') or '', sender.get('title') or ''):
+        return True, str(sender.get('id') or linkbank_username()), str(message.get('message_id') or '')
     return False, '', ''
 
 
@@ -382,7 +399,7 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
     except Exception:
         logger.exception('banner file')
     d = dict(sess.data or {})
-    d['pending_banner'] = {'banner_id': banner.id}
+    d['pending_banner'] = {'banner_id': banner.id, 'from_linkbank': bool(from_lb), 'chat_id': str(chat_id), 'message_id': str(msg_id), 'caption': caption, 'media_kind': _media_kind(message)}
     sess.data = d
     sess.save(update_fields=['data'])
     save_session(sess, STATE_CUST_HOME, role='customer')
@@ -744,14 +761,28 @@ def handle_customer_callback(
         if not pending:
             bc.send_message(str(chat_id), 'بنری برای ثبت درخواست نمانده. اول بنر را بفرستید.')
             return True
+        bid = pending.get('banner_id')
+        b0 = CustomerBanner.objects.filter(id=int(bid), customer=user).first() if bid else None
+        if (b0 and b0.from_linkbank) or pending.get('from_linkbank'):
+            d = dict(sess.data or {})
+            d.pop('pending_banner', None)
+            sess.data = d
+            sess.save(update_fields=['data'])
+            bc.send_message(
+                str(chat_id),
+                'این بنر از کانال بنرهاست و نیازی به تأیید پشتیبانی ندارد.',
+                reply_markup=customer_home_keyboard(),
+            )
+            return True
         from orders.banner_publish import create_publish_request
 
         r = create_publish_request(
             user,
-            storage_chat_id=pending['chat_id'],
-            storage_message_id=pending['message_id'],
+            storage_chat_id=str(pending.get('chat_id') or ''),
+            storage_message_id=str(pending.get('message_id') or ''),
             caption=pending.get('caption') or '',
             media_kind=pending.get('media_kind') or '',
+            banner=b0,
         )
         fee = r.get('fee') or 0
         d = dict(sess.data or {})
@@ -761,7 +792,7 @@ def handle_customer_callback(
         fee_txt = 'رایگان' if fee == 0 else fa_money(fee)
         bc.send_message(
             str(chat_id),
-            f'📨 درخواست برای پشتیبانی ثبت شد.\nهزینهٔ اعلام‌شده: {fee_txt}',
+            '📨 درخواست برای پشتیبانی ثبت شد.\nهزینهٔ اعلام‌شده: ' + fee_txt,
             reply_markup=customer_home_keyboard(),
         )
         return True

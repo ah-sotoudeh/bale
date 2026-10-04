@@ -1624,7 +1624,12 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
     from orders.models import CustomerBanner
     from orders.banner_media import public_media_url
     rows = []
-    qs = CustomerBanner.objects.filter(is_active=True, from_linkbank=True).order_by('-id')[:50]
+    qs = list(CustomerBanner.objects.filter(is_active=True, from_linkbank=True).order_by('-id')[:50])
+    seen = {b.id for b in qs}
+    for b in CustomerBanner.objects.filter(is_active=True).exclude(linkbank_message_id='').order_by('-id')[:30]:
+        if b.id not in seen:
+            qs.append(b)
+            seen.add(b.id)
     for bn in qs:
         media = ''
         try:
@@ -1636,7 +1641,7 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
             'title': bn.display_title(),
             'caption': (bn.caption or '')[:80],
             'has_source': bool(bn.linkbank_message_id),
-            'from_linkbank': True,
+            'from_linkbank': bool(bn.from_linkbank),
             'media_url': media,
             'media_kind': bn.media_kind or '',
             'linkbank_message_id': bn.linkbank_message_id or '',

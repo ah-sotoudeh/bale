@@ -708,8 +708,9 @@ def forward_to_channel(
     from_peer_id: int,
     message_id: int,
     message_date: int,
-    from_peer_type: int = 1,
+    from_peer_type: int = 2,
 ) -> Dict[str, Any]:
+    """فوروارد پیام کانال مبدأ به کانال مقصد. چند ترکیب peer/chat را امتحان می‌کند."""
     async def _fn(client):
         from aiobale.enums import ChatType, PeerType
         from aiobale.types import InfoMessage, Peer
@@ -718,16 +719,59 @@ def forward_to_channel(
         if not resolved.get('ok'):
             return {'ok': False, 'error': resolved.get('error')}
         peer_id = int(resolved['peer_id'])
-        ptype = PeerType.PRIVATE if from_peer_type == 1 else PeerType.GROUP
-        info = InfoMessage(
-            peer=Peer(id=int(from_peer_id), type=ptype),
-            message_id=int(message_id),
-            date=int(message_date),
-        )
-        resp = await client.forward_message(
-            message=info, chat_id=peer_id, chat_type=ChatType.GROUP
-        )
-        return {'ok': True, 'result': str(resp), 'without_quote': False}
+
+        # peer type مبدأ: کانال‌ها معمولاً GROUP
+        peer_types = []
+        for name in ('GROUP', 'CHANNEL', 'PRIVATE'):
+            if hasattr(PeerType, name):
+                peer_types.append(getattr(PeerType, name))
+        if not peer_types:
+            peer_types = [2]
+
+        chat_types = []
+        for name in ('GROUP', 'CHANNEL'):
+            if hasattr(ChatType, name):
+                chat_types.append(getattr(ChatType, name))
+        if not chat_types:
+            chat_types = [ChatType.GROUP]
+
+        # تاریخ: هم ms هم sec (اگر خیلی بزرگ بود)
+        dates = [int(message_date)]
+        md = int(message_date or 0)
+        if md > 10_000_000_000:  # ms
+            dates.append(md // 1000)
+        elif md > 0:
+            dates.append(md * 1000)
+
+        errors = []
+        for ptype in peer_types:
+            for ctype in chat_types:
+                for d in dates:
+                    try:
+                        info = InfoMessage(
+                            peer=Peer(id=int(from_peer_id), type=ptype),
+                            message_id=int(message_id),
+                            date=int(d),
+                        )
+                        resp = await client.forward_message(
+                            message=info, chat_id=peer_id, chat_type=ctype
+                        )
+                        return {
+                            'ok': True,
+                            'result': str(resp),
+                            'from_peer_type': str(ptype),
+                            'chat_type': str(ctype),
+                            'date_used': int(d),
+                            'message_id': int(message_id),
+                            'message_date': int(d),
+                        }
+                    except Exception as e:
+                        errors.append(f'{ptype}/{ctype}/d={d}: {type(e).__name__}: {e}')
+        return {
+            'ok': False,
+            'error': 'InvalidArgument' if any('InvalidArgument' in x for x in errors) else 'forward_failed',
+            'tries': errors[:12],
+        }
 
     return _run(_with_client(_fn))
 
