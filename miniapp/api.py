@@ -1449,10 +1449,11 @@ def api_operator_unassign(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'ok': True})
 
 
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
-    """پشتیبان: تست ارسال بنر به کانال بدون سفارش/پرداخت."""
+    """پشتیبان: تست فوروارد بنر از لینک‌بانک به کانال — بدون سفارش/پرداخت."""
     user, err = _auth_user(request)
     if err:
         return err
@@ -1487,9 +1488,16 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
         if bn.from_linkbank and bn.linkbank_message_id:
             from_chat = str(bn.linkbank_chat_id or from_chat)
             msg_id = bn.linkbank_message_id
-        else:
-            from_chat = str(bn.storage_chat_id or from_chat)
-            msg_id = bn.storage_message_id
+        elif bn.storage_message_id:
+            # هنوز باید از لینک‌بانک باشد؛ اگر لینک‌بانک ندارد خطا
+            if not bn.linkbank_message_id:
+                return JsonResponse({
+                    'ok': False,
+                    'error': 'not_on_linkbank',
+                    'message': 'این بنر در لینک‌بانک نیست؛ فقط بنر تأییدشده قابل فوروارد است.',
+                }, status=400)
+            from_chat = str(bn.linkbank_chat_id or from_chat)
+            msg_id = bn.linkbank_message_id
         caption = caption or (bn.caption or '')
 
     if not from_chat or not msg_id:
@@ -1510,22 +1518,28 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
         return JsonResponse({
             'ok': False,
             'error': 'bad_fields',
-            'message': 'منبع بنر لازم است: banner_id یا from_chat_id + message_id',
+            'message': 'منبع بنر در لینک‌بانک لازم است (banner_id تأییدشده).',
         }, status=400)
 
     mode = str(body.get('mode') or '').strip().lower() or None
     if mode and mode not in ('bot', 'linkyar', 'manual'):
         return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'mode باید bot یا linkyar باشد.'}, status=400)
 
-    delete_after = body.get('delete_after_minutes')
     try:
-        delete_after = int(delete_after or 0)
+        delete_after = int(body.get('delete_after_minutes') or 0)
     except (TypeError, ValueError):
         delete_after = 0
+    try:
+        delay_min = int(body.get('delay_minutes') or body.get('send_after_minutes') or 0)
+    except (TypeError, ValueError):
+        delay_min = 0
 
     from orders.publish import test_publish_to_channel
-    try:
-        result = test_publish_to_channel(
+    import threading
+    import time as _time
+
+    def _run():
+        return test_publish_to_channel(
             ch,
             from_chat,
             int(msg_id),
@@ -1534,13 +1548,67 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
             delete_after_minutes=delete_after,
             banner_id=int(banner_id) if banner_id else None,
         )
+
+    if delay_min > 0:
+        def _delayed():
+            try:
+                _time.sleep(max(1, delay_min) * 60)
+                _run()
+            except Exception:
+                logger.exception('delayed test publish')
+
+        threading.Thread(target=_delayed, daemon=True, name='test-pub-delay').start()
+        return JsonResponse({
+            'ok': True,
+            'scheduled': True,
+            'delay_minutes': delay_min,
+            'channel_id': ch.id,
+            'channel_name': ch.name,
+            'mode': mode or ch.publish_mode,
+            'message': f'ارسال تست برای {delay_min} دقیقه دیگر زمان‌بندی شد.',
+            'banner_id': banner_id,
+        })
+
+    try:
+        result = _run()
     except Exception as e:
         logger.exception('test_publish')
         return JsonResponse({'ok': False, 'error': 'exception', 'message': str(e)[:200]}, status=500)
     result['banner_id'] = banner_id
     result['from_chat_id'] = from_chat
     result['message_id'] = int(msg_id)
+    result['bot_is_admin'] = bool(ch.bot_is_admin)
+    result['linkyar_is_admin'] = bool(ch.linkyar_is_admin)
     return JsonResponse(result)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_test_delete(request: HttpRequest) -> JsonResponse:
+    """حذف دستی پست تستی (بازو یا لینک‌یار)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+    body = _json_body(request)
+    from orders.publish import delete_test_post, channel_ref
+    ch_raw = body.get('channel') or body.get('channel_id') or body.get('ref') or ''
+    ref = str(ch_raw)
+    if str(ch_raw).isdigit():
+        ch = Channel.objects.filter(id=int(ch_raw)).first()
+        if ch:
+            ref = channel_ref(ch)
+    result = delete_test_post(
+        ref,
+        mode=str(body.get('mode') or 'bot'),
+        bot_message_id=int(body['bot_message_id']) if body.get('bot_message_id') else None,
+        ly_message_id=int(body['ly_message_id']) if body.get('ly_message_id') else None,
+        ly_message_date=int(body.get('ly_message_date') or 0),
+    )
+    return JsonResponse(result)
+
 
 
 @csrf_exempt
@@ -1554,20 +1622,25 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
     if not ws.is_operator(user.bale_user_id or ''):
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
     from orders.models import CustomerBanner
+    from orders.banner_media import public_media_url
     rows = []
-    # اولویت با بنرهای لینک‌بانک؛ در غیر این صورت بنرهای فعال با storage
-    qs = CustomerBanner.objects.filter(is_active=True).order_by('-id')[:50]
+    qs = CustomerBanner.objects.filter(is_active=True, from_linkbank=True).order_by('-id')[:50]
     for bn in qs:
-        has = bool(bn.linkbank_message_id or bn.storage_message_id)
+        media = ''
+        try:
+            media = public_media_url(bn) or ''
+        except Exception:
+            media = ''
         rows.append({
             'id': bn.id,
             'title': bn.display_title(),
             'caption': (bn.caption or '')[:80],
-            'has_source': has,
-            'from_linkbank': bool(bn.from_linkbank),
+            'has_source': bool(bn.linkbank_message_id),
+            'from_linkbank': True,
+            'media_url': media,
+            'media_kind': bn.media_kind or '',
+            'linkbank_message_id': bn.linkbank_message_id or '',
         })
-    # بنرهای لینک‌بانک را اول لیست نگه دار
-    rows.sort(key=lambda r: (0 if r.get('from_linkbank') else 1, -r['id']))
     channels = []
     for ch in Channel.objects.order_by('-id')[:100]:
         channels.append({
@@ -1585,3 +1658,5 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
         'channels': channels,
         'counts': {'banners': len(rows), 'channels': len(channels)},
     })
+
+
