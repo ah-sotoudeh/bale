@@ -72,3 +72,10 @@ python manage.py test miniapp.tests_pay miniapp.tests_api -v 2
 ```
 
 پوشش: پرداخت از اعتبار، `publish_due` برای کانال manual، `wallet.report.month_earn`، و تست‌های black-box نقش‌ها.
+
+
+## انتساب مدیر توسط پشتیبان
+
+`POST /miniapp/api/operator/assign-manager` با `{ "manager": "@test", "channels": ["@ch1","@ch2"] }`
+
+اگر کاربر هنوز وارد نشده باشد با اولین پیام به بازو/مینی‌اپ کانال‌ها claim می‌شوند.

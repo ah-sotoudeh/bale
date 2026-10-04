@@ -67,6 +67,11 @@ def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
         if handle and user.bale_username != handle:
             user.bale_username = handle
             user.save(update_fields=['bale_username'])
+        try:
+            from miniapp.api import claim_pending_channels
+            claim_pending_channels(user)
+        except Exception:
+            pass
         return user
     base = (handle or f'bale_{uid}')[:30]
     candidate = base
@@ -77,6 +82,11 @@ def ensure_user(bale_user_id: str, username_hint: str = '') -> User:
     user = User(username=candidate, bale_user_id=uid, bale_username=handle)
     user.set_unusable_password()
     user.save()
+    try:
+        from miniapp.api import claim_pending_channels
+        claim_pending_channels(user)
+    except Exception:
+        pass
     return user
 
 

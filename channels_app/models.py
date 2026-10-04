@@ -58,6 +58,19 @@ class Channel(models.Model):
         default=True,
         help_text='اگر False باشد از کاتالوگ مشتری مخفی است؛ سفارش‌ها می‌مانند',
     )
+    # مالکیت تأییدشده توسط پشتیبان — بدون نیاز به @ در بیو
+    ownership_verified = models.BooleanField(
+        default=False,
+        help_text='اگر True باشد پشتیبان مالک را تعیین کرده؛ چک بیو لازم نیست',
+    )
+    # اگر کاربر هنوز پیام نداده: منتظر username بله
+    pending_manager_username = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='username بدون @؛ بعد از ورود کاربر به manager وصل می‌شود',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

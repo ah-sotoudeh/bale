@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, time as dtime, timedelta
 from typing import Any, Dict, Optional
 
@@ -43,6 +44,39 @@ def _init_from_request(request: HttpRequest) -> str:
     )
 
 
+
+def _norm_username(raw: str) -> str:
+    return str(raw or '').strip().lstrip('@').lower()
+
+
+def _channel_ref_key(ref: str) -> str:
+    """Normalize @name or ble.ir/name to bare username key."""
+    s = str(ref or '').strip()
+    if not s:
+        return ''
+    s = s.replace('https://', '').replace('http://', '')
+    for prefix in ('ble.ir/', 'bale.ai/', 'ble.ir', 'bale.ai'):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):].lstrip('/')
+            break
+    return _norm_username(s)
+
+
+def claim_pending_channels(user: User) -> int:
+    """Connect operator-assigned channels when manager first appears."""
+    handle = _norm_username(getattr(user, 'bale_username', None) or '')
+    if not handle:
+        return 0
+    qs = Channel.objects.filter(pending_manager_username__iexact=handle)
+    n = 0
+    for ch in qs:
+        ch.manager = user
+        ch.ownership_verified = True
+        ch.pending_manager_username = ''
+        ch.save(update_fields=['manager', 'ownership_verified', 'pending_manager_username'])
+        n += 1
+    return n
+
 def _can_switch_roles(bale_user_id: str) -> bool:
     """سوییچ مشتری/مدیر برای همه؛ پشتیبانی فقط برای اپراتور/دیباگ/لیست."""
     uid = str(bale_user_id or '').strip()
@@ -66,6 +100,8 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'manual_remind_hours': ch.manual_remind_hours,
         'tariff_count': ch.tariffs.count(),
         'is_listed': bool(getattr(ch, 'is_listed', True)),
+        'ownership_verified': bool(getattr(ch, 'ownership_verified', False)),
+        'pending_manager_username': (getattr(ch, 'pending_manager_username', None) or ''),
         'members_count': getattr(ch, 'members_count', 0) or 0,
         'avg_views': getattr(ch, 'avg_views', 0) or 0,
         'daily_reach': getattr(ch, 'daily_reach', 0) or 0,
@@ -117,6 +153,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    claim_pending_channels(user)
     from bot_flow.access import is_debug_user
 
     br = ws.balance_breakdown(user)
@@ -215,6 +252,7 @@ def api_channels(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
+    claim_pending_channels(user)
     rows = list(Channel.objects.filter(manager=user).order_by('id'))
     from integrations.channel_stats import recent_snapshots
 
@@ -328,7 +366,20 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     owner = _can_switch_roles(user.bale_user_id or '')
     from bot_flow.handlers import bio_matches_owner, ownership_prompt
 
-    proved = bio_matches_owner(bio, user)
+    existing = Channel.objects.filter(link__iexact=link).first()
+    # مالکیت از قبل توسط پشتیبان یا خود کاربر
+    pre_verified = bool(
+        existing
+        and (
+            getattr(existing, 'ownership_verified', False)
+            or (existing.manager_id == user.id)
+            or (
+                _norm_username(getattr(existing, 'pending_manager_username', '') or '')
+                == _norm_username(getattr(user, 'bale_username', None) or '')
+            )
+        )
+    )
+    proved = bio_matches_owner(bio, user) or pre_verified or owner
     looked_up = not info.get('error')
     if not looked_up:
         missing = 'کانال را از بله نخواندیم. پیوند را یک بار دیگر بررسی کنید.'
@@ -343,13 +394,15 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
             status=400,
         )
 
-    existing = Channel.objects.filter(link__iexact=link).first()
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
         taken = 'این کانال برای کانال‌دار دیگری ثبت شده. اگر مال شماست، به پشتیبانی بگویید.'
         return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=403)
     if existing:
         existing.manager = user
         existing.name = name
+        existing.pending_manager_username = ''
+        if pre_verified:
+            existing.ownership_verified = True
         if info.get('id'):
             try:
                 existing.bale_peer_id = int(info['id'])
@@ -1222,3 +1275,129 @@ def api_channel_avatar(request: HttpRequest, channel_id: int) -> HttpResponse:
     resp = HttpResponse(data, content_type=ctype)
     resp['Cache-Control'] = 'public, max-age=86400'
     return resp
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: @manager را مالک کانال‌های @1 @2 … می‌کند (بدون چک بیو)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=403)
+    body = _json_body(request)
+    mgr_raw = str(body.get('manager') or body.get('username') or '').strip()
+    mgr_key = _norm_username(mgr_raw)
+    if not mgr_key:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کاربری مدیر را بنویسید (مثل @test).'}, status=400)
+    refs = body.get('channels') or body.get('channel_list') or []
+    if isinstance(refs, str):
+        refs = re.split(r'[,\s]+', refs)
+    refs = [str(x).strip() for x in refs if str(x).strip()]
+    if not refs:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال (@name) لازم است.'}, status=400)
+
+    from django.contrib.auth import get_user_model
+    UserModel = get_user_model()
+    manager = (
+        UserModel.objects.filter(bale_username__iexact=mgr_key).first()
+        or UserModel.objects.filter(bale_username__iexact='@' + mgr_key).first()
+    )
+
+    created, updated, pending = [], [], []
+    for ref in refs:
+        key = _channel_ref_key(ref)
+        if not key:
+            continue
+        link = f'ble.ir/{key}'
+        # match existing by link suffix or name
+        ch = (
+            Channel.objects.filter(link__icontains=key).order_by('-id').first()
+            or Channel.objects.filter(name__iexact=key).first()
+            or Channel.objects.filter(name__iexact='@' + key).first()
+        )
+        if ch is None:
+            ch = Channel(
+                name=key,
+                link=link,
+                publish_mode=Channel.PUBLISH_MANUAL,
+                ownership_verified=True,
+            )
+            created.append(key)
+        else:
+            updated.append(key)
+        ch.ownership_verified = True
+        if manager is not None:
+            ch.manager = manager
+            ch.pending_manager_username = ''
+        else:
+            ch.manager = None
+            ch.pending_manager_username = mgr_key
+            pending.append(key)
+        ch.save()
+        try:
+            from integrations.channel_stats import refresh_channel
+            refresh_channel(ch)
+        except Exception:
+            logger.exception('stats after operator assign')
+
+    return JsonResponse({
+        'ok': True,
+        'manager': mgr_key,
+        'manager_found': manager is not None,
+        'manager_id': manager.id if manager else None,
+        'created': created,
+        'updated': updated,
+        'pending_claim': pending,
+        'message': (
+            f'کانال‌ها برای @{mgr_key} ثبت شد.'
+            + (' مدیر هنوز وارد بازو نشده؛ با اولین ورود مالک می‌شود.' if manager is None else '')
+        ),
+    })
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_operator_assignments(request: HttpRequest) -> JsonResponse:
+    """لیست کانال‌های انتساب‌داده‌شده / در انتظار claim."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+    rows = []
+    qs = Channel.objects.filter(ownership_verified=True).select_related('manager').order_by('-id')[:200]
+    for ch in qs:
+        rows.append({
+            'id': ch.id,
+            'name': ch.name,
+            'link': ch.link,
+            'manager_username': (ch.manager.bale_username if ch.manager_id else '') or ch.pending_manager_username,
+            'pending': bool(ch.pending_manager_username and not ch.manager_id),
+            'is_listed': bool(ch.is_listed),
+        })
+    return JsonResponse({'ok': True, 'items': rows})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_unassign(request: HttpRequest) -> JsonResponse:
+    """برداشتن مالکیت تأییدشده از یک کانال."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+    body = _json_body(request)
+    ch = Channel.objects.filter(id=body.get('channel_id')).first()
+    if not ch:
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+    ch.manager = None
+    ch.ownership_verified = False
+    ch.pending_manager_username = ''
+    ch.save(update_fields=['manager', 'ownership_verified', 'pending_manager_username'])
+    return JsonResponse({'ok': True})
