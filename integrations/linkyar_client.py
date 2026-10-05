@@ -842,6 +842,8 @@ def forward_banner_from_linkbank(
     limit: int = 40,
     bot_from_chat_id: str = '',
     bot_message_id: int = 0,
+    dst_peer_id: int | None = None,
+    dst_title: str = '',
 ) -> Dict[str, Any]:
     """فوروارد با نقل‌قول از لینک‌بانک.
 
