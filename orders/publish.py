@@ -558,21 +558,23 @@ def _post_via_linkyar(
         }
 
     err = str(result.get('error') or 'forward_failed')
+    if result.get('me_id'):
+        err = f'{err} | me={result.get("me_id")}'
     if result.get('direction'):
         err = f'{err} | dir={result.get("direction")}'
     wp = result.get('write_probe') if isinstance(result, dict) else None
     if isinstance(wp, dict):
+        ss = wp.get('self_send') or {}
         err = (
-            f'{err} | probe in_dst={wp.get("in_dst")} in_src={wp.get("in_src")} '
-            f'misdir={wp.get("misdirected")} marker={wp.get("marker")}'
-        )[:320]
+            f'{err} | self={ss} in_dst={wp.get("in_dst")} in_src={wp.get("in_src")} '
+            f'dst_n={wp.get("dst_count")} marker={wp.get("marker")}'
+        )[:380]
     err = (
         f'{err} | src={result.get("src_id")}({result.get("src_ref") or src_ref}) '
-        f'dst={result.get("dst_id")}({result.get("dst_ref") or dst_ref}) '
-        f'mid={result.get("message_id")}'
-    )[:450]
+        f'dst={result.get("dst_id")}({result.get("dst_ref") or dst_ref})'
+    )[:480]
     if result.get('hint'):
-        err = f'{err} | {result.get("hint")}'[:520]
+        err = f'{err} | {result.get("hint")}'[:560]
     return {
         'ok': False,
         'method': 'failed',

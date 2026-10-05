@@ -1194,49 +1194,69 @@ def _forward_via_bale_sdk(
                     except Exception as e:
                         errors.append(f'{tag}: {type(e).__name__}: {e}')
 
-            # --- write probe با بررسی هر دو کانال ---
+            # --- write probes: self + dst username + dst peer ---
+            me_id = int(getattr(client, '_me_id', 0) or 0)
             marker = f'[ly-probe-{int(_time.time())}]'
             write_probe: Dict[str, Any] = {
                 'marker': marker,
+                'me_id': me_id,
                 'intended_dst': f'{dst_used}({dst_id})',
                 'intended_src': f'{src_used}({src_id})',
             }
-            try:
-                # ارسال صریح به dst با Peer ساخته‌شده از id مقصد
-                dst_only = Peer(
-                    id=int(dst_id),
-                    type=int(dst_peer.type),
-                    access_hash=int(dst_peer.access_hash or 1),
-                )
-                probe_resp = await client.send_message(dst_only, marker)
-                write_probe['send_api'] = {
-                    'seq': _u64(getattr(probe_resp, 'seq', 0)),
-                    'date': _u64(getattr(probe_resp, 'date', 0)),
-                }
-                await asyncio.sleep(2.5)
-                # کجا ظاهر شد؟
-                try:
-                    h_dst = await _load_hist(dst_peer, 10)
-                    write_probe['in_dst'] = _find_text(h_dst, marker)
-                    write_probe['dst_head'] = _hist_previews(h_dst)
-                except Exception as e:
-                    write_probe['in_dst'] = False
-                    write_probe['dst_hist_err'] = f'{type(e).__name__}: {e}'
-                try:
-                    h_src = await _load_hist(src_peer, 10)
-                    write_probe['in_src'] = _find_text(h_src, marker)
-                    write_probe['src_head'] = _hist_previews(h_src)
-                except Exception as e:
-                    write_probe['in_src'] = False
-                    write_probe['src_hist_err'] = f'{type(e).__name__}: {e}'
 
-                write_probe['ok'] = bool(write_probe.get('in_dst'))
-                if write_probe.get('in_src') and not write_probe.get('in_dst'):
-                    write_probe['misdirected'] = True
-                    write_probe['note'] = 'پیام تست در لینک‌بانک دیده شد نه در مقصد!'
+            async def _send_text(ref, text: str) -> Dict[str, Any]:
+                try:
+                    resp = await client.send_message(ref, text)
+                    return {
+                        'ok_api': True,
+                        'seq': _u64(getattr(resp, 'seq', 0)),
+                        'date': _u64(getattr(resp, 'date', 0)),
+                    }
+                except Exception as e:
+                    return {'ok_api': False, 'error': f'{type(e).__name__}: {e}'}
+
+            # 1) ارسال به خود (کنترل سلامت توکن)
+            if me_id:
+                from bale.peer import Peer as _Peer
+                self_peer = _Peer.user(id=me_id, access_hash=0)
+                write_probe['self_send'] = await _send_text(self_peer, marker + '-self')
+            else:
+                write_probe['self_send'] = {'ok_api': False, 'error': 'me_id_unknown'}
+
+            # 2) ارسال با یوزرنیم مقصد
+            write_probe['dst_by_username'] = await _send_text(dst_used, marker + '-uname')
+            await asyncio.sleep(2.0)
+
+            # 3) ارسال با Peer صریح
+            dst_only = Peer(
+                id=int(dst_id),
+                type=int(dst_peer.type),
+                access_hash=int(dst_peer.access_hash or 1),
+            )
+            write_probe['dst_by_peer'] = await _send_text(dst_only, marker + '-peer')
+            await asyncio.sleep(2.0)
+
+            try:
+                h_dst = await _load_hist(dst_peer, 12)
+                write_probe['in_dst'] = (
+                    _find_text(h_dst, marker)
+                )
+                write_probe['dst_count'] = len(h_dst)
+                write_probe['dst_head'] = _hist_previews(h_dst)
             except Exception as e:
-                write_probe['ok'] = False
-                write_probe['error'] = f'{type(e).__name__}: {e}'
+                write_probe['in_dst'] = False
+                write_probe['dst_hist_err'] = f'{type(e).__name__}: {e}'
+            try:
+                h_src = await _load_hist(src_peer, 12)
+                write_probe['in_src'] = _find_text(h_src, marker)
+                write_probe['src_count'] = len(h_src)
+            except Exception as e:
+                write_probe['in_src'] = False
+                write_probe['src_hist_err'] = f'{type(e).__name__}: {e}'
+
+            write_probe['ok'] = bool(write_probe.get('in_dst'))
+            if write_probe.get('in_src') and not write_probe.get('in_dst'):
+                write_probe['misdirected'] = True
 
             return {
                 'ok': False,
@@ -1246,6 +1266,7 @@ def _forward_via_bale_sdk(
                     else 'linkyar_cannot_post_to_channel'
                 ),
                 'lib': 'bale-sdk',
+                'me_id': me_id,
                 'tries': errors[:4],
                 'message_id': rid,
                 'message_date': date,
@@ -1263,11 +1284,12 @@ def _forward_via_bale_sdk(
                 'dst_steps': dst_steps,
                 'write_probe': write_probe,
                 'hint': (
-                    'direction باید linkbank→linkya باشد. '
-                    'اگر in_src=true و in_dst=false یعنی جهت اشتباه است. '
-                    'اگر هر دو false یعنی ارسال اصلاً نمی‌نشیند.'
+                    f'me_id={me_id} باید همان مالک @linkya باشد. '
+                    'اگر self_send هم بی‌اثر است توکن BALE_TOKEN مشکل دارد. '
+                    'اگر self_send ok ولی in_dst=false مشکل دسترسی کانال/API است.'
                 ),
             }
+
 
     return _run(_fn())
 
