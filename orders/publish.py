@@ -483,8 +483,10 @@ def _post_via_linkyar(
     dst_ref = channel_ref(ch)
     lb_env = linkbank_channel()
 
-    # مبدأ از بنر / پیام واقعی روی لینک‌بانک
-    src_ref = str(from_chat_id or '').strip() or lb_env
+    # شناسه عددی Bot API ≠ peer داخلی لینک‌یار
+    # مبدأ برای لینک‌یار: همیشه یوزرنیم/رفرنس لینک‌بانک (قابل resolve)
+    # مبدأ برای بات: linkbank_chat_id عددی بنر
+    bot_from = str(from_chat_id or '').strip()
     bot_mid = int(message_id or 0)
     cap = caption or ''
     if banner_id:
@@ -493,7 +495,7 @@ def _post_via_linkyar(
             bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
             if bn:
                 if bn.linkbank_chat_id:
-                    src_ref = str(bn.linkbank_chat_id).strip() or src_ref
+                    bot_from = str(bn.linkbank_chat_id).strip() or bot_from
                 if bn.linkbank_message_id:
                     try:
                         bot_mid = int(str(bn.linkbank_message_id).strip())
@@ -504,28 +506,45 @@ def _post_via_linkyar(
         except Exception:
             pass
 
-    # نرمال‌سازی @
     def _norm(ref: str) -> str:
         r = str(ref or '').strip()
         if not r:
             return r
         if r.lstrip('-').isdigit():
-            return r
-        if 'ble.ir' in r or 'bale.ai' in r:
-            return r
+            return r  # فقط برای بات نگه می‌داریم
+        if 'ble.ir/' in r or 'bale.ai/' in r:
+            s = r.replace('https://', '').replace('http://', '')
+            for prefix in ('ble.ir/', 'bale.ai/'):
+                if s.lower().startswith(prefix):
+                    s = s[len(prefix):].lstrip('/')
+                    break
+            s = s.split('/')[0].strip()
+            return ('@' + s.lstrip('@')) if s else r
         if not r.startswith('@'):
             return '@' + r.lstrip('@')
         return r
 
-    src_ref = _norm(src_ref) or _norm(lb_env)
+    def _is_numeric(ref: str) -> bool:
+        return bool(ref) and str(ref).strip().lstrip('-').isdigit()
+
+    # src برای لینک‌یار: هرگز شناسهٔ خالص Bot API
+    src_ref = _norm(lb_env)
+    if bot_from and not _is_numeric(bot_from):
+        src_ref = _norm(bot_from) or src_ref
     dst_ref = _norm(dst_ref)
+
+    # bot_from برای hop/بات: ترجیح عددی
+    if not bot_from:
+        bot_from = src_ref
+    elif not _is_numeric(bot_from):
+        bot_from = _norm(bot_from)
 
     result = ly.forward_banner_from_linkbank(
         dst_ref,
         src_ref,
         caption_match=cap,
         limit=40,
-        bot_from_chat_id=src_ref,
+        bot_from_chat_id=bot_from,
         bot_message_id=bot_mid,
     )
     if result.get('ok'):

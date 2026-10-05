@@ -932,9 +932,49 @@ def _forward_via_bale_sdk(
             return {'ok': False, 'error': 'channel_ref_required', 'lib': 'bale-sdk'}
 
         async with BaleClient(token) as client:
+
+            async def _resolve_any(ref: str, role: str):
+                """چند شکل ref را امتحان کن؛ عدد خالص Bot API معمولاً fail می‌شود."""
+                raw = str(ref or '').strip()
+                candidates = []
+                if raw:
+                    candidates.append(raw)
+                if raw.lstrip('-').isdigit():
+                    # عدد Bot API — برای user client معمولاً peer نیست؛ بعداً username
+                    pass
+                else:
+                    if raw.startswith('@'):
+                        candidates.append(raw.lstrip('@'))
+                    else:
+                        candidates.append('@' + raw.lstrip('@'))
+                # fallback لینک‌بانک env
+                if role == 'src':
+                    try:
+                        from orders.banner_publish import linkbank_channel
+                        lb = linkbank_channel()
+                        if lb and lb not in candidates:
+                            candidates.append(lb)
+                            candidates.append(str(lb).lstrip('@'))
+                            candidates.append('@' + str(lb).lstrip('@'))
+                    except Exception:
+                        pass
+                last_err = None
+                for c in candidates:
+                    if not c:
+                        continue
+                    try:
+                        info = await client.resolve(c)
+                        return info, c
+                    except Exception as e:
+                        last_err = e
+                        continue
+                raise LookupError(
+                    f'no peer found for {role}={raw!r} tried={candidates!r}: {last_err}'
+                )
+
             try:
-                src_info = await client.resolve(src_ref)
-                dst_info = await client.resolve(dst_ref)
+                src_info, src_used = await _resolve_any(src_ref, 'src')
+                dst_info, dst_used = await _resolve_any(dst_ref, 'dst')
             except Exception as e:
                 return {
                     'ok': False,
@@ -944,6 +984,8 @@ def _forward_via_bale_sdk(
                     'dst_ref': dst_ref,
                 }
 
+            src_ref = src_used
+            dst_ref = dst_used
             src_peer = src_info.peer
             dst_peer = dst_info.peer
             src_id = _u64(src_peer.id)
@@ -951,8 +993,7 @@ def _forward_via_bale_sdk(
 
             if src_id and dst_id and src_id == dst_id:
                 logger.warning(
-                    'linkyar forward src==dst peer=%s src_ref=%s dst_ref=%s — '
-                    'کانال مقصد با لینک‌بانک یکی است؛ فوروارد به خود کانال امتحان می‌شود',
+                    'linkyar forward src==dst peer=%s src_ref=%s dst_ref=%s',
                     src_id, src_ref, dst_ref,
                 )
 
