@@ -1162,13 +1162,13 @@ def _forward_via_bale_sdk(
                 op = pb.OutPeer()
                 op.type = int(to_peer.type)
                 op.id = int(to_peer.id)
-                op.accessHash = int(to_peer.access_hash or 0)
+                op.accessHash = int(to_peer.access_hash or 1) or 1
                 req.peer.CopyFrom(op)
                 fwd = req.forwardedMessages.add()
                 sp = pb.Peer()
                 sp.type = int(from_peer.type)
                 sp.id = int(from_peer.id)
-                sp.accessHash = int(from_peer.access_hash or 0)
+                sp.accessHash = int(from_peer.access_hash or 1) or 1
                 fwd.peer.CopyFrom(sp)
                 fwd.rid = int(msg_rid)
                 fwd.date.value = int(msg_date)
@@ -1237,6 +1237,52 @@ def _forward_via_bale_sdk(
                     )
             except Exception as e:
                 group_info = {'err': f'{type(e).__name__}: {e}'}
+
+            # accessHash=0 باعث no-op شدن Send/Forward می‌شود → از SearchContacts بگیر
+            if not int(dst_peer.access_hash or 0):
+                try:
+                    nick = str(dst_used or '').lstrip('@').strip() or 'linkya'
+                    req_sc = pb.SearchContactsRequest()
+                    req_sc.request = nick
+                    resp_sc = await client.call(
+                        'bale.users.v1.Users', 'SearchContacts', req_sc, timeout=10.0
+                    )
+                    for gp in list(getattr(resp_sc, 'groupPeers', []) or []):
+                        if int(getattr(gp, 'groupId', 0) or 0) == int(dst_id):
+                            ah2 = int(getattr(gp, 'accessHash', 0) or 0)
+                            if ah2:
+                                dst_peer = Peer(
+                                    id=dst_id,
+                                    type=int(dst_peer.type),
+                                    access_hash=ah2,
+                                )
+                                group_info['accessHash'] = ah2
+                                group_info['ah_source'] = 'SearchContacts.groupPeers'
+                                break
+                    if not int(dst_peer.access_hash or 0):
+                        for g in list(getattr(resp_sc, 'groups', []) or []):
+                            if int(getattr(g, 'id', 0) or 0) == int(dst_id):
+                                ah2 = int(getattr(g, 'accessHash', 0) or 0)
+                                if ah2:
+                                    dst_peer = Peer(
+                                        id=dst_id,
+                                        type=int(dst_peer.type),
+                                        access_hash=ah2,
+                                    )
+                                    group_info['accessHash'] = ah2
+                                    group_info['ah_source'] = 'SearchContacts.groups'
+                                    break
+                except Exception as e:
+                    group_info['ah_err'] = f'{type(e).__name__}: {e}'
+            # آخرین تلاش: sentinel عمومی
+            if not int(dst_peer.access_hash or 0):
+                dst_peer = Peer(
+                    id=dst_id,
+                    type=int(dst_peer.type),
+                    access_hash=1,
+                )
+                group_info['accessHash'] = 1
+                group_info['ah_source'] = 'sentinel_1'
 
             # member permissions
             perms_info: Dict[str, Any] = {}
