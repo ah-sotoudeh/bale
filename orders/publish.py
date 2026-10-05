@@ -518,13 +518,18 @@ def _post_via_linkyar(
     err = str(result.get('error') or 'forward_failed')
     tries = result.get('tries') or []
     if tries:
-        err = f'{err} | {tries[0]}'[:400]
+        err = f'{err} | {tries[0]}'[:350]
+    wp = result.get('write_probe') if isinstance(result, dict) else None
+    if isinstance(wp, dict):
+        err = f'{err} | write_probe={wp.get("ok")}'[:400]
+    if result.get('hint'):
+        err = f'{err} | {result.get("hint")}'[:450]
     return {
         'ok': False,
         'method': 'failed',
         'channel_ref': ref,
         'api': result if isinstance(result, dict) else {'ok': False},
-        'error': f'فوروارد لینک‌یار ناموفق: {err}'[:400],
+        'error': f'فوروارد لینک‌یار ناموفق: {err}'[:500],
     }
 
 
