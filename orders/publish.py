@@ -562,19 +562,23 @@ def _post_via_linkyar(
         err = f'{err} | me={result.get("me_id")}'
     if result.get('direction'):
         err = f'{err} | dir={result.get("direction")}'
+    gi = result.get('group_info') if isinstance(result, dict) else None
+    if isinstance(gi, dict):
+        err = f'{err} | group={gi}'[:300]
+    pm = result.get('perms') if isinstance(result, dict) else None
+    if isinstance(pm, dict):
+        err = f'{err} | perms={pm}'[:360]
     wp = result.get('write_probe') if isinstance(result, dict) else None
     if isinstance(wp, dict):
-        ss = wp.get('self_send') or {}
         err = (
-            f'{err} | self={ss} in_dst={wp.get("in_dst")} in_src={wp.get("in_src")} '
-            f'dst_n={wp.get("dst_count")} marker={wp.get("marker")}'
-        )[:380]
-    err = (
-        f'{err} | src={result.get("src_id")}({result.get("src_ref") or src_ref}) '
-        f'dst={result.get("dst_id")}({result.get("dst_ref") or dst_ref})'
-    )[:480]
+            f'{err} | probe self={wp.get("self")} in_dst={wp.get("in_dst")} '
+            f'ch={wp.get("ch_api")}'
+        )[:450]
+    tries = result.get('tries') or []
+    if tries:
+        err = f'{err} | try0={tries[0]}'[:520]
     if result.get('hint'):
-        err = f'{err} | {result.get("hint")}'[:560]
+        err = f'{err} | {result.get("hint")}'[:580]
     return {
         'ok': False,
         'method': 'failed',
