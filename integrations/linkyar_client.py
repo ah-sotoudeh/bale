@@ -950,20 +950,11 @@ def _forward_via_bale_sdk(
             dst_id = _u64(dst_peer.id)
 
             if src_id and dst_id and src_id == dst_id:
-                return {
-                    'ok': False,
-                    'error': 'src_dst_same_peer',
-                    'lib': 'bale-sdk',
-                    'src_id': src_id,
-                    'dst_id': dst_id,
-                    'src_ref': src_ref,
-                    'dst_ref': dst_ref,
-                    'hint': (
-                        f'مبدأ و مقصد یک peer شدند ({src_id}). '
-                        f'src_ref={src_ref!r} dst_ref={dst_ref!r} — '
-                        'شناسه/یوزرنیم کانال مقصد را چک کنید.'
-                    ),
-                }
+                logger.warning(
+                    'linkyar forward src==dst peer=%s src_ref=%s dst_ref=%s — '
+                    'کانال مقصد با لینک‌بانک یکی است؛ فوروارد به خود کانال امتحان می‌شود',
+                    src_id, src_ref, dst_ref,
+                )
 
             def _parse_hist_items(resp):
                 items = []

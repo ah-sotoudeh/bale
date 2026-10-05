@@ -52,7 +52,10 @@ def _linkyar_numeric_id() -> Optional[int]:
 
 
 def channel_ref(ch: Channel) -> str:
-    """مرجع مناسب برای Bot API: ترجیح @username، بعد chat_id عددی، بعد link."""
+    """مرجع کانال: ترجیح peer عددی، بعد @username از link."""
+    peer = getattr(ch, 'bale_peer_id', None)
+    if peer not in (None, '', 0, '0'):
+        return str(peer).strip()
     link = (ch.link or '').strip()
     if link:
         s = link.replace('https://', '').replace('http://', '')
@@ -65,8 +68,11 @@ def channel_ref(ch: Channel) -> str:
             if not s.startswith('@') and not s.lstrip('-').isdigit():
                 s = '@' + s
             return s
-    if getattr(ch, 'bale_peer_id', None):
-        return str(ch.bale_peer_id)
+    uname = getattr(ch, 'username', None) or getattr(ch, 'bale_username', None)
+    if uname:
+        u = str(uname).strip().lstrip('@')
+        if u:
+            return '@' + u
     return str(ch.id)
 
 
@@ -467,16 +473,18 @@ def _post_via_linkyar(
     message_date: int = 0,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول: بات→لینک‌یار (خصوصی)→کانال."""
+    """فوروارد با نقل‌قول از لینک‌بانک → کانال مقصد.
+
+    مبدأ: linkbank_chat_id بنر / from_chat_id (نه لزوماً LINKBANK_CHANNEL env)
+    مقصد: channel_ref(ch) با اولویت bale_peer_id
+    """
     from orders.banner_publish import linkbank_channel
 
-    ref = channel_ref(ch)
-    src_ref = linkbank_channel()
-    if src_ref and not str(src_ref).startswith('@') and not str(src_ref).lstrip('-').isdigit():
-        src_ref = '@' + str(src_ref).lstrip('@')
+    dst_ref = channel_ref(ch)
+    lb_env = linkbank_channel()
 
-    # مبدأ بات (لینک‌بانک)
-    bot_from = str(from_chat_id or src_ref)
+    # مبدأ از بنر / پیام واقعی روی لینک‌بانک
+    src_ref = str(from_chat_id or '').strip() or lb_env
     bot_mid = int(message_id or 0)
     cap = caption or ''
     if banner_id:
@@ -484,8 +492,9 @@ def _post_via_linkyar(
             from orders.models import CustomerBanner
             bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
             if bn:
-                if bn.linkbank_chat_id and bn.linkbank_message_id:
-                    bot_from = str(bn.linkbank_chat_id).strip() or bot_from
+                if bn.linkbank_chat_id:
+                    src_ref = str(bn.linkbank_chat_id).strip() or src_ref
+                if bn.linkbank_message_id:
                     try:
                         bot_mid = int(str(bn.linkbank_message_id).strip())
                     except (TypeError, ValueError):
@@ -494,21 +503,35 @@ def _post_via_linkyar(
                     cap = bn.caption
         except Exception:
             pass
-    if bot_from and not str(bot_from).startswith('@') and not str(bot_from).lstrip('-').isdigit() and 'ble.ir' not in bot_from:
-        bot_from = '@' + str(bot_from).lstrip('@')
+
+    # نرمال‌سازی @
+    def _norm(ref: str) -> str:
+        r = str(ref or '').strip()
+        if not r:
+            return r
+        if r.lstrip('-').isdigit():
+            return r
+        if 'ble.ir' in r or 'bale.ai' in r:
+            return r
+        if not r.startswith('@'):
+            return '@' + r.lstrip('@')
+        return r
+
+    src_ref = _norm(src_ref) or _norm(lb_env)
+    dst_ref = _norm(dst_ref)
 
     result = ly.forward_banner_from_linkbank(
-        ref,
+        dst_ref,
         src_ref,
         caption_match=cap,
         limit=40,
-        bot_from_chat_id=bot_from,
+        bot_from_chat_id=src_ref,
         bot_message_id=bot_mid,
     )
     if result.get('ok'):
         return {
             'api': result,
-            'channel_ref': ref,
+            'channel_ref': dst_ref,
             'ok': True,
             'method': 'forward',
             'message_id': result.get('message_id'),
@@ -520,8 +543,8 @@ def _post_via_linkyar(
     if isinstance(wp, dict):
         err = f'{err} | write_probe={wp}'[:260]
     err = (
-        f'{err} | src={result.get("src_id")}({result.get("src_ref")}) '
-        f'dst={result.get("dst_id")}({result.get("dst_ref")}) '
+        f'{err} | src={result.get("src_id")}({result.get("src_ref") or src_ref}) '
+        f'dst={result.get("dst_id")}({result.get("dst_ref") or dst_ref}) '
         f'seq={result.get("message_seq")} mid={result.get("message_id")}'
     )[:420]
     if result.get('hint'):
@@ -532,7 +555,7 @@ def _post_via_linkyar(
     return {
         'ok': False,
         'method': 'failed',
-        'channel_ref': ref,
+        'channel_ref': dst_ref,
         'api': result if isinstance(result, dict) else {'ok': False},
         'error': f'فوروارد لینک‌یار ناموفق: {err}'[:500],
     }
