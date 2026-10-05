@@ -1238,25 +1238,30 @@ def _forward_via_bale_sdk(
             except Exception as e:
                 group_info = {'err': f'{type(e).__name__}: {e}'}
 
-            # همیشه access_hash معتبر برای نوشتن بساز
+            # access_hash واقعی (1 و 0 = نامعتبر)
+            def _is_real_ah(v: int) -> bool:
+                return int(v or 0) not in (0, 1)
+
             ah_final = int(dst_peer.access_hash or 0)
             ah_src = 'initial'
 
-            # از دیالوگ‌ها (قابل اعتمادترین برای کانال‌های عضو)
-            if not ah_final or ah_final == 0:
-                try:
-                    for d in await client.get_dialogs(limit=100):
-                        p = getattr(d, 'peer', None)
-                        if p is not None and int(p.id) == int(dst_id):
-                            ah_final = int(getattr(p, 'access_hash', 0) or 0)
-                            if ah_final:
-                                ah_src = 'dialogs'
-                                break
-                except Exception as e:
-                    group_info['ah_dialogs_err'] = f'{type(e).__name__}: {e}'
+            # همیشه اول از دیالوگ‌ها بخوان (حتی اگر الان 1 باشد)
+            try:
+                for d in await client.get_dialogs(limit=120):
+                    p = getattr(d, 'peer', None)
+                    if p is not None and int(p.id) == int(dst_id):
+                        cand = int(getattr(p, 'access_hash', 0) or 0)
+                        if _is_real_ah(cand):
+                            ah_final = cand
+                            ah_src = 'dialogs'
+                            break
+                        if not _is_real_ah(ah_final) and cand:
+                            ah_final = cand
+                            ah_src = 'dialogs_weak'
+            except Exception as e:
+                group_info['ah_dialogs_err'] = f'{type(e).__name__}: {e}'
 
-            # SearchContacts.groupPeers
-            if not ah_final:
+            if not _is_real_ah(ah_final):
                 try:
                     nick = str(dst_used or '').lstrip('@').strip() or 'linkya'
                     req_sc = pb.SearchContactsRequest()
@@ -1266,15 +1271,17 @@ def _forward_via_bale_sdk(
                     )
                     for gp in list(getattr(resp_sc, 'groupPeers', []) or []):
                         if int(getattr(gp, 'groupId', 0) or 0) == int(dst_id):
-                            ah_final = int(getattr(gp, 'accessHash', 0) or 0)
-                            if ah_final:
+                            cand = int(getattr(gp, 'accessHash', 0) or 0)
+                            if _is_real_ah(cand):
+                                ah_final = cand
                                 ah_src = 'SearchContacts.groupPeers'
                                 break
-                    if not ah_final:
+                    if not _is_real_ah(ah_final):
                         for g in list(getattr(resp_sc, 'groups', []) or []):
                             if int(getattr(g, 'id', 0) or 0) == int(dst_id):
-                                ah_final = int(getattr(g, 'accessHash', 0) or 0)
-                                if ah_final:
+                                cand = int(getattr(g, 'accessHash', 0) or 0)
+                                if _is_real_ah(cand):
+                                    ah_final = cand
                                     ah_src = 'SearchContacts.groups'
                                     break
                 except Exception as e:
@@ -1292,25 +1299,25 @@ def _forward_via_bale_sdk(
             group_info['accessHash'] = int(ah_final)
             group_info['ah_source'] = ah_src
 
-            # src access hash هم اگر صفر بود درست کن
+            # src
             src_ah = int(src_peer.access_hash or 0)
+            try:
+                for d in await client.get_dialogs(limit=120):
+                    p = getattr(d, 'peer', None)
+                    if p is not None and int(p.id) == int(src_id):
+                        cand = int(getattr(p, 'access_hash', 0) or 0)
+                        if _is_real_ah(cand):
+                            src_ah = cand
+                            break
+            except Exception:
+                pass
             if not src_ah:
-                try:
-                    for d in await client.get_dialogs(limit=100):
-                        p = getattr(d, 'peer', None)
-                        if p is not None and int(p.id) == int(src_id):
-                            src_ah = int(getattr(p, 'access_hash', 0) or 0)
-                            if src_ah:
-                                break
-                except Exception:
-                    pass
-                if not src_ah:
-                    src_ah = 1
-                src_peer = Peer(
-                    id=int(src_id),
-                    type=int(src_peer.type),
-                    access_hash=int(src_ah),
-                )
+                src_ah = 1
+            src_peer = Peer(
+                id=int(src_id),
+                type=int(src_peer.type),
+                access_hash=int(src_ah),
+            )
 
             # member permissions
             perms_info: Dict[str, Any] = {}
