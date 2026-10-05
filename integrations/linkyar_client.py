@@ -891,11 +891,12 @@ def _forward_via_bale_sdk(
     caption_match: str = '',
     limit: int = 40,
 ) -> Dict[str, Any]:
-    """فوروارد با bale-sdk + تأیید سخت‌گیرانه (rid جدید در مقصد)."""
+    """فوروارد با bale-sdk — درخواست خام با rid+date+seq."""
 
     async def _fn():
         import asyncio
-        from bale import BaleClient
+        import random
+        from bale import BaleClient, pb
 
         token = user_token()
         if not token or token == 'your_access_token_here':
@@ -917,74 +918,73 @@ def _forward_via_bale_sdk(
                     'lib': 'bale-sdk',
                 }
 
-            src_peer = getattr(src_info, 'peer', src_info)
-            dst_peer = getattr(dst_info, 'peer', dst_info)
-            src_id = int(getattr(src_peer, 'id', 0) or 0)
-            dst_id = int(getattr(dst_peer, 'id', 0) or 0)
-            src_ah = int(getattr(src_peer, 'access_hash', 0) or 0)
-            dst_ah = int(getattr(dst_peer, 'access_hash', 0) or 0)
+            src_peer = src_info.peer
+            dst_peer = dst_info.peer
+            src_id = int(src_peer.id)
+            dst_id = int(dst_peer.id)
 
-            def _text(entry) -> str:
-                try:
-                    c = getattr(entry, 'content', None)
-                    if c is None:
-                        return ''
-                    if getattr(c, 'text', None):
-                        return str(c.text)[:200]
-                    media = getattr(c, 'media', None)
-                    if media is not None:
-                        return str(
-                            getattr(media, 'name', None)
-                            or getattr(media, 'caption', None)
-                            or ''
-                        )[:200]
-                    return str(getattr(c, 'kind', '') or '')
-                except Exception:
-                    return ''
-
-            def _is_media(entry) -> bool:
-                try:
-                    c = getattr(entry, 'content', None)
-                    if c is None:
-                        return False
-                    kind = str(getattr(c, 'kind', '') or '').lower()
-                    if kind in ('photo', 'video', 'document', 'media', 'image'):
-                        return True
-                    return getattr(c, 'media', None) is not None
-                except Exception:
-                    return False
-
-            def _entry_ids(entries) -> set:
-                out = set()
-                for e in entries or []:
+            # --- تاریخچه خام مبدأ (rid + date + seq) ---
+            def _parse_hist_items(resp):
+                items = []
+                for h in getattr(resp, 'history', []) or []:
+                    rid = int(getattr(h, 'rid', 0) or 0)
+                    date = int(getattr(h, 'date', 0) or 0)
+                    seq = int(getattr(h, 'seq', 0) or 0)
+                    sender = int(getattr(h, 'senderUid', 0) or 0)
+                    # متن/رسانه ساده
+                    preview = ''
+                    kind = 'text'
                     try:
-                        out.add(int(getattr(e, 'rid', 0) or 0))
+                        msg = h.message
+                        if msg.HasField('textMessage') if hasattr(msg, 'HasField') else getattr(msg, 'textMessage', None):
+                            preview = str(getattr(msg.textMessage, 'text', '') or '')[:200]
+                        elif msg.HasField('documentMessage') if hasattr(msg, 'HasField') else getattr(msg, 'documentMessage', None):
+                            kind = 'document'
+                            doc = msg.documentMessage
+                            preview = str(getattr(doc, 'name', '') or '')[:200]
+                            cap = getattr(doc, 'caption', None)
+                            if cap is not None:
+                                preview = str(getattr(cap, 'text', None) or getattr(cap, 'content', None) or preview)[:200]
+                        else:
+                            # oneof name heuristic
+                            which = msg.WhichOneof('content') if hasattr(msg, 'WhichOneof') else None
+                            if which:
+                                kind = which
+                                preview = which
                     except Exception:
                         pass
-                return out
+                    if rid and date:
+                        items.append({
+                            'rid': rid,
+                            'date': date,
+                            'seq': seq,
+                            'sender': sender,
+                            'preview': preview,
+                            'kind': kind,
+                        })
+                return items
 
-            async def _hist(ref):
-                try:
-                    return await client.get_history(ref, limit=int(limit))
-                except Exception as e:
-                    raise e
-
-            # تاریخچه مبدأ
+            hist_items = []
             try:
-                hist = await _hist(src_info)
-            except Exception:
-                try:
-                    hist = await _hist(src_ref)
-                except Exception as e:
-                    return {
-                        'ok': False,
-                        'error': f'get_history: {type(e).__name__}: {e}',
-                        'lib': 'bale-sdk',
-                        'src_id': src_id,
-                        'dst_id': dst_id,
-                    }
+                req_h = pb.LoadHistoryRequest()
+                req_h.peer.CopyFrom(src_peer.to_proto())
+                req_h.date = -1
+                req_h.loadMode = 2  # BACKWARD
+                req_h.limit = int(limit)
+                resp_h = await client.call(
+                    'bale.messaging.v2.Messaging', 'LoadHistory', req_h, timeout=12.0
+                )
+                hist_items = _parse_hist_items(resp_h)
+            except Exception as e:
+                return {
+                    'ok': False,
+                    'error': f'LoadHistory: {type(e).__name__}: {e}',
+                    'lib': 'bale-sdk',
+                    'src_id': src_id,
+                    'dst_id': dst_id,
+                }
 
-            if not hist:
+            if not hist_items:
                 return {
                     'ok': False,
                     'error': 'history_empty',
@@ -996,166 +996,174 @@ def _forward_via_bale_sdk(
             key = (caption_match or '').strip()[:40]
             chosen = None
             if key:
-                for e in hist:
-                    if key in _text(e):
-                        chosen = e
+                for it in hist_items:
+                    if key in str(it.get('preview') or ''):
+                        chosen = it
                         break
             if chosen is None:
-                for e in hist:
-                    if _is_media(e):
-                        chosen = e
+                for it in hist_items:
+                    if it.get('kind') in ('document', 'documentMessage', 'photo', 'video', 'media'):
+                        chosen = it
                         break
             if chosen is None:
-                chosen = hist[0]
+                chosen = hist_items[0]
 
-            rid = int(getattr(chosen, 'rid', 0) or 0)
-            date = int(getattr(chosen, 'date', 0) or 0)
-            if not rid or not date:
-                return {
-                    'ok': False,
-                    'error': f'bad_entry rid={rid} date={date}',
-                    'lib': 'bale-sdk',
-                }
+            rid = int(chosen['rid'])
+            date = int(chosen['date'])
+            seq = int(chosen.get('seq') or 0)
 
-            # تاریخچه مقصد قبل از فوروارد
+            # snapshot مقصد
+            before_ids = set()
             try:
-                before = await _hist(dst_info)
-            except Exception:
-                try:
-                    before = await _hist(dst_ref)
-                except Exception as e:
-                    before = []
-                    logger.warning('dst history before failed: %s', e)
-            before_ids = _entry_ids(before)
+                req_d = pb.LoadHistoryRequest()
+                req_d.peer.CopyFrom(dst_peer.to_proto())
+                req_d.date = -1
+                req_d.loadMode = 2
+                req_d.limit = 15
+                resp_d = await client.call(
+                    'bale.messaging.v2.Messaging', 'LoadHistory', req_d, timeout=12.0
+                )
+                before_ids = {int(getattr(h, 'rid', 0) or 0) for h in (resp_d.history or [])}
+                before_ids.discard(0)
+            except Exception as e:
+                logger.warning('dst hist before: %s', e)
 
-            date_candidates = [date]
+            date_list = [date]
             if date > 10_000_000_000:
-                date_candidates.append(date // 1000)
+                date_list.append(date // 1000)
             elif date > 1_000_000_000:
-                date_candidates.append(date * 1000)
+                date_list.append(date * 1000)
 
             errors: List[str] = []
 
-            def _resp_summary(resp) -> Dict[str, Any]:
-                out: Dict[str, Any] = {'raw': str(resp)[:200]}
-                for attr in ('seq', 'date'):
-                    try:
-                        out[attr] = int(getattr(resp, attr, 0) or 0)
-                    except Exception:
-                        pass
-                try:
-                    st = getattr(resp, 'state', None)
-                    if st is not None:
-                        out['state'] = str(st)[:120]
-                except Exception:
-                    pass
-                return out
+            async def _do_forward(dval: int, use_seq: bool, ah_mode: str) -> Dict[str, Any]:
+                """ارسال ForwardMessages با ترکیب‌های مختلف."""
+                req = pb.ForwardMessagesRequest()
+                # dest OutPeer
+                op = pb.OutPeer()
+                op.type = int(dst_peer.type)
+                op.id = int(dst_peer.id)
+                if ah_mode == 'dst':
+                    op.accessHash = int(dst_peer.access_hash)
+                elif ah_mode == 'one':
+                    op.accessHash = 1
+                else:
+                    op.accessHash = int(dst_peer.access_hash or 1)
+                req.peer.CopyFrom(op)
 
-            async def _verify_strict() -> Dict[str, Any]:
-                """فقط اگر rid جدید در مقصد ظاهر شود."""
+                fwd = req.forwardedMessages.add()
+                sp = pb.Peer()
+                sp.type = int(src_peer.type)
+                sp.id = int(src_peer.id)
+                if ah_mode in ('src', 'both'):
+                    sp.accessHash = int(src_peer.access_hash or 1)
+                else:
+                    sp.accessHash = int(src_peer.access_hash or 1)
+                fwd.peer.CopyFrom(sp)
+                fwd.rid = int(rid)
+                fwd.date.value = int(dval)
+                if use_seq and seq:
+                    fwd.seq.value = int(seq)
+                req.rid.append(random.getrandbits(63))
+
+                resp = await client.call(
+                    'bale.messaging.v2.Messaging', 'ForwardMessages', req, timeout=12.0
+                )
+                summary = {
+                    'seq': int(getattr(resp, 'seq', 0) or 0),
+                    'date': int(getattr(resp, 'date', 0) or 0),
+                    'raw': str(resp)[:120],
+                }
+                return summary
+
+            async def _verify() -> Dict[str, Any]:
                 await asyncio.sleep(2.0)
                 try:
-                    after = await _hist(dst_info)
-                except Exception:
-                    try:
-                        after = await _hist(dst_ref)
-                    except Exception as e:
-                        return {'ok': False, 'reason': f'hist: {e}'}
-                after_ids = _entry_ids(after)
-                new_ids = after_ids - before_ids
-                new_ids.discard(0)
-                if new_ids:
+                    req_v = pb.LoadHistoryRequest()
+                    req_v.peer.CopyFrom(dst_peer.to_proto())
+                    req_v.date = -1
+                    req_v.loadMode = 2
+                    req_v.limit = 15
+                    resp_v = await client.call(
+                        'bale.messaging.v2.Messaging', 'LoadHistory', req_v, timeout=12.0
+                    )
+                    after_ids = {int(getattr(h, 'rid', 0) or 0) for h in (resp_v.history or [])}
+                    after_ids.discard(0)
+                    new_ids = after_ids - before_ids
+                    if new_ids:
+                        return {'ok': True, 'new_rids': list(new_ids)[:5]}
                     return {
-                        'ok': True,
-                        'new_rids': list(new_ids)[:5],
-                        'after_count': len(after_ids),
+                        'ok': False,
+                        'before': len(before_ids),
+                        'after': len(after_ids),
                     }
-                # فوروارد با origin = rid مبدأ
-                for e in after or []:
-                    if getattr(e, 'is_forward', False):
-                        orig = int(getattr(e, 'forward_orig_message_id', 0) or 0)
-                        if orig == rid:
-                            return {
-                                'ok': True,
-                                'matched_origin': rid,
-                                'new_rid': int(getattr(e, 'rid', 0) or 0),
-                            }
-                return {
-                    'ok': False,
-                    'reason': 'no_new_rid',
-                    'before_count': len(before_ids),
-                    'after_count': len(after_ids),
-                    'before_sample': list(before_ids)[:5],
-                    'after_sample': list(after_ids)[:5],
+                except Exception as e:
+                    return {'ok': False, 'error': str(e)}
+
+            for dval in date_list:
+                for use_seq in (True, False):
+                    for ah_mode in ('both', 'dst', 'one'):
+                        tag = f'd={dval}/seq={use_seq}/ah={ah_mode}'
+                        try:
+                            summary = await _do_forward(dval, use_seq, ah_mode)
+                            v = await _verify()
+                            if v.get('ok'):
+                                return {
+                                    'ok': True,
+                                    'result': summary,
+                                    'method': 'bale_sdk.ForwardMessages_raw',
+                                    'lib': 'bale-sdk',
+                                    'message_id': rid,
+                                    'message_date': dval,
+                                    'message_seq': seq,
+                                    'verified': True,
+                                    'verify': v,
+                                    'tag': tag,
+                                    'src_id': src_id,
+                                    'dst_id': dst_id,
+                                    'preview': str(chosen.get('preview') or '')[:80],
+                                }
+                            errors.append(f'{tag} resp={summary} v={v}')
+                        except Exception as e:
+                            errors.append(f'{tag}: {type(e).__name__}: {e}')
+
+            # write probe
+            write_probe: Dict[str, Any]
+            try:
+                probe = await client.send_message(
+                    dst_info, '[تست دسترسی لینک‌یار — نادیده بگیرید]'
+                )
+                write_probe = {
+                    'ok': True,
+                    'seq': int(getattr(probe, 'seq', 0) or 0),
+                    'date': int(getattr(probe, 'date', 0) or 0),
                 }
-
-            for dtry in date_candidates:
-                try:
-                    resp = await client.forward_messages(
-                        dst_info,
-                        [(rid, dtry)],
-                        src_info,
-                    )
-                    summary = _resp_summary(resp)
-                    v = await _verify_strict()
-                    if v.get('ok'):
-                        return {
-                            'ok': True,
-                            'result': summary,
-                            'method': 'bale_sdk.forward_messages',
-                            'lib': 'bale-sdk',
-                            'message_id': rid,
-                            'message_date': dtry,
-                            'verified': True,
-                            'verify': v,
-                            'src_id': src_id,
-                            'dst_id': dst_id,
-                            'src_ah': src_ah,
-                            'dst_ah': dst_ah,
-                            'preview': _text(chosen)[:80],
-                        }
-                    errors.append(
-                        f'not_visible date={dtry} resp={summary} verify={v}'
-                    )
-                except Exception as e:
-                    errors.append(f'forward date={dtry}: {type(e).__name__}: {e}')
-
-            # تست دسترسی نوشتن به کانال مقصد
-            write_probe = None
-            probe_text = '[تست دسترسی لینک‌یار — نادیده بگیرید]'
-            for attempt in (
-                lambda: client.send_message(dst_info, probe_text),
-                lambda: client.send_message(dst_ref, probe_text),
-                lambda: client.send_message(dst_info, text=probe_text),
-                lambda: client.send_message(dst_ref, text=probe_text),
-            ):
-                try:
-                    probe = await attempt()
-                    write_probe = {'ok': True, 'resp': str(probe)[:120]}
-                    break
-                except TypeError as e:
-                    write_probe = {'ok': False, 'error': f'TypeError: {e}'}
-                    continue
-                except Exception as e:
-                    write_probe = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
-                    break
+                # تأیید متن هم
+                await asyncio.sleep(1.5)
+                vp = await _verify()
+                write_probe['visible'] = bool(vp.get('ok'))
+            except Exception as e:
+                write_probe = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
 
             return {
                 'ok': False,
                 'error': 'forward_not_visible_in_target',
                 'lib': 'bale-sdk',
-                'tries': errors[:8],
+                'tries': errors[:6],
                 'message_id': rid,
                 'message_date': date,
+                'message_seq': seq,
                 'src_id': src_id,
                 'dst_id': dst_id,
-                'src_ah': src_ah,
-                'dst_ah': dst_ah,
-                'preview': _text(chosen)[:80],
+                'src_type': int(src_peer.type),
+                'dst_type': int(dst_peer.type),
+                'src_ah': int(src_peer.access_hash),
+                'dst_ah': int(dst_peer.access_hash),
                 'write_probe': write_probe,
+                'preview': str(chosen.get('preview') or '')[:80],
                 'hint': (
-                    'فوروارد در مقصد دیده نشد. '
-                    'اگر write_probe.ok=false لینک‌یار به کانال دسترسی ارسال ندارد.'
+                    'ForwardMessages پاسخ خالی می‌دهد. '
+                    'write_probe نشان می‌دهد لینک‌یار به کانال دسترسی ارسال دارد یا نه.'
                 ),
             }
 

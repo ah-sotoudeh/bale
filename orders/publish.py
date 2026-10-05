@@ -516,14 +516,16 @@ def _post_via_linkyar(
         }
 
     err = str(result.get('error') or 'forward_failed')
-    tries = result.get('tries') or []
-    if tries:
-        err = f'{err} | {tries[0]}'[:350]
     wp = result.get('write_probe') if isinstance(result, dict) else None
     if isinstance(wp, dict):
-        err = f'{err} | write_probe={wp.get("ok")}'[:400]
-    if result.get('hint'):
-        err = f'{err} | {result.get("hint")}'[:450]
+        err = f'{err} | write_probe={wp}'[:280]
+    err = (
+        f'{err} | src={result.get("src_id")} dst={result.get("dst_id")} '
+        f'seq={result.get("message_seq")} mid={result.get("message_id")}'
+    )[:400]
+    tries = result.get('tries') or []
+    if tries:
+        err = f'{err} | try0={tries[0]}'[:500]
     return {
         'ok': False,
         'method': 'failed',
