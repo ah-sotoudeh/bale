@@ -939,15 +939,19 @@ def _forward_via_bale_sdk(
             me_peer = Peer.user(id=me_id, access_hash=0) if me_id else None
 
             async def _resolve_any(ref: str, role: str):
+                """Resolve با تطبیق دقیق یوزرنیم — بدون قبول نتیجه fuzzy اشتباه."""
                 raw = str(ref or '').strip()
-                candidates = []
-                if raw:
-                    candidates.append(raw)
-                if not raw.lstrip('-').isdigit():
-                    if raw.startswith('@'):
-                        candidates.append(raw.lstrip('@'))
-                    else:
-                        candidates.append('@' + raw.lstrip('@'))
+                if not raw:
+                    raise LookupError(f'empty ref for {role}')
+
+                # عدد = peer id مستقیم (بدون search)
+                if raw.lstrip('-').isdigit():
+                    info = await client.resolve(int(raw))
+                    full = await client.get_full(info)
+                    return full, raw
+
+                want = raw.lstrip('@').strip().lower()
+                candidates = [raw, want, '@' + want]
                 if role == 'src':
                     try:
                         from orders.banner_publish import linkbank_channel
@@ -957,16 +961,35 @@ def _forward_via_bale_sdk(
                                 candidates.append(x)
                     except Exception:
                         pass
+
                 last_err = None
+                seen_ids = set()
                 for c in candidates:
                     if not c:
                         continue
                     try:
-                        return await client.resolve(c), c
+                        info = await client.resolve(c)
+                        pid = int(info.peer.id)
+                        if pid in seen_ids:
+                            continue
+                        seen_ids.add(pid)
+                        full = await client.get_full(info)
+                        got = (full.username or '').lstrip('@').strip().lower()
+                        title = str(getattr(full, 'title', None) or '')[:40]
+                        # اگر یوزرنیم برگشتی دقیقاً همان خواسته‌شده باشد قبول
+                        if got and got == want:
+                            return full, '@' + got
+                        # اگر resolve با id بود و username نداشت، فقط برای عدد
+                        last_err = (
+                            f'mismatch want=@{want} got=@{got or "?"} '
+                            f'title={title!r} id={pid}'
+                        )
                     except Exception as e:
                         last_err = e
+                        continue
+
                 raise LookupError(
-                    f'no peer for {role}={raw!r} tried={candidates!r}: {last_err}'
+                    f'exact username not found for {role} want=@{want}: {last_err}'
                 )
 
             async def _enrich(info):

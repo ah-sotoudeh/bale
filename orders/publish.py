@@ -52,7 +52,7 @@ def _linkyar_numeric_id() -> Optional[int]:
 
 
 def channel_ref(ch: Channel) -> str:
-    """مرجع کانال: ترجیح peer عددی، بعد @username از link."""
+    """مرجع کانال برای ارسال: ترجیح peer عددی پایدار، بعد @username."""
     peer = getattr(ch, 'bale_peer_id', None)
     if peer not in (None, '', 0, '0'):
         return str(peer).strip()
@@ -65,7 +65,9 @@ def channel_ref(ch: Channel) -> str:
                 break
         s = s.split('/')[0].strip()
         if s:
-            if not s.startswith('@') and not s.lstrip('-').isdigit():
+            if s.lstrip('-').isdigit():
+                return s
+            if not s.startswith('@'):
                 s = '@' + s
             return s
     uname = getattr(ch, 'username', None) or getattr(ch, 'bale_username', None)
@@ -74,6 +76,24 @@ def channel_ref(ch: Channel) -> str:
         if u:
             return '@' + u
     return str(ch.id)
+
+
+def channel_username(ch: Channel) -> str:
+    """یوزرنیم کانال (برای verify بعد از resolve)."""
+    link = (ch.link or '').strip()
+    if link:
+        s = link.replace('https://', '').replace('http://', '')
+        for prefix in ('ble.ir/', 'bale.ai/'):
+            if s.lower().startswith(prefix):
+                s = s[len(prefix):].lstrip('/')
+                break
+        s = s.split('/')[0].strip().lstrip('@')
+        if s and not s.lstrip('-').isdigit():
+            return s.lower()
+    uname = getattr(ch, 'username', None) or getattr(ch, 'bale_username', None)
+    if uname:
+        return str(uname).strip().lstrip('@').lower()
+    return ''
 
 
 def check_linkyar_admin(ch: Channel) -> str:
