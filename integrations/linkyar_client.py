@@ -855,6 +855,8 @@ def forward_banner_from_linkbank(
             source_channel_ref,
             caption_match=caption_match,
             limit=limit,
+            dst_peer_id=dst_peer_id,
+            dst_title=dst_title,
         )
         if isinstance(result, dict) and result.get('ok'):
             return result
@@ -890,6 +892,8 @@ def _forward_via_bale_sdk(
     *,
     caption_match: str = '',
     limit: int = 40,
+    dst_peer_id: int | None = None,
+    dst_title: str = '',
 ) -> Dict[str, Any]:
     """فوروارد پایدار: لینک‌بانک → (خصوصی خود لینک‌یار) → کانال مقصد.
 
@@ -938,58 +942,114 @@ def _forward_via_bale_sdk(
             me_id = int(getattr(client, '_me_id', 0) or 0)
             me_peer = Peer.user(id=me_id, access_hash=0) if me_id else None
 
-            async def _resolve_any(ref: str, role: str):
-                """Resolve با تطبیق دقیق یوزرنیم — بدون قبول نتیجه fuzzy اشتباه."""
+            async def _resolve_any(ref: str, role: str, peer_id: int | None = None, title_hint: str = ''):
+                """Resolve دقیق: peer_id > یوزرنیم exact > دیالوگ‌ها با عنوان."""
+                from bale.peer import Peer, PeerInfo
+
                 raw = str(ref or '').strip()
-                if not raw:
-                    raise LookupError(f'empty ref for {role}')
-
-                # عدد = peer id مستقیم (بدون search)
-                if raw.lstrip('-').isdigit():
-                    info = await client.resolve(int(raw))
-                    full = await client.get_full(info)
-                    return full, raw
-
-                want = raw.lstrip('@').strip().lower()
-                candidates = [raw, want, '@' + want]
-                if role == 'src':
-                    try:
-                        from orders.banner_publish import linkbank_channel
-                        lb = linkbank_channel()
-                        for x in (lb, str(lb).lstrip('@'), '@' + str(lb).lstrip('@')):
-                            if x and x not in candidates:
-                                candidates.append(x)
-                    except Exception:
-                        pass
-
                 last_err = None
-                seen_ids = set()
-                for c in candidates:
-                    if not c:
-                        continue
+
+                # 1) peer_id صریح (از دیتابیس کانال)
+                if peer_id:
                     try:
-                        info = await client.resolve(c)
-                        pid = int(info.peer.id)
-                        if pid in seen_ids:
-                            continue
-                        seen_ids.add(pid)
+                        info = PeerInfo(peer=Peer.channel(int(peer_id)))
                         full = await client.get_full(info)
-                        got = (full.username or '').lstrip('@').strip().lower()
-                        title = str(getattr(full, 'title', None) or '')[:40]
-                        # اگر یوزرنیم برگشتی دقیقاً همان خواسته‌شده باشد قبول
-                        if got and got == want:
-                            return full, '@' + got
-                        # اگر resolve با id بود و username نداشت، فقط برای عدد
-                        last_err = (
-                            f'mismatch want=@{want} got=@{got or "?"} '
-                            f'title={title!r} id={pid}'
-                        )
+                        return full, str(peer_id)
                     except Exception as e:
-                        last_err = e
-                        continue
+                        last_err = f'peer_id={peer_id}: {e}'
+
+                # 2) عدد در ref
+                if raw.lstrip('-').isdigit():
+                    try:
+                        info = PeerInfo(peer=Peer.channel(int(raw)))
+                        full = await client.get_full(info)
+                        return full, raw
+                    except Exception as e:
+                        last_err = f'numeric ref: {e}'
+
+                # 3) یوزرنیم exact match
+                want = raw.lstrip('@').strip().lower() if raw else ''
+                if want and not want.lstrip('-').isdigit():
+                    candidates = [raw, want, '@' + want]
+                    if role == 'src':
+                        try:
+                            from orders.banner_publish import linkbank_channel
+                            lb = linkbank_channel()
+                            for x in (lb, str(lb).lstrip('@'), '@' + str(lb).lstrip('@')):
+                                if x and x not in candidates:
+                                    candidates.append(x)
+                        except Exception:
+                            pass
+                    seen = set()
+                    for c in candidates:
+                        if not c:
+                            continue
+                        try:
+                            info = await client.resolve(c)
+                            pid = int(info.peer.id)
+                            if pid in seen:
+                                continue
+                            seen.add(pid)
+                            full = await client.get_full(info)
+                            got = (full.username or '').lstrip('@').strip().lower()
+                            if got and got == want:
+                                return full, '@' + got
+                            last_err = (
+                                f'mismatch want=@{want} got=@{got or "?"} '
+                                f'title={str(full.title or "")[:40]!r} id={pid}'
+                            )
+                        except Exception as e:
+                            last_err = e
+
+                # 4) جستجو در دیالوگ‌های حساب (کانال‌هایی که عضو است)
+                title_want = (title_hint or '').strip().lower()
+                if title_want or want:
+                    try:
+                        dialogs = await client.get_dialogs(limit=80)
+                        for d in dialogs:
+                            # Dialog has peer / title attributes — defensive
+                            d_title = str(
+                                getattr(d, 'title', None)
+                                or getattr(getattr(d, 'peer_info', None), 'title', None)
+                                or getattr(getattr(d, 'info', None), 'title', None)
+                                or ''
+                            ).strip()
+                            d_user = str(
+                                getattr(d, 'username', None)
+                                or getattr(getattr(d, 'peer_info', None), 'username', None)
+                                or ''
+                            ).lstrip('@').lower()
+                            peer_obj = (
+                                getattr(d, 'peer', None)
+                                or getattr(getattr(d, 'info', None), 'peer', None)
+                                or getattr(getattr(d, 'peer_info', None), 'peer', None)
+                            )
+                            if title_want and d_title and (
+                                d_title.lower() == title_want
+                                or title_want in d_title.lower()
+                                or d_title.lower() in title_want
+                            ):
+                                if peer_obj is not None:
+                                    info = PeerInfo(peer=peer_obj, title=d_title, username=d_user or None)
+                                    try:
+                                        full = await client.get_full(info)
+                                    except Exception:
+                                        full = info
+                                    return full, f'title:{d_title}'
+                            if want and d_user == want and peer_obj is not None:
+                                info = PeerInfo(peer=peer_obj, title=d_title, username=d_user)
+                                try:
+                                    full = await client.get_full(info)
+                                except Exception:
+                                    full = info
+                                return full, '@' + want
+                        last_err = f'not in dialogs title={title_want!r} user=@{want}'
+                    except Exception as e:
+                        last_err = f'dialogs: {type(e).__name__}: {e}'
 
                 raise LookupError(
-                    f'exact username not found for {role} want=@{want}: {last_err}'
+                    f'cannot resolve {role} ref={raw!r} peer_id={peer_id} '
+                    f'title={title_hint!r}: {last_err}'
                 )
 
             async def _enrich(info):
@@ -1094,7 +1154,12 @@ def _forward_via_bale_sdk(
             # resolve + enrich
             try:
                 src_info, src_used = await _resolve_any(src_ref_in, 'src')
-                dst_info, dst_used = await _resolve_any(dst_ref_in, 'dst')
+                dst_info, dst_used = await _resolve_any(
+                    dst_ref_in,
+                    'dst',
+                    peer_id=int(dst_peer_id) if dst_peer_id else None,
+                    title_hint=str(dst_title or ''),
+                )
             except Exception as e:
                 return {
                     'ok': False,

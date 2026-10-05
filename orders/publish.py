@@ -559,6 +559,12 @@ def _post_via_linkyar(
     elif not _is_numeric(bot_from):
         bot_from = _norm(bot_from)
 
+    peer_id = getattr(ch, 'bale_peer_id', None)
+    try:
+        peer_id = int(peer_id) if peer_id not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        peer_id = None
+
     result = ly.forward_banner_from_linkbank(
         dst_ref,
         src_ref,
@@ -566,6 +572,8 @@ def _post_via_linkyar(
         limit=40,
         bot_from_chat_id=bot_from,
         bot_message_id=bot_mid,
+        dst_peer_id=peer_id,
+        dst_title=str(getattr(ch, 'name', None) or ''),
     )
     if result.get('ok'):
         return {
