@@ -1238,54 +1238,66 @@ def _forward_via_bale_sdk(
             except Exception as e:
                 group_info = {'err': f'{type(e).__name__}: {e}'}
 
-            # access_hash واقعی (1 و 0 = نامعتبر)
             def _is_real_ah(v: int) -> bool:
                 return int(v or 0) not in (0, 1)
 
             ah_final = int(dst_peer.access_hash or 0)
             ah_src = 'initial'
+            can_send = None
 
-            # همیشه اول از دیالوگ‌ها بخوان (حتی اگر الان 1 باشد)
+            # LoadGroups — accessHash و canSendMessage از خود گروه
             try:
-                for d in await client.get_dialogs(limit=120):
-                    p = getattr(d, 'peer', None)
-                    if p is not None and int(p.id) == int(dst_id):
-                        cand = int(getattr(p, 'access_hash', 0) or 0)
+                req_lg = pb.LoadGroupsRequest()
+                gp = req_lg.peers.add()
+                gp.groupId = int(dst_id)
+                gp.accessHash = int(ah_final or 1)
+                resp_lg = await client.call(
+                    'bale.groups.v1.Groups', 'LoadGroups', req_lg, timeout=10.0
+                )
+                for g in list(getattr(resp_lg, 'groups', []) or []):
+                    if int(getattr(g, 'id', 0) or 0) == int(dst_id):
+                        cand = int(getattr(g, 'accessHash', 0) or 0)
+                        can_send = bool(getattr(g, 'canSendMessage', False))
+                        group_info['canSendMessage'] = can_send
+                        group_info['groupType'] = int(getattr(g, 'groupType', 0) or 0)
                         if _is_real_ah(cand):
                             ah_final = cand
-                            ah_src = 'dialogs'
-                            break
-                        if not _is_real_ah(ah_final) and cand:
-                            ah_final = cand
-                            ah_src = 'dialogs_weak'
+                            ah_src = 'LoadGroups'
+                        break
             except Exception as e:
-                group_info['ah_dialogs_err'] = f'{type(e).__name__}: {e}'
+                group_info['ah_lg_err'] = f'{type(e).__name__}: {e}'
 
+            # JoinPublicGroup response.group.accessHash
             if not _is_real_ah(ah_final):
                 try:
-                    nick = str(dst_used or '').lstrip('@').strip() or 'linkya'
-                    req_sc = pb.SearchContactsRequest()
-                    req_sc.request = nick
-                    resp_sc = await client.call(
-                        'bale.users.v1.Users', 'SearchContacts', req_sc, timeout=10.0
+                    req_j = pb.JoinPublicGroupRequest()
+                    req_j.peer.type = int(dst_peer.type)
+                    req_j.peer.id = int(dst_id)
+                    resp_j = await client.call(
+                        'bale.groups.v1.Groups', 'JoinPublicGroup', req_j, timeout=8.0
                     )
-                    for gp in list(getattr(resp_sc, 'groupPeers', []) or []):
-                        if int(getattr(gp, 'groupId', 0) or 0) == int(dst_id):
-                            cand = int(getattr(gp, 'accessHash', 0) or 0)
+                    g = getattr(resp_j, 'group', None)
+                    if g is not None:
+                        cand = int(getattr(g, 'accessHash', 0) or 0)
+                        if _is_real_ah(cand):
+                            ah_final = cand
+                            ah_src = 'JoinPublicGroup'
+                except Exception as e:
+                    group_info['ah_join_err'] = f'{type(e).__name__}: {e}'
+
+            # dialogs
+            if not _is_real_ah(ah_final):
+                try:
+                    for d in await client.get_dialogs(limit=120):
+                        p = getattr(d, 'peer', None)
+                        if p is not None and int(p.id) == int(dst_id):
+                            cand = int(getattr(p, 'access_hash', 0) or 0)
                             if _is_real_ah(cand):
                                 ah_final = cand
-                                ah_src = 'SearchContacts.groupPeers'
+                                ah_src = 'dialogs'
                                 break
-                    if not _is_real_ah(ah_final):
-                        for g in list(getattr(resp_sc, 'groups', []) or []):
-                            if int(getattr(g, 'id', 0) or 0) == int(dst_id):
-                                cand = int(getattr(g, 'accessHash', 0) or 0)
-                                if _is_real_ah(cand):
-                                    ah_final = cand
-                                    ah_src = 'SearchContacts.groups'
-                                    break
                 except Exception as e:
-                    group_info['ah_sc_err'] = f'{type(e).__name__}: {e}'
+                    group_info['ah_dialogs_err'] = f'{type(e).__name__}: {e}'
 
             if not ah_final:
                 ah_final = 1
@@ -1299,24 +1311,27 @@ def _forward_via_bale_sdk(
             group_info['accessHash'] = int(ah_final)
             group_info['ah_source'] = ah_src
 
-            # src
-            src_ah = int(src_peer.access_hash or 0)
+            src_ah = int(src_peer.access_hash or 0) or 1
             try:
-                for d in await client.get_dialogs(limit=120):
-                    p = getattr(d, 'peer', None)
-                    if p is not None and int(p.id) == int(src_id):
-                        cand = int(getattr(p, 'access_hash', 0) or 0)
+                req_lg2 = pb.LoadGroupsRequest()
+                gp2 = req_lg2.peers.add()
+                gp2.groupId = int(src_id)
+                gp2.accessHash = int(src_ah)
+                resp_lg2 = await client.call(
+                    'bale.groups.v1.Groups', 'LoadGroups', req_lg2, timeout=10.0
+                )
+                for g in list(getattr(resp_lg2, 'groups', []) or []):
+                    if int(getattr(g, 'id', 0) or 0) == int(src_id):
+                        cand = int(getattr(g, 'accessHash', 0) or 0)
                         if _is_real_ah(cand):
                             src_ah = cand
-                            break
+                        break
             except Exception:
                 pass
-            if not src_ah:
-                src_ah = 1
             src_peer = Peer(
                 id=int(src_id),
                 type=int(src_peer.type),
-                access_hash=int(src_ah),
+                access_hash=int(src_ah or 1),
             )
 
             # member permissions
@@ -1483,23 +1498,34 @@ def _forward_via_bale_sdk(
                 except Exception as e:
                     errors.append(f'direct d={dval}: {type(e).__name__}: {e}')
 
-            # probe text to channel one more time
+            # probe: self + raw SendMessage to channel with final access_hash
             marker = f'[ly-probe-{int(_time.time())}]'
-            write_probe: Dict[str, Any] = {'marker': marker, 'me_id': me_id}
+            write_probe: Dict[str, Any] = {
+                'marker': marker,
+                'me_id': me_id,
+                'dst_ah_used': int(dst_peer.access_hash),
+            }
             try:
                 r1 = await client.send_message(me_peer, marker + '-self') if me_peer else None
-                write_probe['self'] = {
-                    'seq': _u64(getattr(r1, 'seq', 0)) if r1 else 0,
-                }
+                write_probe['self'] = {'seq': _u64(getattr(r1, 'seq', 0)) if r1 else 0}
             except Exception as e:
                 write_probe['self'] = {'err': str(e)}
             try:
-                r2 = await client.send_message(dst_used, marker + '-ch')
+                # raw SendMessage مثل مسیر موفق self
+                req_sm = pb.SendMessageRequest()
+                req_sm.peer.CopyFrom(dst_peer.to_proto())
+                req_sm.exPeer.CopyFrom(dst_peer.to_out_proto())
+                req_sm.rid = random.getrandbits(63)
+                req_sm.message.textMessage.text = marker + '-ch'
+                r2 = await client.call(
+                    'bale.messaging.v2.Messaging', 'SendMessage', req_sm, timeout=10.0
+                )
                 write_probe['ch_api'] = {
                     'seq': _u64(getattr(r2, 'seq', 0)),
                     'date': _u64(getattr(r2, 'date', 0)),
+                    'raw': str(r2)[:80],
                 }
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(2.5)
                 h_dst = await _load_hist(dst_peer, 12)
                 write_probe['in_dst'] = _find_text(h_dst, marker)
                 write_probe['dst_n'] = len(h_dst)
