@@ -891,9 +891,10 @@ def _forward_via_bale_sdk(
     caption_match: str = '',
     limit: int = 40,
 ) -> Dict[str, Any]:
-    """فوروارد با bale-sdk (import bale)."""
+    """فوروارد با bale-sdk + تأیید حضور در کانال مقصد."""
 
     async def _fn():
+        import asyncio
         from bale import BaleClient
 
         token = user_token()
@@ -905,19 +906,47 @@ def _forward_via_bale_sdk(
         if not src_ref or not dst_ref:
             return {'ok': False, 'error': 'channel_ref_required', 'lib': 'bale-sdk'}
 
-        errors: List[str] = []
         async with BaleClient(token) as client:
+            # resolve برای لاگ و اطمینان
             try:
-                hist = await client.get_history(src_ref, limit=int(limit))
+                src_info = await client.resolve(src_ref)
+                dst_info = await client.resolve(dst_ref)
             except Exception as e:
                 return {
                     'ok': False,
-                    'error': f'get_history: {type(e).__name__}: {e}',
+                    'error': f'resolve: {type(e).__name__}: {e}',
                     'lib': 'bale-sdk',
                 }
 
+            src_peer = getattr(src_info, 'peer', src_info)
+            dst_peer = getattr(dst_info, 'peer', dst_info)
+            src_id = int(getattr(src_peer, 'id', 0) or 0)
+            dst_id = int(getattr(dst_peer, 'id', 0) or 0)
+            src_ah = int(getattr(src_peer, 'access_hash', 0) or 0)
+            dst_ah = int(getattr(dst_peer, 'access_hash', 0) or 0)
+
+            try:
+                hist = await client.get_history(src_info, limit=int(limit))
+            except Exception as e:
+                try:
+                    hist = await client.get_history(src_ref, limit=int(limit))
+                except Exception as e2:
+                    return {
+                        'ok': False,
+                        'error': f'get_history: {type(e2).__name__}: {e2}',
+                        'lib': 'bale-sdk',
+                        'src_id': src_id,
+                        'dst_id': dst_id,
+                    }
+
             if not hist:
-                return {'ok': False, 'error': 'history_empty', 'lib': 'bale-sdk'}
+                return {
+                    'ok': False,
+                    'error': 'history_empty',
+                    'lib': 'bale-sdk',
+                    'src_id': src_id,
+                    'dst_id': dst_id,
+                }
 
             key = (caption_match or '').strip()[:40]
 
@@ -974,52 +1003,114 @@ def _forward_via_bale_sdk(
                     'lib': 'bale-sdk',
                 }
 
-            try:
-                resp = await client.forward_messages(
-                    dst_ref,
-                    [(rid, date)],
-                    src_ref,
-                )
-                return {
-                    'ok': True,
-                    'result': str(resp)[:300],
-                    'method': 'bale_sdk.forward_messages',
-                    'lib': 'bale-sdk',
-                    'message_id': rid,
-                    'message_date': date,
-                    'preview': _text(chosen)[:80],
-                }
-            except Exception as e:
-                errors.append(f'forward_messages: {type(e).__name__}: {e}')
+            # چند فرم تاریخ: اصلی، ثانیه، میلی‌ثانیه
+            date_candidates = [date]
+            if date > 10_000_000_000:  # ms → s
+                date_candidates.append(date // 1000)
+            elif date > 1_000_000_000:  # s → ms
+                date_candidates.append(date * 1000)
+
+            errors: List[str] = []
+
+            async def _verify_in_target(after_rid: int, after_date: int) -> bool:
+                """آیا پیام جدید/فورواردشده در مقصد دیده می‌شود؟"""
+                await asyncio.sleep(1.5)
                 try:
-                    src_info = await client.resolve(src_ref)
-                    dst_info = await client.resolve(dst_ref)
+                    th = await client.get_history(dst_info, limit=8)
+                except Exception:
+                    try:
+                        th = await client.get_history(dst_ref, limit=8)
+                    except Exception as e:
+                        errors.append(f'verify_hist: {type(e).__name__}: {e}')
+                        return False
+                if not th:
+                    return False
+                for e in th:
+                    erid = int(getattr(e, 'rid', 0) or 0)
+                    edate = int(getattr(e, 'date', 0) or 0)
+                    # پیام جدید با rid تولیدشده، یا فوروارد با origin
+                    if getattr(e, 'is_forward', False):
+                        orig = int(getattr(e, 'forward_orig_message_id', 0) or 0)
+                        if orig and orig == after_rid:
+                            return True
+                        # فوروارد تازه با رسانه
+                        if _is_media(e):
+                            return True
+                    if _is_media(e) and edate >= (after_date // 1000 if after_date > 10_000_000_000 else after_date) - 5:
+                        # پیام رسانه‌ای خیلی تازه
+                        return True
+                # اگر جدیدترین پیام رسانه دارد و date نزدیک now است
+                newest = th[0]
+                if _is_media(newest):
+                    return True
+                return False
+
+            def _resp_summary(resp) -> Dict[str, Any]:
+                out: Dict[str, Any] = {'raw': str(resp)[:200]}
+                try:
+                    out['seq'] = int(getattr(resp, 'seq', 0) or 0)
+                except Exception:
+                    pass
+                try:
+                    out['date'] = int(getattr(resp, 'date', 0) or 0)
+                except Exception:
+                    pass
+                try:
+                    st = getattr(resp, 'state', None)
+                    if st is not None:
+                        out['state'] = str(st)[:120]
+                except Exception:
+                    pass
+                return out
+
+            for dtry in date_candidates:
+                try:
                     resp = await client.forward_messages(
                         dst_info,
-                        [(rid, date)],
+                        [(rid, dtry)],
                         src_info,
                     )
-                    return {
-                        'ok': True,
-                        'result': str(resp)[:300],
-                        'method': 'bale_sdk.forward_messages_resolved',
-                        'lib': 'bale-sdk',
-                        'message_id': rid,
-                        'message_date': date,
-                    }
-                except Exception as e2:
-                    errors.append(f'forward_resolved: {type(e2).__name__}: {e2}')
+                    summary = _resp_summary(resp)
+                    verified = await _verify_in_target(rid, dtry)
+                    if verified:
+                        return {
+                            'ok': True,
+                            'result': summary,
+                            'method': 'bale_sdk.forward_messages',
+                            'lib': 'bale-sdk',
+                            'message_id': rid,
+                            'message_date': dtry,
+                            'verified': True,
+                            'src_id': src_id,
+                            'dst_id': dst_id,
+                            'src_ah': src_ah,
+                            'dst_ah': dst_ah,
+                            'preview': _text(chosen)[:80],
+                        }
+                    errors.append(
+                        f'not_visible date={dtry} resp={summary}'
+                    )
+                except Exception as e:
+                    errors.append(f'forward date={dtry}: {type(e).__name__}: {e}')
 
+            # آخرین تلاش: بدون verify هم اگر seq غیرصفر بود گزارش مشکوک
             return {
                 'ok': False,
-                'error': 'forward_failed',
+                'error': 'forward_not_visible_in_target',
                 'lib': 'bale-sdk',
-                'tries': errors[:8],
+                'tries': errors[:10],
                 'message_id': rid,
                 'message_date': date,
+                'src_id': src_id,
+                'dst_id': dst_id,
+                'src_ah': src_ah,
+                'dst_ah': dst_ah,
+                'preview': _text(chosen)[:80],
+                'hint': 'API جواب داد ولی پیام در کانال مقصد دیده نشد؛ دسترسی ادمین لینک‌یار یا peer مقصد را چک کنید',
             }
 
     return _run(_fn())
+
 
 
 def _forward_via_aiobale_stack(
