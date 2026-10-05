@@ -843,9 +843,195 @@ def forward_banner_from_linkbank(
     bot_from_chat_id: str = '',
     bot_message_id: int = 0,
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول — اولویت با BaleClient + load_history رسمی."""
+    """فوروارد با نقل‌قول از لینک‌بانک.
+
+    اولویت ۱: bale-sdk (forward_messages با rid+date)
+    اولویت ۲: baleclient/aiobale
+    """
+    sdk_err = ''
+    try:
+        result = _forward_via_bale_sdk(
+            target_channel_ref,
+            source_channel_ref,
+            caption_match=caption_match,
+            limit=limit,
+        )
+        if isinstance(result, dict) and result.get('ok'):
+            return result
+        if isinstance(result, dict) and result.get('error'):
+            sdk_err = str(result.get('error'))
+            if result.get('tries'):
+                sdk_err = sdk_err + ' | ' + str(result['tries'][0])[:120]
+            # اگر bale-sdk نصب بود ولی فوروارد شکست → همان خطا را برگردان
+            # (fallback فقط وقتی sdk نصب نیست)
+            if result.get('lib') == 'bale-sdk' and result.get('error') != 'BALE_TOKEN missing':
+                return result
+    except ModuleNotFoundError:
+        logger.info('bale-sdk not installed; fallback to baleclient/aiobale')
+    except Exception as e:
+        logger.exception('bale-sdk forward exception')
+        sdk_err = f'{type(e).__name__}: {e}'
+
+    result = _forward_via_aiobale_stack(
+        target_channel_ref,
+        source_channel_ref,
+        caption_match=caption_match,
+        limit=limit,
+    )
+    if isinstance(result, dict) and sdk_err and not result.get('ok'):
+        result = dict(result)
+        result['sdk_error'] = sdk_err[:200]
+    return result
+
+
+def _forward_via_bale_sdk(
+    target_channel_ref: str,
+    source_channel_ref: str,
+    *,
+    caption_match: str = '',
+    limit: int = 40,
+) -> Dict[str, Any]:
+    """فوروارد با bale-sdk (import bale)."""
+
+    async def _fn():
+        from bale import BaleClient
+
+        token = user_token()
+        if not token or token == 'your_access_token_here':
+            return {'ok': False, 'error': 'BALE_TOKEN missing', 'lib': 'bale-sdk'}
+
+        src_ref = str(source_channel_ref or '').strip()
+        dst_ref = str(target_channel_ref or '').strip()
+        if not src_ref or not dst_ref:
+            return {'ok': False, 'error': 'channel_ref_required', 'lib': 'bale-sdk'}
+
+        errors: List[str] = []
+        async with BaleClient(token) as client:
+            try:
+                hist = await client.get_history(src_ref, limit=int(limit))
+            except Exception as e:
+                return {
+                    'ok': False,
+                    'error': f'get_history: {type(e).__name__}: {e}',
+                    'lib': 'bale-sdk',
+                }
+
+            if not hist:
+                return {'ok': False, 'error': 'history_empty', 'lib': 'bale-sdk'}
+
+            key = (caption_match or '').strip()[:40]
+
+            def _text(entry) -> str:
+                try:
+                    c = getattr(entry, 'content', None)
+                    if c is None:
+                        return ''
+                    if getattr(c, 'text', None):
+                        return str(c.text)[:200]
+                    media = getattr(c, 'media', None)
+                    if media is not None:
+                        return str(
+                            getattr(media, 'name', None)
+                            or getattr(media, 'caption', None)
+                            or ''
+                        )[:200]
+                    return str(getattr(c, 'kind', '') or '')
+                except Exception:
+                    return ''
+
+            def _is_media(entry) -> bool:
+                try:
+                    c = getattr(entry, 'content', None)
+                    if c is None:
+                        return False
+                    kind = str(getattr(c, 'kind', '') or '').lower()
+                    if kind in ('photo', 'video', 'document', 'media', 'image'):
+                        return True
+                    return getattr(c, 'media', None) is not None
+                except Exception:
+                    return False
+
+            chosen = None
+            if key:
+                for e in hist:
+                    if key in _text(e):
+                        chosen = e
+                        break
+            if chosen is None:
+                for e in hist:
+                    if _is_media(e):
+                        chosen = e
+                        break
+            if chosen is None:
+                chosen = hist[0]
+
+            rid = int(getattr(chosen, 'rid', 0) or 0)
+            date = int(getattr(chosen, 'date', 0) or 0)
+            if not rid or not date:
+                return {
+                    'ok': False,
+                    'error': f'bad_entry rid={rid} date={date}',
+                    'lib': 'bale-sdk',
+                }
+
+            try:
+                resp = await client.forward_messages(
+                    dst_ref,
+                    [(rid, date)],
+                    src_ref,
+                )
+                return {
+                    'ok': True,
+                    'result': str(resp)[:300],
+                    'method': 'bale_sdk.forward_messages',
+                    'lib': 'bale-sdk',
+                    'message_id': rid,
+                    'message_date': date,
+                    'preview': _text(chosen)[:80],
+                }
+            except Exception as e:
+                errors.append(f'forward_messages: {type(e).__name__}: {e}')
+                try:
+                    src_info = await client.resolve(src_ref)
+                    dst_info = await client.resolve(dst_ref)
+                    resp = await client.forward_messages(
+                        dst_info,
+                        [(rid, date)],
+                        src_info,
+                    )
+                    return {
+                        'ok': True,
+                        'result': str(resp)[:300],
+                        'method': 'bale_sdk.forward_messages_resolved',
+                        'lib': 'bale-sdk',
+                        'message_id': rid,
+                        'message_date': date,
+                    }
+                except Exception as e2:
+                    errors.append(f'forward_resolved: {type(e2).__name__}: {e2}')
+
+            return {
+                'ok': False,
+                'error': 'forward_failed',
+                'lib': 'bale-sdk',
+                'tries': errors[:8],
+                'message_id': rid,
+                'message_date': date,
+            }
+
+    return _run(_fn())
+
+
+def _forward_via_aiobale_stack(
+    target_channel_ref: str,
+    source_channel_ref: str,
+    *,
+    caption_match: str = '',
+    limit: int = 40,
+) -> Dict[str, Any]:
+    """مسیر baleclient/aiobale (fallback)."""
+
     async def _fn(client):
-        # import از aiobale.* که به baleclient alias شده
         from aiobale.enums import ChatType, ListLoadMode, PeerType
         from aiobale.types import InfoMessage, Peer
         from aiobale.types.values import IntValue
@@ -877,7 +1063,6 @@ def forward_banner_from_linkbank(
         except Exception:
             pass
 
-        # 1) load_history رسمی
         loaded = []
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
             try:
@@ -891,47 +1076,16 @@ def forward_banner_from_linkbank(
             except Exception as e:
                 errors.append(f'load_history/{ctype}: {type(e).__name__}: {e}')
 
-        def _preview(msg) -> str:
-            try:
-                c = getattr(msg, 'content', None)
-                if c is None:
-                    return ''
-                text = getattr(c, 'text', None)
-                if text is not None:
-                    return str(getattr(text, 'text', None) or getattr(text, 'content', None) or '')[:200]
-                doc = getattr(c, 'document', None)
-                if doc is not None:
-                    cap = getattr(doc, 'caption', None)
-                    if cap is not None:
-                        return str(getattr(cap, 'content', None) or getattr(cap, 'text', None) or '')[:200]
-                    return str(getattr(doc, 'name', None) or '')[:200]
-            except Exception:
-                return ''
-            return ''
-
-        def _is_media(msg) -> bool:
-            try:
-                c = getattr(msg, 'content', None)
-                return bool(c is not None and getattr(c, 'document', None) is not None)
-            except Exception:
-                return False
-
         if loaded:
-            key = (caption_match or '').strip()[:40]
-            chosen = None
-            if key:
-                for msg in loaded:
-                    if key in _preview(msg):
+            chosen = loaded[0]
+            for msg in loaded:
+                try:
+                    c = getattr(msg, 'content', None)
+                    if c is not None and getattr(c, 'document', None) is not None:
                         chosen = msg
                         break
-            if chosen is None:
-                for msg in loaded:
-                    if _is_media(msg):
-                        chosen = msg
-                        break
-            if chosen is None:
-                chosen = loaded[0]
-
+                except Exception:
+                    pass
             for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
                 try:
                     resp = await client.forward_message(
@@ -945,99 +1099,15 @@ def forward_banner_from_linkbank(
                         'chat_type': str(ctype),
                         'message_id': int(getattr(chosen, 'message_id', 0) or 0),
                         'message_date': int(getattr(chosen, 'date', 0) or 0),
-                        'preview': _preview(chosen)[:80],
                     }
                 except Exception as e:
                     errors.append(f'fwd_msg/{ctype}: {type(e).__name__}: {e}')
-
-            mid = int(getattr(chosen, 'message_id', 0) or 0)
-            date = int(getattr(chosen, 'date', 0) or 0)
-            if mid and date:
-                pkw = {'type': PeerType.GROUP, 'id': src_id}
-                if src_ah not in (None, 0, '0'):
-                    pkw['access_hash'] = int(src_ah)
-                for d in (IntValue(value=date), date):
-                    info = InfoMessage(peer=Peer(**pkw), message_id=mid, date=d)
-                    for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
-                        try:
-                            resp = await client.forward_message(
-                                message=info, chat_id=tgt_id, chat_type=ctype
-                            )
-                            return {
-                                'ok': True,
-                                'result': str(resp),
-                                'method': 'forward_message_InfoMessage',
-                                'lib': lib_name,
-                                'chat_type': str(ctype),
-                                'message_id': mid,
-                                'message_date': date,
-                            }
-                        except Exception as e:
-                            errors.append(f'fwd_info/{ctype}: {type(e).__name__}: {e}')
-
-        # 2) تاریخچه خام
-        raw = await _load_history_raw(
-            client, src_id, src_ah if src_ah not in (None, 0) else None, limit=int(limit)
-        )
-        if not raw.get('ok'):
-            raw = await _load_history_raw(client, src_id, None, limit=int(limit))
-        if raw.get('ok'):
-            uname = str(source_channel_ref).lstrip('@')
-            posts = []
-            for it in raw.get('items') or []:
-                parsed = _parse_raw_message_item(it, uname)
-                if parsed and parsed.get('message_id') and parsed.get('date'):
-                    posts.append(parsed)
-            posts.sort(key=lambda p: int(p.get('date') or 0), reverse=True)
-            key = (caption_match or '').strip()[:40]
-            pick = None
-            if key:
-                for p in posts:
-                    if key in str(p.get('preview') or ''):
-                        pick = p
-                        break
-            if pick is None:
-                for p in posts:
-                    if p.get('kind') in ('photo', 'video', 'document'):
-                        pick = p
-                        break
-            if pick is None and posts:
-                pick = posts[0]
-            if pick:
-                mid = int(pick['message_id'])
-                date = int(pick['date'])
-                pkw = {'type': PeerType.GROUP, 'id': src_id}
-                if src_ah not in (None, 0, '0'):
-                    pkw['access_hash'] = int(src_ah)
-                for d in (IntValue(value=date), date):
-                    info = InfoMessage(peer=Peer(**pkw), message_id=mid, date=d)
-                    for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
-                        try:
-                            resp = await client.forward_message(
-                                message=info, chat_id=tgt_id, chat_type=ctype
-                            )
-                            return {
-                                'ok': True,
-                                'result': str(resp),
-                                'method': 'forward_raw_InfoMessage',
-                                'lib': lib_name,
-                                'chat_type': str(ctype),
-                                'message_id': mid,
-                                'message_date': date,
-                                'preview': str(pick.get('preview') or '')[:80],
-                            }
-                        except Exception as e:
-                            errors.append(f'fwd_raw/{ctype}: {type(e).__name__}: {e}')
-        else:
-            errors.append(f'raw_hist: {raw.get("error")}')
 
         return {
             'ok': False,
             'error': 'forward_failed',
             'lib': lib_name,
-            'tries': errors[:14],
-            'src_peer': src_id,
-            'target': tgt_id,
+            'tries': errors[:10],
         }
 
     return _run(_with_client(_fn))

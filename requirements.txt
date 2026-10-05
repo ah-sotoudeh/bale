@@ -8,7 +8,8 @@ aiohttp>=3.9.0
 # لینک‌یار (حساب کاربری). نام روی PyPI این است؛ در کد همان import aiobale می‌ماند.
 # بستهٔ aiobale روی PyPI فقط نسخهٔ خالی 0.0.1 است و به کار نمی‌آید.
 aiobale-py>=0.3.8
-baleclient>=1.0.0  # فورک پایدار aiobale — اولویت برای لینک‌یار
+baleclient>=1.0.0  # فورک پایدار aiobale
+bale-sdk>=0.1.1  # اولویت فوروارد لینک‌یار (rid+date)
 
 # Optional: MySQL driver for production/CI only
 # Install separately when you have MySQL + build tools:
