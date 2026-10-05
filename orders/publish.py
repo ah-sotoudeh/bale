@@ -580,62 +580,24 @@ def _post_via_linkyar(
             'api': result,
             'channel_ref': dst_ref,
             'ok': True,
-            'method': 'forward',
+            'method': result.get('method') or 'forward',
             'message_id': result.get('message_id'),
             'message_date': result.get('message_date'),
+            'lib': result.get('lib'),
         }
 
-    # API حساب کاربری با وجود canSendMessage=True ارسال به کانال را no-op می‌کند
-    # (self کار می‌کند؛ کانال نه). اگر بازو ادمین کانال باشد، فوروارد بات fallback.
-    ly_err = str(result.get('error') or 'forward_failed')
-    bot_fallback = None
-    try:
-        from integrations import bale_client as bc
-        if bot_mid and (bot_from or src_ref) and dst_ref:
-            bot_fallback = bc.forward_message(
-                dst_ref,
-                bot_from or src_ref,
-                int(bot_mid),
-            )
-            if isinstance(bot_fallback, dict) and bot_fallback.get('ok') is False:
-                pass
-            else:
-                # موفقیت بات
-                mid = None
-                if isinstance(bot_fallback, dict):
-                    mid = (
-                        bot_fallback.get('message_id')
-                        or bot_fallback.get('result', {}).get('message_id')
-                        if isinstance(bot_fallback.get('result'), dict)
-                        else bot_fallback.get('message_id')
-                    )
-                return {
-                    'ok': True,
-                    'method': 'forward_bot_fallback',
-                    'channel_ref': dst_ref,
-                    'message_id': mid,
-                    'api': {'linkyar': result, 'bot': bot_fallback},
-                    'warning': (
-                        'لینک‌یار API نتوانست در کانال بنویسد '
-                        f'({ly_err[:80]}); با بازو فوروارد شد.'
-                    ),
-                }
-    except Exception as e:
-        bot_fallback = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
-
-    err = ly_err
-    if result.get('me_id'):
-        err = f'{err} | me={result.get("me_id")}'
-    if result.get('direction'):
-        err = f'{err} | dir={result.get("direction")}'
-    gi = result.get('group_info') if isinstance(result, dict) else None
-    if isinstance(gi, dict):
-        err = f'{err} | group={gi}'[:280]
-    pm = result.get('perms') if isinstance(result, dict) else None
-    if isinstance(pm, dict):
-        err = f'{err} | perms={pm}'[:340]
-    if bot_fallback is not None:
-        err = f'{err} | bot_fallback={bot_fallback}'[:420]
+    err = str(result.get('error') or 'forward_failed')
+    if result.get('tries_all'):
+        err = f'{err} | {result.get("tries_all")}'[:300]
+    elif result.get('tries'):
+        err = f'{err} | try0={result.get("tries")[0]}'[:300]
+    if result.get('src_peer') or result.get('target'):
+        err = (
+            f'{err} | src={result.get("src_peer")} tgt={result.get("target")} '
+            f'mid={result.get("mid")}'
+        )[:400]
+    if result.get('lib'):
+        err = f'{err} | lib={result.get("lib")}'
     return {
         'ok': False,
         'method': 'failed',

@@ -1595,7 +1595,7 @@ def _forward_via_aiobale_stack(
             except Exception:
                 pass
 
-        tgt = await _resolve_peer(client, target_channel_ref)
+        tgt = await _resolve_exact(target_channel_ref, peer_id=dst_peer_id)
         if not tgt.get('ok'):
             return {'ok': False, 'error': f'target_resolve: {tgt.get("error")}', 'lib': lib_name}
         tgt_id = int(tgt['peer_id'])
