@@ -974,7 +974,8 @@ def _forward_via_bale_sdk(
                 steps = []
                 try:
                     req_j = pb.JoinPublicGroupRequest()
-                    req_j.peer.CopyFrom(peer.to_proto())
+                    req_j.peer.type = int(peer.type)
+                    req_j.peer.id = int(peer.id)
                     await client.call(
                         'bale.groups.v1.Groups', 'JoinPublicGroup', req_j, timeout=8.0
                     )
@@ -1090,22 +1091,24 @@ def _forward_via_bale_sdk(
             group_info: Dict[str, Any] = {}
             try:
                 req_fg = pb.GetFullGroupRequest()
-                req_fg.peer.CopyFrom(dst_peer.to_proto())
+                req_fg.peer.groupId = int(dst_id)
+                req_fg.peer.accessHash = int(dst_peer.access_hash or 1)
                 resp_fg = await client.call(
                     'bale.groups.v1.Groups', 'GetFullGroup', req_fg, timeout=8.0
                 )
                 fg = resp_fg.fullGroup
+                ah = _u64(getattr(fg, 'accessHash', 0))
                 group_info = {
                     'ownerUid': _u64(getattr(fg, 'ownerUid', 0)),
                     'isMember': bool(getattr(fg, 'isMember', False)),
-                    'accessHash': _u64(getattr(fg, 'accessHash', 0)),
+                    'accessHash': ah,
                     'title': str(getattr(fg, 'title', '') or '')[:40],
                 }
-                if group_info['accessHash']:
+                if ah:
                     dst_peer = Peer(
                         id=dst_id,
                         type=int(dst_peer.type),
-                        access_hash=int(group_info['accessHash']),
+                        access_hash=int(ah),
                     )
             except Exception as e:
                 group_info = {'err': f'{type(e).__name__}: {e}'}
@@ -1117,19 +1120,24 @@ def _forward_via_bale_sdk(
                     req_p = pb.GetMemberPermissionsRequest()
                     req_p.group.groupId = int(dst_id)
                     req_p.group.accessHash = int(dst_peer.access_hash or 1)
-                    req_p.user.type = 1
-                    req_p.user.id = int(me_id)
+                    req_p.user.uid = int(me_id)
+                    req_p.user.accessHash = 0
                     resp_p = await client.call(
                         'bale.groups.v1.Groups', 'GetMemberPermissions', req_p, timeout=8.0
                     )
                     p = resp_p.permissions
+                    def _pb_bool(v):
+                        if v is None:
+                            return False
+                        if isinstance(v, bool):
+                            return v
+                        return bool(getattr(v, 'value', False))
                     perms_info = {
                         'sendMessage': bool(getattr(p, 'sendMessage', False)),
-                        'sendForwardedMessage': bool(
-                            getattr(getattr(p, 'sendForwardedMessage', None), 'value', False)
-                            if hasattr(getattr(p, 'sendForwardedMessage', None), 'value')
-                            else getattr(p, 'sendForwardedMessage', False)
+                        'sendForwardedMessage': _pb_bool(
+                            getattr(p, 'sendForwardedMessage', None)
                         ),
+                        'sendMedia': _pb_bool(getattr(p, 'sendMedia', None)),
                     }
                 except Exception as e:
                     perms_info = {'err': f'{type(e).__name__}: {e}'}
