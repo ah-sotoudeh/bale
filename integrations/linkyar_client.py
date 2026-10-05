@@ -943,13 +943,38 @@ def _forward_via_bale_sdk(
             me_peer = Peer.user(id=me_id, access_hash=0) if me_id else None
 
             async def _resolve_any(ref: str, role: str, peer_id: int | None = None, title_hint: str = ''):
-                """Resolve دقیق: peer_id > یوزرنیم exact > دیالوگ‌ها با عنوان."""
+                """Resolve بدون SearchPeer فازی:
+
+                1) peer_id دیتابیس
+                2) SearchContacts با تطبیق دقیق nick (مثل ble.ir/name)
+                3) دیالوگ‌های عضو با عنوان/nick
+                """
                 from bale.peer import Peer, PeerInfo
 
                 raw = str(ref or '').strip()
-                last_err = None
+                # ble.ir/linkya → linkya
+                if 'ble.ir/' in raw or 'bale.ai/' in raw:
+                    s = raw.replace('https://', '').replace('http://', '')
+                    for prefix in ('ble.ir/', 'bale.ai/'):
+                        if s.lower().startswith(prefix):
+                            s = s[len(prefix):]
+                            break
+                    raw = s.split('/')[0].strip()
 
-                # 1) peer_id صریح (از دیتابیس کانال)
+                last_err = None
+                want = raw.lstrip('@').strip().lower() if raw else ''
+
+                def _nick_of(group_or_full) -> str:
+                    n = getattr(group_or_full, 'nick', None)
+                    if n is None:
+                        n = getattr(group_or_full, 'username', None)
+                    if n is None:
+                        return ''
+                    if hasattr(n, 'value'):
+                        n = n.value
+                    return str(n or '').lstrip('@').strip().lower()
+
+                # 1) peer_id
                 if peer_id:
                     try:
                         info = PeerInfo(peer=Peer.channel(int(peer_id)))
@@ -958,92 +983,102 @@ def _forward_via_bale_sdk(
                     except Exception as e:
                         last_err = f'peer_id={peer_id}: {e}'
 
-                # 2) عدد در ref
                 if raw.lstrip('-').isdigit():
                     try:
                         info = PeerInfo(peer=Peer.channel(int(raw)))
                         full = await client.get_full(info)
                         return full, raw
                     except Exception as e:
-                        last_err = f'numeric ref: {e}'
+                        last_err = f'numeric: {e}'
 
-                # 3) یوزرنیم exact match
-                want = raw.lstrip('@').strip().lower() if raw else ''
+                # 2) SearchContacts — nick دقیق (نه SearchPeer فازی)
                 if want and not want.lstrip('-').isdigit():
-                    candidates = [raw, want, '@' + want]
+                    queries = [want, '@' + want]
                     if role == 'src':
                         try:
                             from orders.banner_publish import linkbank_channel
-                            lb = linkbank_channel()
-                            for x in (lb, str(lb).lstrip('@'), '@' + str(lb).lstrip('@')):
-                                if x and x not in candidates:
-                                    candidates.append(x)
+                            lb = str(linkbank_channel()).lstrip('@')
+                            if lb and lb not in queries:
+                                queries.append(lb)
                         except Exception:
                             pass
-                    seen = set()
-                    for c in candidates:
-                        if not c:
-                            continue
+                    for q in queries:
                         try:
-                            info = await client.resolve(c)
-                            pid = int(info.peer.id)
-                            if pid in seen:
-                                continue
-                            seen.add(pid)
-                            full = await client.get_full(info)
-                            got = (full.username or '').lstrip('@').strip().lower()
-                            if got and got == want:
-                                return full, '@' + got
-                            last_err = (
-                                f'mismatch want=@{want} got=@{got or "?"} '
-                                f'title={str(full.title or "")[:40]!r} id={pid}'
+                            req = pb.SearchContactsRequest()
+                            req.request = q
+                            resp = await client.call(
+                                'bale.users.v1.Users', 'SearchContacts', req, timeout=10.0
                             )
-                        except Exception as e:
-                            last_err = e
-
-                # 4) جستجو در دیالوگ‌های حساب (کانال‌هایی که عضو است)
-                title_want = (title_hint or '').strip().lower()
-                if title_want or want:
-                    try:
-                        dialogs = await client.get_dialogs(limit=80)
-                        for d in dialogs:
-                            # Dialog has peer / title attributes — defensive
-                            d_title = str(
-                                getattr(d, 'title', None)
-                                or getattr(getattr(d, 'peer_info', None), 'title', None)
-                                or getattr(getattr(d, 'info', None), 'title', None)
-                                or ''
-                            ).strip()
-                            d_user = str(
-                                getattr(d, 'username', None)
-                                or getattr(getattr(d, 'peer_info', None), 'username', None)
-                                or ''
-                            ).lstrip('@').lower()
-                            peer_obj = (
-                                getattr(d, 'peer', None)
-                                or getattr(getattr(d, 'info', None), 'peer', None)
-                                or getattr(getattr(d, 'peer_info', None), 'peer', None)
-                            )
-                            if title_want and d_title and (
-                                d_title.lower() == title_want
-                                or title_want in d_title.lower()
-                                or d_title.lower() in title_want
-                            ):
-                                if peer_obj is not None:
-                                    info = PeerInfo(peer=peer_obj, title=d_title, username=d_user or None)
+                            groups = list(getattr(resp, 'groups', []) or [])
+                            gpeers = list(getattr(resp, 'groupPeers', []) or [])
+                            # map access hash by id
+                            ah_map = {}
+                            for gp in gpeers:
+                                try:
+                                    ah_map[int(gp.groupId)] = int(gp.accessHash)
+                                except Exception:
+                                    pass
+                            for g in groups:
+                                nick = _nick_of(g)
+                                gid = int(getattr(g, 'id', 0) or 0)
+                                if not gid:
+                                    continue
+                                if nick == want or nick == q.lstrip('@').lower():
+                                    ah = int(
+                                        getattr(g, 'accessHash', 0)
+                                        or ah_map.get(gid)
+                                        or 1
+                                    )
+                                    peer = Peer.channel(gid, access_hash=ah)
+                                    info = PeerInfo(
+                                        peer=peer,
+                                        title=str(getattr(g, 'title', '') or '')[:80],
+                                        username=nick or want,
+                                    )
                                     try:
                                         full = await client.get_full(info)
                                     except Exception:
                                         full = info
-                                    return full, f'title:{d_title}'
-                            if want and d_user == want and peer_obj is not None:
-                                info = PeerInfo(peer=peer_obj, title=d_title, username=d_user)
+                                    return full, '@' + (nick or want)
+                            last_err = (
+                                f'SearchContacts q={q!r} groups='
+                                f'{[(_nick_of(g), int(getattr(g,"id",0) or 0)) for g in groups][:5]}'
+                            )
+                        except Exception as e:
+                            last_err = f'SearchContacts: {type(e).__name__}: {e}'
+
+                # 3) دیالوگ‌ها
+                title_want = (title_hint or '').strip().lower()
+                if title_want or want:
+                    try:
+                        dialogs = await client.get_dialogs(limit=100)
+                        for d in dialogs:
+                            d_title = str(getattr(d, 'title', None) or '').strip()
+                            peer_obj = getattr(d, 'peer', None)
+                            if peer_obj is None:
+                                continue
+                            if not getattr(peer_obj, 'is_channel', True):
+                                # فقط کانال/گروه
+                                if int(getattr(peer_obj, 'type', 0) or 0) == 1:
+                                    continue
+                            if want:
+                                try:
+                                    full = await client.get_full(PeerInfo(peer=peer_obj))
+                                    if _nick_of(full) == want:
+                                        return full, '@' + want
+                                except Exception:
+                                    pass
+                            if title_want and d_title and (
+                                d_title.lower() == title_want
+                                or title_want in d_title.lower()
+                            ):
+                                info = PeerInfo(peer=peer_obj, title=d_title)
                                 try:
                                     full = await client.get_full(info)
                                 except Exception:
                                     full = info
-                                return full, '@' + want
-                        last_err = f'not in dialogs title={title_want!r} user=@{want}'
+                                return full, f'title:{d_title}'
+                        last_err = f'not in dialogs title={title_want!r} @={want}'
                     except Exception as e:
                         last_err = f'dialogs: {type(e).__name__}: {e}'
 
