@@ -919,7 +919,13 @@ def _forward_via_aiobale_stack(
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد مستقیم + تأیید تاریخچهٔ مقصد."""
+    """فوروارد مستقیم لینک‌بانک → کانال.
+
+    نکتهٔ حیاتی از سورس aiobale:
+      ForwardMessages.message_ids = شناسه‌های *جدید* پیام در مقصد (generate_id)
+      forwarded_messages[].message_id = شناسه *اصلی* در مبدأ
+    قبلاً اشتباهاً mid مبدأ در message_ids گذاشته می‌شد → InvalidArgument
+    """
 
     async def _fn(client):
         import asyncio
@@ -927,12 +933,12 @@ def _forward_via_aiobale_stack(
         from aiobale.types import InfoMessage, Peer
         from aiobale.types.values import IntValue
         from aiobale.methods.messaging.forward_message import ForwardMessages
+        from aiobale.utils import generate_id
 
         lib_name = _BALE_LIB_NAME or 'aiobale'
         errors: List[str] = []
 
         async def _resolve_exact(ref: str, peer_id: int | None = None) -> Dict[str, Any]:
-            """اولویت: یوزرنیم/لینک دقیق (SearchContact)، بعد peer_id در صورت تطبیق."""
             raw = str(ref or '').strip()
             if 'ble.ir/' in raw or 'bale.ai/' in raw:
                 s = raw.replace('https://', '').replace('http://', '')
@@ -941,61 +947,52 @@ def _forward_via_aiobale_stack(
                         s = s[len(pfx):]
                         break
                 raw = s.split('/')[0].strip()
-
             uname = ''
             if raw and not raw.lstrip('-').isdigit():
                 uname = raw.lstrip('@').strip().lower()
 
-            # 1) SearchContact با nick دقیق (مثلاً linkya)
             if uname:
                 sc = await _search_contact_raw(client, uname)
                 if sc.get('ok') and sc.get('peer_id'):
                     pid = int(sc['peer_id'])
-                    ah = await _enrich_access_hash(
-                        client, pid, sc.get('access_hash')
-                    )
+                    ah = await _enrich_access_hash(client, pid, sc.get('access_hash'))
                     if ah in (None, 0, '0'):
-                        ah = sc.get('access_hash')
+                        ah = sc.get('access_hash') or 0
                     return {
                         'ok': True,
                         'peer_id': pid,
-                        'access_hash': int(ah) if ah not in (None, '', 0, '0') else None,
+                        'access_hash': int(ah or 0),
                         'source': 'SearchContact',
                         'username': uname,
                     }
 
-            # 2) peer_id از دیتابیس — فقط اگر یوزرنیم نداشتیم یا SearchContact شکست خورد
             if peer_id:
-                ah = await _enrich_access_hash(client, int(peer_id), None)
-                # اگر uname داریم، peer_id اشتباه را رد کن (مثلاً 1497133952 به‌جای linkya)
+                ah = await _enrich_access_hash(client, int(peer_id), None) or 0
                 if uname:
                     sc2 = await _search_contact_raw(client, uname)
-                    if sc2.get('ok') and sc2.get('peer_id'):
-                        if int(sc2['peer_id']) != int(peer_id):
-                            pid = int(sc2['peer_id'])
-                            ah2 = await _enrich_access_hash(
-                                client, pid, sc2.get('access_hash')
-                            )
-                            return {
-                                'ok': True,
-                                'peer_id': pid,
-                                'access_hash': ah2 or sc2.get('access_hash'),
-                                'source': 'SearchContact_override_bad_peer_id',
-                                'username': uname,
-                                'ignored_peer_id': int(peer_id),
-                            }
+                    if sc2.get('ok') and int(sc2.get('peer_id') or 0) not in (0, int(peer_id)):
+                        pid = int(sc2['peer_id'])
+                        ah2 = await _enrich_access_hash(
+                            client, pid, sc2.get('access_hash')
+                        ) or sc2.get('access_hash') or 0
+                        return {
+                            'ok': True,
+                            'peer_id': pid,
+                            'access_hash': int(ah2 or 0),
+                            'source': 'SearchContact_override',
+                            'username': uname,
+                        }
                 return {
                     'ok': True,
                     'peer_id': int(peer_id),
-                    'access_hash': ah,
+                    'access_hash': int(ah or 0),
                     'source': 'peer_id',
                 }
 
-            # 3) عدد در ref
             if raw.lstrip('-').isdigit():
                 pid = int(raw)
-                ah = await _enrich_access_hash(client, pid, None)
-                return {'ok': True, 'peer_id': pid, 'access_hash': ah, 'source': 'numeric'}
+                ah = await _enrich_access_hash(client, pid, None) or 0
+                return {'ok': True, 'peer_id': pid, 'access_hash': int(ah or 0), 'source': 'numeric'}
 
             return await _resolve_peer(client, ref)
 
@@ -1028,32 +1025,25 @@ def _forward_via_aiobale_stack(
         if not src.get('ok'):
             return {'ok': False, 'error': f'source_resolve:{src.get("error")}', 'lib': lib_name}
         src_id = int(src['peer_id'])
-        src_ah = src.get('access_hash')
+        src_ah = int(src.get('access_hash') or 0)
         try:
             await client.join_public_chat(src_id)
         except Exception:
             pass
-        if src_ah in (None, 0, '0'):
-            src_ah = await _enrich_access_hash(client, src_id, None)
+        if not src_ah:
+            src_ah = int(await _enrich_access_hash(client, src_id, None) or 0)
 
         tgt = await _resolve_exact(target_channel_ref, peer_id=dst_peer_id)
         if not tgt.get('ok'):
             return {'ok': False, 'error': f'target_resolve:{tgt.get("error")}', 'lib': lib_name}
         tgt_id = int(tgt['peer_id'])
-        tgt_ah = tgt.get('access_hash')
+        tgt_ah = int(tgt.get('access_hash') or 0)
         try:
             await client.join_public_chat(tgt_id)
         except Exception:
             pass
-        if tgt_ah in (None, 0, '0'):
-            tgt_ah = await _enrich_access_hash(client, tgt_id, None)
-        if tgt_ah in (None, 0, '0') and tgt.get('username'):
-            sc_again = await _search_contact_raw(client, str(tgt.get('username')))
-            if sc_again.get('access_hash') not in (None, 0, '0'):
-                tgt_ah = sc_again.get('access_hash')
-        # AH=None را به 0 تبدیل کن تا Peer فیلد را حذف نکند اشتباه
-        if tgt_ah in (None, ''):
-            tgt_ah = 0
+        if not tgt_ah:
+            tgt_ah = int(await _enrich_access_hash(client, tgt_id, None) or 0)
 
         loaded = []
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
@@ -1066,22 +1056,22 @@ def _forward_via_aiobale_stack(
                     loaded = list(msgs)
                     break
             except Exception as e:
-                errors.append(f'hist/{ctype}:{type(e).__name__}:{e}')
+                errors.append(f'hist/{ctype}:{type(e).__name__}')
         if not loaded:
             try:
                 raw_h = await _load_history_raw(client, src_id, src_ah, limit=limit)
                 if raw_h.get('ok') and raw_h.get('messages'):
                     loaded = raw_h['messages']
             except Exception as e:
-                errors.append(f'raw_hist:{type(e).__name__}:{e}')
+                errors.append(f'raw_hist:{type(e).__name__}')
         if not loaded:
             return {
                 'ok': False,
                 'error': 'history_empty',
                 'lib': lib_name,
-                'tries': errors,
                 'src': src_id,
                 'dst': tgt_id,
+                'tries': errors,
             }
 
         key = (caption_match or '').strip()[:40]
@@ -1109,6 +1099,7 @@ def _forward_via_aiobale_stack(
                     if it.get('kind') in ('photo', 'document', 'video'):
                         chosen = it
                         break
+                    chosen = it
             msg_id = int(chosen.get('message_id') or 0)
             msg_date = int(chosen.get('date') or 0)
 
@@ -1129,80 +1120,82 @@ def _forward_via_aiobale_stack(
             after = await _hist_ids(tgt_id, tgt_ah)
             return bool(after - before)
 
+        src_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
+        if src_ah:
+            src_kw['access_hash'] = int(src_ah)
+        dst_kw = {'type': PeerType.GROUP, 'id': int(tgt_id)}
+        if tgt_ah:
+            dst_kw['access_hash'] = int(tgt_ah)
+
         for d in dates:
+            # 1) Message object + new_id
             if chosen_msg is not None:
                 for ctype in chat_types:
                     try:
+                        new_id = generate_id()
                         await client.forward_message(
                             message=chosen_msg,
                             chat_id=int(tgt_id),
                             chat_type=ctype,
+                            new_id=new_id,
                         )
                         if await _verify():
                             return {
                                 'ok': True,
                                 'method': f'forward_Message/{ctype}',
                                 'lib': lib_name,
-                                'message_id': msg_id,
+                                'message_id': new_id,
                                 'message_date': d,
                                 'src': src_id,
                                 'dst': tgt_id,
                                 'verified': True,
                             }
-                        errors.append(f'Msg/{ctype}:api_ok_not_visible')
+                        errors.append(f'Msg/{ctype}:not_visible')
                     except Exception as e:
                         errors.append(f'Msg/{ctype}:{type(e).__name__}:{e}')
 
+            # 2) InfoMessage + new_id
             for ctype in chat_types:
                 try:
-                    _src_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
-                    if src_ah not in (None, '', 0, '0'):
-                        _src_kw['access_hash'] = int(src_ah)
+                    new_id = generate_id()
                     info = InfoMessage(
                         message_id=int(msg_id),
                         date=IntValue(value=int(d)),
-                        peer=Peer(**_src_kw),
+                        peer=Peer(**src_kw),
                     )
                     await client.forward_message(
                         message=info,
                         chat_id=int(tgt_id),
                         chat_type=ctype,
+                        new_id=new_id,
                     )
                     if await _verify():
                         return {
                             'ok': True,
                             'method': f'forward_Info/{ctype}',
                             'lib': lib_name,
-                            'message_id': msg_id,
+                            'message_id': new_id,
                             'message_date': d,
                             'src': src_id,
                             'dst': tgt_id,
                             'verified': True,
                         }
-                    errors.append(f'Info/{ctype}:api_ok_not_visible')
+                    errors.append(f'Info/{ctype}:not_visible')
                 except Exception as e:
                     errors.append(f'Info/{ctype}:{type(e).__name__}:{e}')
 
+            # 3) ForwardMessages raw — message_ids = NEW ids
             for ctype in chat_types:
                 try:
-                    _src_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
-                    if src_ah not in (None, '', 0, '0'):
-                        _src_kw['access_hash'] = int(src_ah)
-                    _dst_kw = {'type': PeerType.GROUP, 'id': int(tgt_id)}
-                    if tgt_ah not in (None, '', 0, '0'):
-                        _dst_kw['access_hash'] = int(tgt_ah)
-                    else:
-                        _dst_kw['access_hash'] = 0  # مالک کانال؛ AH سرور 0 می‌دهد
-                    src_p = Peer(**_src_kw)
-                    dst_p = Peer(**_dst_kw)
+                    new_id = generate_id()
                     call = ForwardMessages(
-                        peer=dst_p,
-                        message_ids=[int(msg_id)],
+                        peer=Peer(**dst_kw),
+                        message_ids=[int(new_id)],
                         forwarded_messages=[
                             InfoMessage(
                                 message_id=int(msg_id),
                                 date=IntValue(value=int(d)),
-                                peer=src_p,
+                                peer=Peer(**src_kw),
                             )
                         ],
                     )
@@ -1212,14 +1205,14 @@ def _forward_via_aiobale_stack(
                             'ok': True,
                             'method': f'ForwardMessages_raw/{ctype}',
                             'lib': lib_name,
-                            'message_id': msg_id,
+                            'message_id': new_id,
                             'message_date': d,
                             'src': src_id,
                             'dst': tgt_id,
                             'verified': True,
                         }
                     errors.append(
-                        f'raw/{ctype}:ok={raw.get("ok")} visible=0 err={raw.get("error")}'
+                        f'raw/{ctype}:ok={raw.get("ok")} vis=0 err={raw.get("error")}'
                     )
                 except Exception as e:
                     errors.append(f'FMsg/{ctype}:{type(e).__name__}:{e}')
