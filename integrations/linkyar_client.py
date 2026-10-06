@@ -845,13 +845,10 @@ def forward_banner_from_linkbank(
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول از لینک‌بانک.
+    """فوروارد با نقل‌قول: فقط aiobale/baleclient.
 
-    اولویت: aiobale/baleclient (همان مسیر موفق آپلود به کانال)
-    سپس bale-sdk.
+    bale-sdk روی کانال no-op است (seq خالی، پیام نمی‌نشیند) — استفاده نمی‌شود.
     """
-    errors: List[str] = []
-
     try:
         result = _forward_via_aiobale_stack(
             target_channel_ref,
@@ -861,38 +858,10 @@ def forward_banner_from_linkbank(
             dst_peer_id=dst_peer_id,
             dst_title=dst_title,
         )
-        if isinstance(result, dict) and result.get('ok'):
-            return result
-        if isinstance(result, dict):
-            errors.append(f"aiobale:{result.get('error')}")
-            if result.get('tries'):
-                errors.append(str(result['tries'][0])[:150])
+        return result if isinstance(result, dict) else {'ok': False, 'error': str(result)}
     except Exception as e:
         logger.exception('aiobale forward')
-        errors.append(f'aiobale_exc:{type(e).__name__}:{e}')
-
-    try:
-        result = _forward_via_bale_sdk(
-            target_channel_ref,
-            source_channel_ref,
-            caption_match=caption_match,
-            limit=limit,
-            dst_peer_id=dst_peer_id,
-            dst_title=dst_title,
-        )
-        if isinstance(result, dict) and result.get('ok'):
-            return result
-        if isinstance(result, dict):
-            out = dict(result)
-            out['prior_errors'] = errors[:4]
-            return out
-    except ModuleNotFoundError:
-        errors.append('sdk:not_installed')
-    except Exception as e:
-        logger.exception('sdk forward')
-        errors.append(f'sdk_exc:{type(e).__name__}:{e}')
-
-    return {'ok': False, 'error': 'forward_failed', 'tries_all': errors[:8]}
+        return {'ok': False, 'error': f'aiobale_exc:{type(e).__name__}:{e}'}
 
 
 def _forward_via_aiobale_stack(
@@ -904,12 +873,10 @@ def _forward_via_aiobale_stack(
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد مستقیم لینک‌بانک → کانال با aiobale (بدون hop به شخصی).
-
-    همان ترکیب PeerType.GROUP + ChatType که آپلود به کانال موفق بود.
-    """
+    """فوروارد مستقیم + تأیید تاریخچهٔ مقصد."""
 
     async def _fn(client):
+        import asyncio
         from aiobale.enums import ChatType, ListLoadMode, PeerType
         from aiobale.types import InfoMessage, Peer
         from aiobale.types.values import IntValue
@@ -949,6 +916,31 @@ def _forward_via_aiobale_stack(
                 }
             return await _resolve_peer(client, ref)
 
+        async def _hist_ids(peer_id: int, ah) -> set:
+            ids = set()
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    msgs = await client.load_history(
+                        int(peer_id), ctype, limit=15, offset_date=-1,
+                        load_mode=ListLoadMode.BACKWARD,
+                    )
+                    for m in (msgs or []):
+                        mid = getattr(m, 'message_id', None) or getattr(m, 'id', None)
+                        if mid:
+                            ids.add(int(mid))
+                    if ids:
+                        return ids
+                except Exception:
+                    continue
+            try:
+                raw = await _load_history_raw(client, int(peer_id), ah, limit=15)
+                for it in (raw.get('messages') or []):
+                    if it.get('message_id'):
+                        ids.add(int(it['message_id']))
+            except Exception:
+                pass
+            return ids
+
         src = await _resolve_exact(source_channel_ref)
         if not src.get('ok'):
             return {'ok': False, 'error': f'source_resolve:{src.get("error")}', 'lib': lib_name}
@@ -973,7 +965,6 @@ def _forward_via_aiobale_stack(
         if tgt_ah in (None, 0, '0'):
             tgt_ah = await _enrich_access_hash(client, tgt_id, None)
 
-        # تاریخچه مبدأ
         loaded = []
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
             try:
@@ -985,57 +976,54 @@ def _forward_via_aiobale_stack(
                     loaded = list(msgs)
                     break
             except Exception as e:
-                errors.append(f'hist/{ctype}:{type(e).__name__}')
+                errors.append(f'hist/{ctype}:{type(e).__name__}:{e}')
         if not loaded:
             try:
                 raw_h = await _load_history_raw(client, src_id, src_ah, limit=limit)
                 if raw_h.get('ok') and raw_h.get('messages'):
                     loaded = raw_h['messages']
             except Exception as e:
-                errors.append(f'raw_hist:{type(e).__name__}')
+                errors.append(f'raw_hist:{type(e).__name__}:{e}')
         if not loaded:
-            return {'ok': False, 'error': 'history_empty', 'lib': lib_name, 'tries': errors}
+            return {
+                'ok': False,
+                'error': 'history_empty',
+                'lib': lib_name,
+                'tries': errors,
+                'src': src_id,
+                'dst': tgt_id,
+            }
 
         key = (caption_match or '').strip()[:40]
+        chosen_msg = None
         msg_id, msg_date = 0, 0
         if loaded and not isinstance(loaded[0], dict):
-            chosen = None
+            chosen_msg = loaded[0]
             if key:
                 for m in loaded:
                     text = str(getattr(m, 'text', None) or getattr(m, 'caption', None) or '')
                     if key in text:
-                        chosen = m
+                        chosen_msg = m
                         break
-            if chosen is None:
-                chosen = loaded[0]
-            msg_id = int(getattr(chosen, 'message_id', None) or getattr(chosen, 'id', 0) or 0)
-            msg_date = int(getattr(chosen, 'date', 0) or 0)
-            # اگر Message کامل است، همان را به forward_message بده
-            chosen_msg = chosen
+            msg_id = int(getattr(chosen_msg, 'message_id', None) or getattr(chosen_msg, 'id', 0) or 0)
+            msg_date = int(getattr(chosen_msg, 'date', 0) or 0)
         else:
-            chosen_msg = None
-            chosen = None
+            chosen = loaded[0]
             if key:
                 for it in loaded:
                     if key in str(it.get('preview') or ''):
                         chosen = it
                         break
-            if chosen is None:
+            else:
                 for it in loaded:
                     if it.get('kind') in ('photo', 'document', 'video'):
                         chosen = it
                         break
-            if chosen is None:
-                chosen = loaded[0]
             msg_id = int(chosen.get('message_id') or 0)
             msg_date = int(chosen.get('date') or 0)
 
         if not msg_id or not msg_date:
-            return {
-                'ok': False,
-                'error': f'bad_message id={msg_id} date={msg_date}',
-                'lib': lib_name,
-            }
+            return {'ok': False, 'error': f'bad_message id={msg_id} date={msg_date}', 'lib': lib_name}
 
         dates = [msg_date]
         if msg_date > 10_000_000_000:
@@ -1043,32 +1031,38 @@ def _forward_via_aiobale_stack(
         elif msg_date > 1_000_000_000:
             dates.append(msg_date * 1000)
 
-        # ترکیب‌هایی که آپلود با آن‌ها به کانال نشسته
+        before = await _hist_ids(tgt_id, tgt_ah)
         chat_types = (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP)
 
+        async def _verify() -> bool:
+            await asyncio.sleep(2.0)
+            after = await _hist_ids(tgt_id, tgt_ah)
+            return bool(after - before)
+
         for d in dates:
-            # 1) Message کامل از history
             if chosen_msg is not None:
                 for ctype in chat_types:
                     try:
-                        resp = await client.forward_message(
+                        await client.forward_message(
                             message=chosen_msg,
                             chat_id=int(tgt_id),
                             chat_type=ctype,
                         )
-                        return {
-                            'ok': True,
-                            'method': f'forward_Message/{ctype}',
-                            'lib': lib_name,
-                            'message_id': msg_id,
-                            'message_date': d,
-                            'src': src_id,
-                            'dst': tgt_id,
-                        }
+                        if await _verify():
+                            return {
+                                'ok': True,
+                                'method': f'forward_Message/{ctype}',
+                                'lib': lib_name,
+                                'message_id': msg_id,
+                                'message_date': d,
+                                'src': src_id,
+                                'dst': tgt_id,
+                                'verified': True,
+                            }
+                        errors.append(f'Msg/{ctype}:api_ok_not_visible')
                     except Exception as e:
-                        errors.append(f'Msg/{ctype}/d={d}:{type(e).__name__}:{e}')
+                        errors.append(f'Msg/{ctype}:{type(e).__name__}:{e}')
 
-            # 2) InfoMessage + PeerType.GROUP
             for ctype in chat_types:
                 try:
                     info = InfoMessage(
@@ -1080,24 +1074,26 @@ def _forward_via_aiobale_stack(
                             access_hash=int(src_ah) if src_ah not in (None, 0, '0') else None,
                         ),
                     )
-                    resp = await client.forward_message(
+                    await client.forward_message(
                         message=info,
                         chat_id=int(tgt_id),
                         chat_type=ctype,
                     )
-                    return {
-                        'ok': True,
-                        'method': f'forward_Info/{ctype}',
-                        'lib': lib_name,
-                        'message_id': msg_id,
-                        'message_date': d,
-                        'src': src_id,
-                        'dst': tgt_id,
-                    }
+                    if await _verify():
+                        return {
+                            'ok': True,
+                            'method': f'forward_Info/{ctype}',
+                            'lib': lib_name,
+                            'message_id': msg_id,
+                            'message_date': d,
+                            'src': src_id,
+                            'dst': tgt_id,
+                            'verified': True,
+                        }
+                    errors.append(f'Info/{ctype}:api_ok_not_visible')
                 except Exception as e:
-                    errors.append(f'Info/{ctype}/d={d}:{type(e).__name__}:{e}')
+                    errors.append(f'Info/{ctype}:{type(e).__name__}:{e}')
 
-            # 3) ForwardMessages raw (مثل آپلود raw)
             for ctype in chat_types:
                 try:
                     src_p = Peer(
@@ -1122,7 +1118,7 @@ def _forward_via_aiobale_stack(
                         ],
                     )
                     raw = await _post_method_raw(client, call)
-                    if raw.get('ok'):
+                    if raw.get('ok') and await _verify():
                         return {
                             'ok': True,
                             'method': f'ForwardMessages_raw/{ctype}',
@@ -1131,23 +1127,27 @@ def _forward_via_aiobale_stack(
                             'message_date': d,
                             'src': src_id,
                             'dst': tgt_id,
-                            'note': 'raw_ok_verify_channel',
+                            'verified': True,
                         }
-                    errors.append(f'raw/{ctype}:{raw.get("error")}')
+                    errors.append(
+                        f'raw/{ctype}:ok={raw.get("ok")} visible=0 err={raw.get("error")}'
+                    )
                 except Exception as e:
-                    errors.append(f'FMsg/{ctype}/d={d}:{type(e).__name__}:{e}')
+                    errors.append(f'FMsg/{ctype}:{type(e).__name__}:{e}')
 
         return {
             'ok': False,
-            'error': 'forward_failed',
+            'error': 'forward_not_visible',
             'lib': lib_name,
-            'tries': errors[:16],
+            'tries': errors[:20],
             'src_peer': src_id,
             'target': tgt_id,
             'mid': msg_id,
             'src_ah': src_ah,
             'tgt_ah': tgt_ah,
+            'before_count': len(before),
             'tgt_source': tgt.get('source'),
+            'src_source': src.get('source'),
         }
 
     return _run(_with_client(_fn))

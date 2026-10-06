@@ -587,17 +587,19 @@ def _post_via_linkyar(
         }
 
     err = str(result.get('error') or 'forward_failed')
-    if result.get('tries_all'):
-        err = f'{err} | {result.get("tries_all")}'[:300]
-    elif result.get('tries'):
-        err = f'{err} | try0={result.get("tries")[0]}'[:300]
-    if result.get('src_peer') or result.get('target'):
-        err = (
-            f'{err} | src={result.get("src_peer")} tgt={result.get("target")} '
-            f'mid={result.get("mid")}'
-        )[:400]
     if result.get('lib'):
         err = f'{err} | lib={result.get("lib")}'
+    if result.get('src_peer') or result.get('target'):
+        err = (
+            f'{err} | src={result.get("src_peer")}(ah={result.get("src_ah")}) '
+            f'tgt={result.get("target")}(ah={result.get("tgt_ah")}) '
+            f'mid={result.get("mid")}'
+        )[:320]
+    tries = result.get('tries') or result.get('tries_all') or []
+    if tries:
+        err = f'{err} | try0={tries[0]}'[:450]
+        if len(tries) > 1:
+            err = f'{err} | try1={tries[1]}'[:520]
     return {
         'ok': False,
         'method': 'failed',
