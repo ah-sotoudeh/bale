@@ -52,10 +52,10 @@ def _linkyar_numeric_id() -> Optional[int]:
 
 
 def channel_ref(ch: Channel) -> str:
-    """مرجع کانال برای ارسال: ترجیح peer عددی پایدار، بعد @username."""
-    peer = getattr(ch, 'bale_peer_id', None)
-    if peer not in (None, '', 0, '0'):
-        return str(peer).strip()
+    """مرجع کانال: ترجیح @username از link (دقیق)، بعد peer عددی.
+
+    peer_id اشتباه در DB قبلاً باعث resolve به کانال غلط می‌شد.
+    """
     link = (ch.link or '').strip()
     if link:
         s = link.replace('https://', '').replace('http://', '')
@@ -75,6 +75,9 @@ def channel_ref(ch: Channel) -> str:
         u = str(uname).strip().lstrip('@')
         if u:
             return '@' + u
+    peer = getattr(ch, 'bale_peer_id', None)
+    if peer not in (None, '', 0, '0'):
+        return str(peer).strip()
     return str(ch.id)
 
 

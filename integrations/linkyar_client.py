@@ -886,9 +886,7 @@ def _forward_via_aiobale_stack(
         errors: List[str] = []
 
         async def _resolve_exact(ref: str, peer_id: int | None = None) -> Dict[str, Any]:
-            if peer_id:
-                ah = await _enrich_access_hash(client, int(peer_id), None)
-                return {'ok': True, 'peer_id': int(peer_id), 'access_hash': ah, 'source': 'peer_id'}
+            """اولویت: یوزرنیم/لینک دقیق (SearchContact)، بعد peer_id در صورت تطبیق."""
             raw = str(ref or '').strip()
             if 'ble.ir/' in raw or 'bale.ai/' in raw:
                 s = raw.replace('https://', '').replace('http://', '')
@@ -897,23 +895,62 @@ def _forward_via_aiobale_stack(
                         s = s[len(pfx):]
                         break
                 raw = s.split('/')[0].strip()
+
+            uname = ''
+            if raw and not raw.lstrip('-').isdigit():
+                uname = raw.lstrip('@').strip().lower()
+
+            # 1) SearchContact با nick دقیق (مثلاً linkya)
+            if uname:
+                sc = await _search_contact_raw(client, uname)
+                if sc.get('ok') and sc.get('peer_id'):
+                    pid = int(sc['peer_id'])
+                    ah = await _enrich_access_hash(
+                        client, pid, sc.get('access_hash')
+                    )
+                    if ah in (None, 0, '0'):
+                        ah = sc.get('access_hash')
+                    return {
+                        'ok': True,
+                        'peer_id': pid,
+                        'access_hash': int(ah) if ah not in (None, '', 0, '0') else None,
+                        'source': 'SearchContact',
+                        'username': uname,
+                    }
+
+            # 2) peer_id از دیتابیس — فقط اگر یوزرنیم نداشتیم یا SearchContact شکست خورد
+            if peer_id:
+                ah = await _enrich_access_hash(client, int(peer_id), None)
+                # اگر uname داریم، peer_id اشتباه را رد کن (مثلاً 1497133952 به‌جای linkya)
+                if uname:
+                    sc2 = await _search_contact_raw(client, uname)
+                    if sc2.get('ok') and sc2.get('peer_id'):
+                        if int(sc2['peer_id']) != int(peer_id):
+                            pid = int(sc2['peer_id'])
+                            ah2 = await _enrich_access_hash(
+                                client, pid, sc2.get('access_hash')
+                            )
+                            return {
+                                'ok': True,
+                                'peer_id': pid,
+                                'access_hash': ah2 or sc2.get('access_hash'),
+                                'source': 'SearchContact_override_bad_peer_id',
+                                'username': uname,
+                                'ignored_peer_id': int(peer_id),
+                            }
+                return {
+                    'ok': True,
+                    'peer_id': int(peer_id),
+                    'access_hash': ah,
+                    'source': 'peer_id',
+                }
+
+            # 3) عدد در ref
             if raw.lstrip('-').isdigit():
                 pid = int(raw)
                 ah = await _enrich_access_hash(client, pid, None)
                 return {'ok': True, 'peer_id': pid, 'access_hash': ah, 'source': 'numeric'}
-            uname = raw.lstrip('@').strip()
-            sc = await _search_contact_raw(client, uname)
-            if sc.get('ok') and sc.get('peer_id'):
-                ah = await _enrich_access_hash(
-                    client, int(sc['peer_id']), sc.get('access_hash')
-                )
-                return {
-                    'ok': True,
-                    'peer_id': int(sc['peer_id']),
-                    'access_hash': ah or sc.get('access_hash'),
-                    'source': 'SearchContact',
-                    'username': uname,
-                }
+
             return await _resolve_peer(client, ref)
 
         async def _hist_ids(peer_id: int, ah) -> set:
