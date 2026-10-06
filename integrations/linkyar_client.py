@@ -206,6 +206,30 @@ async def _search_contact_raw(client, uname: str) -> Dict[str, Any]:
     from aiobale.utils.grpc_post import add_header
     import aiohttp
 
+    def _dig_ah(obj, depth=0):
+        """access_hash را از ساختار خام دربیار."""
+        if depth > 6 or obj is None:
+            return None
+        if isinstance(obj, dict):
+            for k in ('2', 2, 'access_hash', 'accessHash', '3', 3):
+                if k in obj and obj[k] not in (None, '', 0, '0'):
+                    try:
+                        v = int(obj[k])
+                        if v not in (0, 1):
+                            return v
+                    except (TypeError, ValueError):
+                        pass
+            for v in obj.values():
+                found = _dig_ah(v, depth + 1)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for v in obj:
+                found = _dig_ah(v, depth + 1)
+                if found:
+                    return found
+        return None
+
     session = client.session
     if not session.session or session.session.closed:
         session.session = aiohttp.ClientSession()
@@ -224,17 +248,39 @@ async def _search_contact_raw(client, uname: str) -> Dict[str, Any]:
     content = await req.read()
     if req.headers.get('grpc-message'):
         return {'ok': False, 'error': req.headers.get('grpc-message')}
-    raw = session.decoder(clean_grpc(content))
-    group = (raw or {}).get('5') or {}
-    if group.get('1'):
+    raw = session.decoder(clean_grpc(content)) or {}
+
+    # shapes: group at '5', or groups list, or peer list
+    candidates = []
+    for key in ('5', 5, 'groups', '3', 3):
+        g = raw.get(key)
+        if isinstance(g, dict) and (g.get('1') or g.get(1)):
+            candidates.append(g)
+        elif isinstance(g, list):
+            candidates.extend([x for x in g if isinstance(x, dict)])
+
+    for group in candidates:
+        pid = group.get('1') or group.get(1)
+        if not pid:
+            continue
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        ah = group.get('2') or group.get(2) or _dig_ah(group) or _dig_ah(raw)
+        try:
+            ah = int(ah) if ah not in (None, '') else 0
+        except (TypeError, ValueError):
+            ah = 0
         return {
             'ok': True,
-            'peer_id': int(group['1']),
-            'access_hash': int(group.get('2') or 0),
+            'peer_id': pid,
+            'access_hash': ah,
             'source': 'SearchContact',
-            'raw_group': group,
+            'raw_keys': list(raw.keys())[:12],
         }
-    return {'ok': False, 'error': 'channel_not_found', 'raw': raw}
+
+    return {'ok': False, 'error': 'channel_not_found', 'raw_keys': list(raw.keys())[:12] if isinstance(raw, dict) else []}
 
 
 async def _enrich_access_hash(client, peer_id: int, access_hash: Any = None) -> Optional[int]:
@@ -1001,6 +1047,13 @@ def _forward_via_aiobale_stack(
             pass
         if tgt_ah in (None, 0, '0'):
             tgt_ah = await _enrich_access_hash(client, tgt_id, None)
+        if tgt_ah in (None, 0, '0') and tgt.get('username'):
+            sc_again = await _search_contact_raw(client, str(tgt.get('username')))
+            if sc_again.get('access_hash') not in (None, 0, '0'):
+                tgt_ah = sc_again.get('access_hash')
+        # AH=None را به 0 تبدیل کن تا Peer فیلد را حذف نکند اشتباه
+        if tgt_ah in (None, ''):
+            tgt_ah = 0
 
         loaded = []
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
@@ -1102,14 +1155,13 @@ def _forward_via_aiobale_stack(
 
             for ctype in chat_types:
                 try:
+                    _src_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
+                    if src_ah not in (None, '', 0, '0'):
+                        _src_kw['access_hash'] = int(src_ah)
                     info = InfoMessage(
                         message_id=int(msg_id),
                         date=IntValue(value=int(d)),
-                        peer=Peer(
-                            type=PeerType.GROUP,
-                            id=int(src_id),
-                            access_hash=int(src_ah) if src_ah not in (None, 0, '0') else None,
-                        ),
+                        peer=Peer(**_src_kw),
                     )
                     await client.forward_message(
                         message=info,
@@ -1133,16 +1185,16 @@ def _forward_via_aiobale_stack(
 
             for ctype in chat_types:
                 try:
-                    src_p = Peer(
-                        type=PeerType.GROUP,
-                        id=int(src_id),
-                        access_hash=int(src_ah) if src_ah not in (None, 0, '0') else None,
-                    )
-                    dst_p = Peer(
-                        type=PeerType.GROUP,
-                        id=int(tgt_id),
-                        access_hash=int(tgt_ah) if tgt_ah not in (None, 0, '0') else None,
-                    )
+                    _src_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
+                    if src_ah not in (None, '', 0, '0'):
+                        _src_kw['access_hash'] = int(src_ah)
+                    _dst_kw = {'type': PeerType.GROUP, 'id': int(tgt_id)}
+                    if tgt_ah not in (None, '', 0, '0'):
+                        _dst_kw['access_hash'] = int(tgt_ah)
+                    else:
+                        _dst_kw['access_hash'] = 0  # مالک کانال؛ AH سرور 0 می‌دهد
+                    src_p = Peer(**_src_kw)
+                    dst_p = Peer(**_dst_kw)
                     call = ForwardMessages(
                         peer=dst_p,
                         message_ids=[int(msg_id)],
