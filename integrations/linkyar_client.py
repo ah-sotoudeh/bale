@@ -1676,70 +1676,7 @@ def _forward_via_bale_sdk(
             errors: List[str] = []
             path_used = None
 
-            # ===== مسیر A: لینک‌بانک → me → کانال =====
-            if me_peer is not None:
-                me_before, _ = await _ids(me_peer)
-                for dval in date_list:
-                    try:
-                        await _forward(me_peer, src_peer, rid, dval, seq)
-                        await asyncio.sleep(2.0)
-                        me_after, me_hist = await _ids(me_peer)
-                        new_on_me = me_after - me_before
-                        new_on_me.discard(0)
-                        # پیدا کردن پیام جدید روی me
-                        hop = None
-                        for h in me_hist:
-                            hr = _u64(getattr(h, 'rid', 0))
-                            if hr in new_on_me or (not new_on_me and hr):
-                                hop = {
-                                    'rid': hr,
-                                    'date': _u64(getattr(h, 'date', 0)),
-                                    'seq': _u64(getattr(h, 'seq', 0)),
-                                }
-                                if hr in new_on_me:
-                                    break
-                        if not hop and me_hist:
-                            h0 = me_hist[0]
-                            hop = {
-                                'rid': _u64(getattr(h0, 'rid', 0)),
-                                'date': _u64(getattr(h0, 'date', 0)),
-                                'seq': _u64(getattr(h0, 'seq', 0)),
-                            }
-                        if hop and hop['rid']:
-                            dst_before, _ = await _ids(dst_peer)
-                            await _forward(
-                                dst_peer, me_peer, hop['rid'], hop['date'], hop.get('seq') or 0
-                            )
-                            await asyncio.sleep(2.0)
-                            dst_after, _ = await _ids(dst_peer)
-                            new_dst = dst_after - dst_before
-                            new_dst.discard(0)
-                            if new_dst:
-                                return {
-                                    'ok': True,
-                                    'method': 'forward_via_self_hop',
-                                    'lib': 'bale-sdk',
-                                    'me_id': me_id,
-                                    'message_id': hop['rid'],
-                                    'message_date': hop['date'],
-                                    'verified': True,
-                                    'new_rids': list(new_dst)[:5],
-                                    'src_ref': src_used,
-                                    'dst_ref': dst_used,
-                                    'direction': f'{src_used}→me→{dst_used}',
-                                    'group_info': group_info,
-                                    'perms': perms_info,
-                                }
-                            errors.append(
-                                f'self_hop d={dval}: on_me={bool(new_on_me)} '
-                                f'on_dst=False hop={hop}'
-                            )
-                        else:
-                            errors.append(f'self_hop d={dval}: not_on_me')
-                    except Exception as e:
-                        errors.append(f'self_hop d={dval}: {type(e).__name__}: {e}')
-
-            # ===== مسیر B: مستقیم لینک‌بانک → کانال =====
+            # فقط مستقیم — بدون hop به شخصی
             dst_before, _ = await _ids(dst_peer)
             for dval in date_list:
                 try:
@@ -1765,40 +1702,6 @@ def _forward_via_bale_sdk(
                     errors.append(f'direct d={dval}: {type(e).__name__}: {e}')
 
             # probe: self + raw SendMessage to channel with final access_hash
-            marker = f'[ly-probe-{int(_time.time())}]'
-            write_probe: Dict[str, Any] = {
-                'marker': marker,
-                'me_id': me_id,
-                'dst_ah_used': int(dst_peer.access_hash),
-            }
-            try:
-                r1 = None  # no self spam
-                write_probe['self'] = {'seq': _u64(getattr(r1, 'seq', 0)) if r1 else 0}
-            except Exception as e:
-                write_probe['self'] = {'err': str(e)}
-            try:
-                # raw SendMessage مثل مسیر موفق self
-                req_sm = pb.SendMessageRequest()
-                req_sm.peer.CopyFrom(dst_peer.to_proto())
-                req_sm.exPeer.CopyFrom(dst_peer.to_out_proto())
-                req_sm.rid = random.getrandbits(63)
-                req_sm.message.textMessage.text = marker + '-ch'
-                r2 = await client.call(
-                    'bale.messaging.v2.Messaging', 'SendMessage', req_sm, timeout=10.0
-                )
-                write_probe['ch_api'] = {
-                    'seq': _u64(getattr(r2, 'seq', 0)),
-                    'date': _u64(getattr(r2, 'date', 0)),
-                    'raw': str(r2)[:80],
-                }
-                await asyncio.sleep(2.5)
-                h_dst = await _load_hist(dst_peer, 12)
-                write_probe['in_dst'] = _find_text(h_dst, marker)
-                write_probe['dst_n'] = len(h_dst)
-            except Exception as e:
-                write_probe['ch_api'] = {'err': f'{type(e).__name__}: {e}'}
-                write_probe['in_dst'] = False
-
             return {
                 'ok': False,
                 'error': 'linkyar_cannot_post_to_channel',
@@ -1811,19 +1714,10 @@ def _forward_via_bale_sdk(
                 'dst_id': dst_id,
                 'src_ref': src_used,
                 'dst_ref': dst_used,
-                'direction': f'{src_used}({src_id}) → {dst_used}({dst_id})',
                 'group_info': group_info,
                 'perms': perms_info,
-                'src_steps': src_steps,
-                'dst_steps': dst_steps,
-                'write_probe': write_probe,
-                'hint': (
-                    f'me={me_id} ownerUid={group_info.get("ownerUid")} '
-                    f'isMember={group_info.get("isMember")} '
-                    f'sendMessage={perms_info.get("sendMessage")} '
-                    f'sendForwarded={perms_info.get("sendForwardedMessage")}'
-                ),
             }
+
 
     return _run(_fn())
 
