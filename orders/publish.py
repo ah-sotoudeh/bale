@@ -512,6 +512,9 @@ def _post_via_linkyar(
     bot_from = str(from_chat_id or '').strip()
     bot_mid = int(message_id or 0)
     cap = caption or ''
+    ly_rid = ''
+    ly_date = ''
+    ly_seq = ''
     if banner_id:
         try:
             from orders.models import CustomerBanner
@@ -526,6 +529,9 @@ def _post_via_linkyar(
                         pass
                 if not cap and bn.caption:
                     cap = bn.caption
+                ly_rid = str(getattr(bn, 'linkyar_rid', '') or '')
+                ly_date = str(getattr(bn, 'linkyar_date', '') or '')
+                ly_seq = str(getattr(bn, 'linkyar_seq', '') or '')
         except Exception:
             pass
 
@@ -576,6 +582,9 @@ def _post_via_linkyar(
         bot_from_chat_id=bot_from,
         bot_message_id=bot_mid,
         message_date=int(message_date or 0),
+        linkyar_rid=ly_rid,
+        linkyar_date=ly_date,
+        linkyar_seq=ly_seq,
         dst_peer_id=peer_id,
         dst_title=str(getattr(ch, 'name', None) or ''),
     )

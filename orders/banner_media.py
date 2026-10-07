@@ -241,3 +241,11 @@ def _pull_stored_message(banner: CustomerBanner) -> Path | None:
     if saved is None:
         miss.write_bytes(b'')
     return saved
+
+
+def materialize_banner_file(banner) -> 'Path | None':
+    """مسیر فایل محلی بنر (storage یا لینک‌بانک)."""
+    path = _pull_stored_message(banner)
+    if path is not None:
+        return path
+    return _pull_linkbank_message(banner)

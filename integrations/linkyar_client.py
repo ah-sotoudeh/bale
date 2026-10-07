@@ -880,6 +880,104 @@ def send_local_file_to_channel(
     return _run(_with_client(_fn))
 
 
+def publish_to_linkbank_and_capture(
+    channel_ref: str,
+    file_path: str,
+    caption: str = '',
+    kind: str = 'photo',
+) -> Dict[str, Any]:
+    """آپلود بنر به لینک‌بانک توسط لینک‌یار + ذخیره rid/date/seq برای فوروارد بعدی."""
+    sent = send_local_file_to_channel(channel_ref, file_path, caption=caption, kind=kind)
+    if not sent.get('ok'):
+        return sent
+
+    # بعد از ارسال، تاریخچه را بخوان و rid واقعی را بردار
+    import time as _time
+    _time.sleep(1.5)
+    meta = capture_latest_forward_ids(channel_ref, caption_match=caption or '')
+    out = dict(sent)
+    out.update(meta)
+    out['ok'] = True
+    return out
+
+
+def capture_latest_forward_ids(
+    channel_ref: str,
+    caption_match: str = '',
+) -> Dict[str, Any]:
+    """از تاریخچهٔ لینک‌بانک rid/date/seq آخرین (یا مطابق کپشن) را برمی‌گرداند."""
+    token = user_token()
+    if not token:
+        return {'ok': False, 'error': 'BALE_TOKEN missing'}
+
+    async def _fn():
+        import re
+        from bale import BaleClient
+
+        def _u64(v) -> int:
+            if v is None:
+                return 0
+            if hasattr(v, 'value'):
+                try:
+                    return int(v.value)
+                except Exception:
+                    pass
+            try:
+                return int(v)
+            except Exception:
+                return 0
+
+        def _norm(s: str) -> str:
+            s = re.sub(r'[*_`~\[\]()]', '', s or '')
+            return re.sub(r'\s+', ' ', s).strip().lower()
+
+        def _text(h) -> str:
+            for a in ('text', 'caption', 'preview'):
+                v = getattr(h, a, None)
+                if v:
+                    return str(v)
+            return ''
+
+        async with BaleClient(token) as client:
+            raw = str(channel_ref or '').strip()
+            if 'ble.ir/' in raw:
+                raw = '@' + raw.split('ble.ir/')[-1].split('/')[0].lstrip('@')
+            if not raw.startswith('@') and not raw.lstrip('-').isdigit():
+                raw = '@' + raw.lstrip('@')
+            hist = list(await client.get_history(raw, limit=15) or [])
+            if not hist:
+                return {'ok': False, 'error': 'history_empty_after_upload'}
+
+            chosen = hist[0]
+            cap = (caption_match or '').strip()
+            if cap:
+                nc = _norm(cap)
+                for h in hist:
+                    if nc[:30] in _norm(_text(h)):
+                        chosen = h
+                        break
+
+            rid = _u64(getattr(chosen, 'rid', None) or getattr(chosen, 'message_id', None))
+            date = _u64(getattr(chosen, 'date', None))
+            seq = _u64(getattr(chosen, 'seq', None))
+            if not rid or not date:
+                return {
+                    'ok': False,
+                    'error': f'bad_capture rid={rid} date={date}',
+                    'history_n': len(hist),
+                }
+            return {
+                'ok': True,
+                'linkyar_rid': str(rid),
+                'linkyar_date': str(date),
+                'linkyar_seq': str(seq) if seq else '',
+                'peer_id': getattr(getattr(chosen, 'peer', None), 'id', None),
+            }
+
+    return _run(_fn())
+
+
+
 def forward_banner_from_linkbank(
     target_channel_ref: str,
     source_channel_ref: str,
@@ -889,10 +987,13 @@ def forward_banner_from_linkbank(
     bot_from_chat_id: str = '',
     bot_message_id: int = 0,
     message_date: int = 0,
+    linkyar_rid: str | int = '',
+    linkyar_date: str | int = '',
+    linkyar_seq: str | int = '',
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد واقعی بنر (نه آپلود/file_id).
+    """فوروارد واقعی بنر با rid ذخیره‌شده هنگام آپلود به لینک‌بانک.
 
     1) بازو همان linkbank_message_id را به شخصی لینک‌یار می‌آورد
     2) لینک‌یار با bale-sdk (rid+date) همان پیام را به کانال فوروارد می‌کند
@@ -901,6 +1002,32 @@ def forward_banner_from_linkbank(
     """
     bot_mid = int(bot_message_id or 0)
     bridge_info: Dict[str, Any] = {}
+    stored_rid = str(linkyar_rid or '').strip()
+    stored_date = str(linkyar_date or '').strip()
+    stored_seq = str(linkyar_seq or '').strip()
+
+    # اگر rid هنگام آپلود لینک‌بانک ذخیره شده، مستقیم فوروارد — بدون پل و جستجوی کپشن
+    if stored_rid and stored_date:
+        try:
+            result = _forward_via_bale_sdk_from_self_or_source(
+                target_channel_ref=target_channel_ref,
+                source_channel_ref=source_channel_ref,
+                caption_match=caption_match,
+                bot_message_id=bot_mid,
+                message_date=int(message_date or 0),
+                dst_peer_id=dst_peer_id,
+                prefer_self_inbox=False,
+                me_id=None,
+                force_rid=int(stored_rid),
+                force_date=int(stored_date),
+                force_seq=int(stored_seq) if stored_seq.isdigit() else 0,
+            )
+            if isinstance(result, dict):
+                result['used_stored_ids'] = True
+            return result if isinstance(result, dict) else {'ok': False, 'error': str(result)}
+        except Exception as e:
+            logger.exception('stored rid forward')
+            # ادامه با پل
 
     if bot_mid and bot_mid < 10**12 and bot_from_chat_id:
         try:
@@ -976,6 +1103,9 @@ def _forward_via_bale_sdk_from_self_or_source(
     dst_peer_id: int | None = None,
     prefer_self_inbox: bool = False,
     me_id: int | None = None,
+    force_rid: int = 0,
+    force_date: int = 0,
+    force_seq: int = 0,
 ) -> Dict[str, Any]:
     """فوروارد فقط با bale-sdk: OutPeer + rid + date (مستند رسمی)."""
     import asyncio
@@ -1052,7 +1182,7 @@ def _forward_via_bale_sdk_from_self_or_source(
             if prefer_self_inbox and me_id:
                 me_peer = Peer.user(int(me_id))
                 try:
-                    hist = list(await client.load_history(me_peer, limit=25) or [])
+                    hist = list(await client.get_history(me_peer, limit=25) or [])
                     src_peer = me_peer
                     src_label = f'self:{me_id}'
                 except Exception as e:
@@ -1068,40 +1198,44 @@ def _forward_via_bale_sdk_from_self_or_source(
                     src_info = await client.resolve(raw_src)
                     src_peer = src_info.peer
                     src_label = raw_src
-                    hist = list(await client.load_history(src_peer, limit=40) or [])
+                    hist = list(await client.get_history(src_peer, limit=40) or [])
                 except Exception as e:
                     return {'ok': False, 'error': f'source_load:{type(e).__name__}:{e}', 'tries': errors}
 
-            if not hist or src_peer is None:
-                return {'ok': False, 'error': 'history_empty', 'src': src_label, 'tries': errors}
+            if force_rid and force_date and src_peer is not None:
+                rid, date, seq = int(force_rid), int(force_date), int(force_seq or 0)
+                pick = 'stored_linkyar_ids'
+            else:
+                if not hist or src_peer is None:
+                    return {'ok': False, 'error': 'history_empty', 'src': src_label, 'tries': errors}
 
-            chosen = None
-            pick = ''
-            cap = (caption_match or '').strip()
-            if cap:
-                nc = _norm(cap)
-                for h in hist:
-                    if nc[:25] in _norm(_entry_text(h)):
-                        chosen = h
-                        pick = 'caption'
-                        break
-            if chosen is None:
-                chosen = hist[0]
-                pick = 'latest_self' if prefer_self_inbox else 'latest_src'
+                chosen = None
+                pick = ''
+                cap = (caption_match or '').strip()
+                if cap:
+                    nc = _norm(cap)
+                    for h in hist:
+                        if nc[:25] in _norm(_entry_text(h)):
+                            chosen = h
+                            pick = 'caption'
+                            break
+                if chosen is None:
+                    chosen = hist[0]
+                    pick = 'latest_self' if prefer_self_inbox else 'latest_src'
 
-            rid = _entry_rid(chosen)
-            date = _entry_date(chosen)
-            seq = _entry_seq(chosen)
-            if not rid or not date:
-                return {
-                    'ok': False,
-                    'error': f'bad_rid_date rid={rid} date={date}',
-                    'pick': pick,
-                    'src': src_label,
-                }
+                rid = _entry_rid(chosen)
+                date = _entry_date(chosen)
+                seq = _entry_seq(chosen)
+                if not rid or not date:
+                    return {
+                        'ok': False,
+                        'error': f'bad_rid_date rid={rid} date={date}',
+                        'pick': pick,
+                        'src': src_label,
+                    }
 
             try:
-                before = list(await client.load_history(dst_peer, limit=15) or [])
+                before = list(await client.get_history(dst_peer, limit=15) or [])
                 before_rids = {_entry_rid(x) for x in before}
             except Exception as e:
                 before_rids = set()
@@ -1136,7 +1270,7 @@ def _forward_via_bale_sdk_from_self_or_source(
                     resp = await _do_forward(src_peer, dst_peer, rid, dval, seq)
                     await asyncio.sleep(2.5)
                     try:
-                        after = list(await client.load_history(dst_peer, limit=15) or [])
+                        after = list(await client.get_history(dst_peer, limit=15) or [])
                         after_rids = {_entry_rid(x) for x in after}
                         new = after_rids - before_rids
                         new.discard(0)
@@ -1168,7 +1302,7 @@ def _forward_via_bale_sdk_from_self_or_source(
                     src_peer,
                 )
                 await asyncio.sleep(2.5)
-                after = list(await client.load_history(dst_peer, limit=15) or [])
+                after = list(await client.get_history(dst_peer, limit=15) or [])
                 new = {_entry_rid(x) for x in after} - before_rids
                 new.discard(0)
                 if new:

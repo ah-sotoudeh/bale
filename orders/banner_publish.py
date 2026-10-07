@@ -175,21 +175,66 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         return {'ok': True, 'status': 'rejected', 'message': 'درخواست رد شد. مشتری خبردار می‌شود.'}
 
     lb = linkbank_channel()
-    fwd = bc.forward_message(lb, req.storage_chat_id, int(req.storage_message_id))
-    if not fwd.get('ok'):
-        fwd = bc.copy_message(lb, req.storage_chat_id, int(req.storage_message_id))
-    if not fwd.get('ok'):
-        # فقط در لاگ سرور — هرگز detail خام به کاربر نرود
-        logger.error('publish to %s failed (sanitized log): ok=False error_code-ish', lb)
-        logger.debug('publish detail keys=%s', list(fwd.keys()) if isinstance(fwd, dict) else type(fwd))
-        return {
-            'ok': False,
-            'error': 'publish_failed',
-            'message': user_facing_error('publish_failed'),
-        }
+    lb_mid = ''
+    linkyar_rid = ''
+    linkyar_date = ''
+    linkyar_seq = ''
 
-    result = fwd.get('result') or {}
-    lb_mid = str(result.get('message_id') or '')
+    # اولویت: آپلود توسط لینک‌یار + ذخیره rid/date برای فوروارد بعدی
+    try:
+        from orders.banner_media import materialize_banner_file
+        from integrations import linkyar_client as ly
+        from orders.models import CustomerBanner as CB
+
+        bn0 = req.customer_banner
+        path = None
+        kind = (req.media_kind or 'photo').lower() or 'photo'
+        if bn0 is not None:
+            try:
+                path = materialize_banner_file(bn0)
+            except Exception:
+                logger.exception('materialize banner')
+        if path is None:
+            # از storage بات دانلود
+            try:
+                from orders.banner_media import _pull_stored_message
+                if bn0 is not None:
+                    path = _pull_stored_message(bn0)
+            except Exception:
+                pass
+
+        if path is not None:
+            up = ly.publish_to_linkbank_and_capture(
+                lb, str(path), caption=req.caption or (bn0.caption if bn0 else '') or '', kind=kind,
+            )
+            if up.get('ok'):
+                linkyar_rid = str(up.get('linkyar_rid') or '')
+                linkyar_date = str(up.get('linkyar_date') or '')
+                linkyar_seq = str(up.get('linkyar_seq') or '')
+                lb_mid = str(up.get('message_id') or up.get('linkyar_rid') or '')
+                logger.info(
+                    'linkyar uploaded to linkbank rid=%s date=%s',
+                    linkyar_rid, linkyar_date,
+                )
+            else:
+                logger.warning('linkyar upload failed: %s — fallback bot', up.get('error'))
+    except Exception:
+        logger.exception('linkyar publish_to_linkbank')
+
+    # fallback: فوروارد بات (برای linkbank_message_id بات)
+    if not linkyar_rid:
+        fwd = bc.forward_message(lb, req.storage_chat_id, int(req.storage_message_id))
+        if not fwd.get('ok'):
+            fwd = bc.copy_message(lb, req.storage_chat_id, int(req.storage_message_id))
+        if not fwd.get('ok'):
+            logger.error('publish to %s failed', lb)
+            return {
+                'ok': False,
+                'error': 'publish_failed',
+                'message': user_facing_error('publish_failed'),
+            }
+        result = fwd.get('result') or {}
+        lb_mid = str(result.get('message_id') or '')
 
     banner = req.customer_banner
     if banner is None:
@@ -208,6 +253,9 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
             from_linkbank=True,
             linkbank_chat_id=lb,
             linkbank_message_id=lb_mid,
+            linkyar_rid=linkyar_rid,
+            linkyar_date=linkyar_date,
+            linkyar_seq=linkyar_seq,
             media_kind=req.media_kind,
             is_active=True,
         )
@@ -215,6 +263,10 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
         banner.from_linkbank = True
         banner.linkbank_chat_id = lb
         banner.linkbank_message_id = lb_mid
+        if linkyar_rid:
+            banner.linkyar_rid = linkyar_rid
+            banner.linkyar_date = linkyar_date
+            banner.linkyar_seq = linkyar_seq
         if req.caption and not banner.caption:
             banner.caption = req.caption
         banner.is_active = True
