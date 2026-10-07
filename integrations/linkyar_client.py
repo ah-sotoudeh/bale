@@ -1107,7 +1107,7 @@ def _forward_via_bale_sdk_from_self_or_source(
     force_date: int = 0,
     force_seq: int = 0,
 ) -> Dict[str, Any]:
-    """فوروارد فقط با bale-sdk: OutPeer + rid + date (مستند رسمی)."""
+    """فوروارد با bale-sdk: مستقیم، بعد hop شخصی→کانال اگر مستقیم دیده نشد."""
     import asyncio
     import random
     import re
@@ -1156,6 +1156,34 @@ def _forward_via_bale_sdk_from_self_or_source(
         def _entry_seq(h) -> int:
             return _u64(getattr(h, 'seq', None))
 
+        def _count_marker(hist, marker: str) -> int:
+            if not marker:
+                return 0
+            n = _norm(marker)
+            c = 0
+            for h in hist or []:
+                if n[:20] in _norm(_entry_text(h)):
+                    c += 1
+            return c
+
+        async def _do_forward(from_peer, to_peer, rid_, date_, seq_=0):
+            req = pb.ForwardMessagesRequest()
+            req.peer.CopyFrom(to_peer.to_out_proto())
+            fwd = req.forwardedMessages.add()
+            fwd.peer.CopyFrom(from_peer.to_proto())
+            fwd.rid = int(rid_)
+            fwd.date.value = int(date_)
+            if seq_:
+                try:
+                    if hasattr(fwd, 'seq') and hasattr(fwd.seq, 'value'):
+                        fwd.seq.value = int(seq_)
+                except Exception:
+                    pass
+            req.rid.append(random.getrandbits(63))
+            return await client.call(
+                'bale.messaging.v2.Messaging', 'ForwardMessages', req, timeout=15.0,
+            )
+
         async with BaleClient(token) as client:
             raw_dst = str(target_channel_ref or '').strip()
             if 'ble.ir/' in raw_dst:
@@ -1175,42 +1203,34 @@ def _forward_via_bale_sdk_from_self_or_source(
                 dst_peer = dst_info.peer
             dst_id = int(dst_peer.id)
 
+            # مبدأ
+            raw_src = str(source_channel_ref or '').strip()
+            if 'ble.ir/' in raw_src:
+                raw_src = '@' + raw_src.split('ble.ir/')[-1].split('/')[0].lstrip('@')
+            if not raw_src.startswith('@') and not raw_src.lstrip('-').isdigit():
+                raw_src = '@' + raw_src.lstrip('@')
+
             hist = []
             src_peer = None
-            src_label = ''
+            src_label = raw_src
+            try:
+                src_info = await client.resolve(raw_src)
+                src_peer = src_info.peer
+                hist = list(await client.get_history(src_peer, limit=30) or [])
+            except Exception as e:
+                errors.append(f'src_resolve:{type(e).__name__}:{e}')
 
-            if prefer_self_inbox and me_id:
-                me_peer = Peer.user(int(me_id))
-                try:
-                    hist = list(await client.get_history(me_peer, limit=25) or [])
-                    src_peer = me_peer
-                    src_label = f'self:{me_id}'
-                except Exception as e:
-                    errors.append(f'self_hist:{type(e).__name__}:{e}')
-
-            if not hist:
-                raw_src = str(source_channel_ref or '').strip()
-                if 'ble.ir/' in raw_src:
-                    raw_src = '@' + raw_src.split('ble.ir/')[-1].split('/')[0].lstrip('@')
-                if not raw_src.startswith('@') and not raw_src.lstrip('-').isdigit():
-                    raw_src = '@' + raw_src.lstrip('@')
-                try:
-                    src_info = await client.resolve(raw_src)
-                    src_peer = src_info.peer
-                    src_label = raw_src
-                    hist = list(await client.get_history(src_peer, limit=40) or [])
-                except Exception as e:
-                    return {'ok': False, 'error': f'source_load:{type(e).__name__}:{e}', 'tries': errors}
+            my_id = int(me_id or getattr(client, 'me_id', 0) or _linkyar_user_id_from_token() or 0)
+            me_peer = Peer.user(my_id) if my_id else None
 
             if force_rid and force_date and src_peer is not None:
                 rid, date, seq = int(force_rid), int(force_date), int(force_seq or 0)
-                pick = 'stored_linkyar_ids'
+                pick = 'stored_ids'
             else:
                 if not hist or src_peer is None:
-                    return {'ok': False, 'error': 'history_empty', 'src': src_label, 'tries': errors}
-
-                chosen = None
-                pick = ''
+                    return {'ok': False, 'error': 'history_empty', 'tries': errors}
+                chosen = hist[0]
+                pick = 'latest'
                 cap = (caption_match or '').strip()
                 if cap:
                     nc = _norm(cap)
@@ -1219,45 +1239,34 @@ def _forward_via_bale_sdk_from_self_or_source(
                             chosen = h
                             pick = 'caption'
                             break
-                if chosen is None:
-                    chosen = hist[0]
-                    pick = 'latest_self' if prefer_self_inbox else 'latest_src'
-
                 rid = _entry_rid(chosen)
                 date = _entry_date(chosen)
                 seq = _entry_seq(chosen)
                 if not rid or not date:
-                    return {
-                        'ok': False,
-                        'error': f'bad_rid_date rid={rid} date={date}',
-                        'pick': pick,
-                        'src': src_label,
-                    }
+                    return {'ok': False, 'error': f'bad_rid_date rid={rid} date={date}'}
 
             try:
-                before = list(await client.get_history(dst_peer, limit=15) or [])
+                before = list(await client.get_history(dst_peer, limit=20) or [])
                 before_rids = {_entry_rid(x) for x in before}
+                before_marker = _count_marker(before, caption_match)
             except Exception as e:
+                before = []
                 before_rids = set()
+                before_marker = 0
                 errors.append(f'dst_before:{type(e).__name__}')
 
-            async def _do_forward(from_peer, to_peer, rid_, date_, seq_=0):
-                req = pb.ForwardMessagesRequest()
-                req.peer.CopyFrom(to_peer.to_out_proto())
-                fwd = req.forwardedMessages.add()
-                fwd.peer.CopyFrom(from_peer.to_proto())
-                fwd.rid = int(rid_)
-                fwd.date.value = int(date_)
-                if seq_:
-                    try:
-                        if hasattr(fwd, 'seq') and hasattr(fwd.seq, 'value'):
-                            fwd.seq.value = int(seq_)
-                    except Exception:
-                        pass
-                req.rid.append(random.getrandbits(63))
-                return await client.call(
-                    'bale.messaging.v2.Messaging', 'ForwardMessages', req, timeout=15.0,
-                )
+            async def _verify_dst() -> tuple:
+                await asyncio.sleep(2.5)
+                try:
+                    after = list(await client.get_history(dst_peer, limit=20) or [])
+                except Exception as e:
+                    errors.append(f'verify:{type(e).__name__}:{e}')
+                    return set(), 0
+                after_rids = {_entry_rid(x) for x in after}
+                new = after_rids - before_rids
+                new.discard(0)
+                marker_n = _count_marker(after, caption_match)
+                return new, marker_n
 
             dates_try = [date]
             if date > 10_000_000_000:
@@ -1265,75 +1274,116 @@ def _forward_via_bale_sdk_from_self_or_source(
             elif date > 1_000_000_000:
                 dates_try.append(date * 1000)
 
+            # --- A) فوروارد مستقیم مبدأ → مقصد ---
             for dval in dates_try:
                 try:
                     resp = await _do_forward(src_peer, dst_peer, rid, dval, seq)
-                    await asyncio.sleep(2.5)
-                    try:
-                        after = list(await client.get_history(dst_peer, limit=15) or [])
-                        after_rids = {_entry_rid(x) for x in after}
-                        new = after_rids - before_rids
-                        new.discard(0)
-                    except Exception as e:
-                        new = set()
-                        errors.append(f'verify:{type(e).__name__}:{e}')
-                    if new:
+                    new, marker_n = await _verify_dst()
+                    # موفق اگر rid جدید یا تعداد marker بیشتر شد (همان کانال)
+                    if new or (caption_match and marker_n > before_marker):
                         return {
                             'ok': True,
-                            'method': 'forward_sdk',
+                            'method': 'forward_direct',
                             'lib': 'bale-sdk',
                             'verified': True,
-                            'message_id': list(new)[0],
-                            'message_date': dval,
+                            'message_id': list(new)[0] if new else rid,
                             'src_rid': rid,
                             'src_date': dval,
                             'src': src_label,
                             'dst': dst_id,
                             'picked': pick,
+                            'marker_count': marker_n,
                         }
-                    errors.append(f'fwd d={dval}: new=0 resp={str(resp)[:50] if resp else None}')
+                    errors.append(
+                        f'direct d={dval}: new=0 marker={marker_n}/{before_marker} '
+                        f'resp={str(resp)[:40] if resp else None}'
+                    )
                 except Exception as e:
-                    errors.append(f'fwd d={dval}:{type(e).__name__}:{e}')
+                    errors.append(f'direct d={dval}:{type(e).__name__}:{e}')
 
-            try:
-                await client.forward_messages(
-                    target_channel_ref if not dst_peer_id else dst_peer,
-                    [(rid, date)],
-                    src_peer,
-                )
-                await asyncio.sleep(2.5)
-                after = list(await client.get_history(dst_peer, limit=15) or [])
-                new = {_entry_rid(x) for x in after} - before_rids
-                new.discard(0)
-                if new:
-                    return {
-                        'ok': True,
-                        'method': 'forward_sdk_hl',
-                        'lib': 'bale-sdk',
-                        'verified': True,
-                        'message_id': list(new)[0],
-                        'src_rid': rid,
-                        'picked': pick,
-                    }
-                errors.append('hl:new=0')
-            except Exception as e:
-                errors.append(f'hl:{type(e).__name__}:{e}')
+            # --- B) hop: مبدأ → شخصی → مقصد (فوروارد واقعی دو مرحله‌ای) ---
+            if me_peer is None:
+                return {
+                    'ok': False,
+                    'error': 'forward_not_visible',
+                    'lib': 'bale-sdk',
+                    'tries': errors[:12],
+                    'src_rid': rid,
+                    'src_date': date,
+                    'note': 'no me_peer for hop',
+                }
+
+            hop_rid, hop_date, hop_seq = rid, date, seq
+            for dval in dates_try:
+                try:
+                    await _do_forward(src_peer, me_peer, rid, dval, seq)
+                    await asyncio.sleep(1.5)
+                    me_hist = list(await client.get_history(me_peer, limit=10) or [])
+                    # پیام جدید در شخصی
+                    found = None
+                    for h in me_hist:
+                        if caption_match and _norm(caption_match)[:20] in _norm(_entry_text(h)):
+                            found = h
+                            break
+                    if found is None and me_hist:
+                        found = me_hist[0]
+                    if found is not None:
+                        hop_rid = _entry_rid(found)
+                        hop_date = _entry_date(found)
+                        hop_seq = _entry_seq(found)
+                        errors.append(f'hop_to_me ok rid={hop_rid}')
+                        break
+                    errors.append(f'hop_to_me d={dval}: no msg on me')
+                except Exception as e:
+                    errors.append(f'hop_to_me d={dval}:{type(e).__name__}:{e}')
+
+            if hop_rid and hop_date:
+                hop_dates = [hop_date]
+                if hop_date > 10_000_000_000:
+                    hop_dates.append(hop_date // 1000)
+                for dval in hop_dates:
+                    try:
+                        resp = await _do_forward(me_peer, dst_peer, hop_rid, dval, hop_seq)
+                        new, marker_n = await _verify_dst()
+                        if new or (caption_match and marker_n > before_marker):
+                            return {
+                                'ok': True,
+                                'method': 'forward_hop_self',
+                                'lib': 'bale-sdk',
+                                'verified': True,
+                                'message_id': list(new)[0] if new else hop_rid,
+                                'src_rid': rid,
+                                'hop_rid': hop_rid,
+                                'src': src_label,
+                                'dst': dst_id,
+                                'picked': pick,
+                                'marker_count': marker_n,
+                            }
+                        errors.append(
+                            f'hop_to_dst d={dval}: new=0 marker={marker_n}/{before_marker}'
+                        )
+                    except Exception as e:
+                        errors.append(f'hop_to_dst d={dval}:{type(e).__name__}:{e}')
 
             return {
                 'ok': False,
                 'error': 'forward_not_visible',
                 'lib': 'bale-sdk',
-                'tries': errors[:12],
+                'tries': errors[:14],
                 'src_rid': rid,
                 'src_date': date,
                 'src_seq': seq,
                 'src': src_label,
                 'dst': dst_id,
                 'picked': pick,
-                'note': 'فقط فوروارد؛ آپلود استفاده نشد. پیام در کانال ظاهر نشد.',
+                'note': (
+                    'فوروارد مستقیم و hop شخصی هر دو در کانال دیده نشد. '
+                    'ارسال متن کار می‌کند؛ مشکل فقط ForwardMessages به کانال است.'
+                ),
             }
 
     return _run(_fn())
+
 
 
 def _forward_via_aiobale_stack(
