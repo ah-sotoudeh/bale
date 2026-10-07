@@ -572,9 +572,10 @@ def _post_via_linkyar(
         dst_ref,
         src_ref,
         caption_match=cap,
-        limit=40,
+        limit=80,
         bot_from_chat_id=bot_from,
         bot_message_id=bot_mid,
+        message_date=int(message_date or 0),
         dst_peer_id=peer_id,
         dst_title=str(getattr(ch, 'name', None) or ''),
     )
@@ -592,17 +593,21 @@ def _post_via_linkyar(
     err = str(result.get('error') or 'forward_failed')
     if result.get('lib'):
         err = f'{err} | lib={result.get("lib")}'
+    if result.get('picked'):
+        err = f'{err} | picked={result.get("picked")}'
+    if result.get('want_mid') is not None:
+        err = f'{err} | want_mid={result.get("want_mid")}'
+    if result.get('previews'):
+        err = f'{err} | hist={result.get("previews")}'[:400]
     if result.get('src_peer') or result.get('target'):
         err = (
             f'{err} | src={result.get("src_peer")}(ah={result.get("src_ah")}) '
             f'tgt={result.get("target")}(ah={result.get("tgt_ah")}) '
             f'mid={result.get("mid")}'
-        )[:320]
+        )[:480]
     tries = result.get('tries') or result.get('tries_all') or []
     if tries:
-        err = f'{err} | try0={tries[0]}'[:450]
-        if len(tries) > 1:
-            err = f'{err} | try1={tries[1]}'[:520]
+        err = f'{err} | try0={tries[0]}'[:560]
     return {
         'ok': False,
         'method': 'failed',

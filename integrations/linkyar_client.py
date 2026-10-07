@@ -885,15 +885,17 @@ def forward_banner_from_linkbank(
     source_channel_ref: str,
     *,
     caption_match: str = '',
-    limit: int = 40,
+    limit: int = 80,
     bot_from_chat_id: str = '',
     bot_message_id: int = 0,
+    message_date: int = 0,
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد با نقل‌قول: فقط aiobale/baleclient.
+    """فوروارد/ارسال بنر مشخص از لینک‌بانک.
 
-    bale-sdk روی کانال no-op است (seq خالی، پیام نمی‌نشیند) — استفاده نمی‌شود.
+    bot_message_id و caption_match برای انتخاب بنر درست ضروری‌اند
+    (قبلاً همیشه پیام اول تاریخچه فرستاده می‌شد).
     """
     try:
         result = _forward_via_aiobale_stack(
@@ -901,6 +903,8 @@ def forward_banner_from_linkbank(
             source_channel_ref,
             caption_match=caption_match,
             limit=limit,
+            bot_message_id=int(bot_message_id or 0),
+            message_date=int(message_date or 0),
             dst_peer_id=dst_peer_id,
             dst_title=dst_title,
         )
@@ -915,11 +919,13 @@ def _forward_via_aiobale_stack(
     source_channel_ref: str,
     *,
     caption_match: str = '',
-    limit: int = 40,
+    limit: int = 80,
+    bot_message_id: int = 0,
+    message_date: int = 0,
     dst_peer_id: int | None = None,
     dst_title: str = '',
 ) -> Dict[str, Any]:
-    """فوروارد طبق baleclient.Client.forward_messages + fallback file_id."""
+    """انتخاب بنر مشخص + فوروارد یا file_id همان پیام."""
 
     async def _fn(client):
         import asyncio
@@ -965,7 +971,10 @@ def _forward_via_aiobale_stack(
             ids = set()
             for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 try:
-                    msgs = await client.load_history(int(peer_id), ctype, limit=12, offset_date=-1, load_mode=ListLoadMode.BACKWARD)
+                    msgs = await client.load_history(
+                        int(peer_id), ctype, limit=12, offset_date=-1,
+                        load_mode=ListLoadMode.BACKWARD,
+                    )
                     for m in (msgs or []):
                         mid = getattr(m, 'message_id', None) or getattr(m, 'id', None)
                         if mid:
@@ -975,6 +984,67 @@ def _forward_via_aiobale_stack(
                 except Exception:
                     continue
             return ids
+
+        def _msg_text(m) -> str:
+            parts = []
+            for attr in ('text', 'caption'):
+                v = getattr(m, attr, None)
+                if v:
+                    parts.append(str(v))
+            content = getattr(m, 'content', None)
+            if content is not None:
+                doc = getattr(content, 'document', None)
+                if doc is not None:
+                    cap = getattr(doc, 'caption', None)
+                    if cap is not None:
+                        parts.append(str(getattr(cap, 'content', None) or getattr(cap, 'text', None) or ''))
+                tm = getattr(content, 'text', None) or getattr(content, 'text_message', None)
+                if tm is not None:
+                    parts.append(str(getattr(tm, 'value', None) or getattr(tm, 'text', None) or tm or ''))
+            return ' '.join(p for p in parts if p).strip()
+
+        def _pick_message(loaded, want_mid: int, want_date: int, caption: str):
+            """هرگز به پیام اول پیش‌فرض نرو مگر صریحاً فقط یک پیام باشد."""
+            if not loaded:
+                return None, 'empty'
+
+            # 1) mid داخلی بزرگ (rid لینک‌یار)
+            if want_mid and want_mid > 10**12:
+                for m in loaded:
+                    mid = int(getattr(m, 'message_id', None) or getattr(m, 'id', 0) or 0)
+                    if mid == want_mid:
+                        return m, f'by_rid:{want_mid}'
+                return None, f'rid_not_in_history:{want_mid}'
+
+            # 2) caption دقیق / شامل
+            cap = (caption or '').strip()
+            if cap:
+                exact = []
+                partial = []
+                for m in loaded:
+                    text = _msg_text(m)
+                    if not text:
+                        continue
+                    if text == cap or text.strip() == cap:
+                        exact.append(m)
+                    elif cap in text or text in cap:
+                        partial.append(m)
+                if exact:
+                    return exact[0], f'caption_exact:{cap[:40]}'
+                if partial:
+                    # طولانی‌ترین تطبیق
+                    partial.sort(key=lambda m: len(_msg_text(m)), reverse=True)
+                    return partial[0], f'caption_partial:{cap[:40]}'
+                return None, f'caption_not_found:{cap[:40]}'
+
+            # 3) mid کوچک Bot API — در تاریخچهٔ کاربر نیست؛ بدون caption نمی‌توانیم
+            if want_mid and want_mid < 10**12:
+                return None, f'bot_mid_needs_caption:{want_mid}'
+
+            # 4) فقط اگر یک پیام باشد
+            if len(loaded) == 1:
+                return loaded[0], 'only_one'
+            return None, 'ambiguous_need_caption_or_mid'
 
         src = await _resolve_exact(source_channel_ref)
         if not src.get('ok'):
@@ -1000,7 +1070,10 @@ def _forward_via_aiobale_stack(
         src_ctype_used = ChatType.GROUP
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
             try:
-                msgs = await client.load_history(src_id, ctype, limit=int(limit), offset_date=-1, load_mode=ListLoadMode.BACKWARD)
+                msgs = await client.load_history(
+                    src_id, ctype, limit=int(limit or 80), offset_date=-1,
+                    load_mode=ListLoadMode.BACKWARD,
+                )
                 if msgs:
                     loaded = list(msgs)
                     src_ctype_used = ctype
@@ -1008,29 +1081,41 @@ def _forward_via_aiobale_stack(
             except Exception as e:
                 errors.append(f'hist/{ctype}:{type(e).__name__}:{e}')
         if not loaded:
-            return {'ok': False, 'error': 'history_empty', 'lib': lib_name, 'tries': errors, 'src': src_id, 'dst': tgt_id}
+            return {
+                'ok': False, 'error': 'history_empty', 'lib': lib_name,
+                'tries': errors, 'src': src_id, 'dst': tgt_id,
+            }
 
-        key = (caption_match or '').strip()[:40]
-        chosen_msg = loaded[0]
-        if key:
-            for m in loaded:
-                text = str(getattr(m, 'text', None) or getattr(m, 'caption', None) or '')
-                if key in text:
-                    chosen_msg = m
-                    break
+        want_mid = int(bot_message_id or 0)
+        want_date = int(message_date or 0)
+        chosen_msg, pick_how = _pick_message(loaded, want_mid, want_date, caption_match or '')
+        if chosen_msg is None:
+            previews = []
+            for m in loaded[:8]:
+                mid = int(getattr(m, 'message_id', None) or getattr(m, 'id', 0) or 0)
+                previews.append({'mid': mid, 'text': _msg_text(m)[:50]})
+            return {
+                'ok': False,
+                'error': f'banner_not_found:{pick_how}',
+                'lib': lib_name,
+                'want_mid': want_mid,
+                'caption': (caption_match or '')[:80],
+                'history_n': len(loaded),
+                'previews': previews,
+            }
+
         msg_id = int(getattr(chosen_msg, 'message_id', None) or getattr(chosen_msg, 'id', 0) or 0)
-        msg_date = int(getattr(chosen_msg, 'date', 0) or 0)
-        if not msg_id or not msg_date:
-            return {'ok': False, 'error': f'bad_message id={msg_id} date={msg_date}', 'lib': lib_name}
-
+        msg_date = int(getattr(chosen_msg, 'date', 0) or 0) or want_date
         try:
             chosen_msg.chat = Chat(id=src_id, type=src_ctype_used)
         except Exception:
             pass
 
-        dates = [msg_date]
+        dates = [msg_date] if msg_date else []
         if msg_date > 10_000_000_000:
             dates.append(msg_date // 1000)
+        if not dates:
+            dates = [0]
 
         before = await _hist_ids(tgt_id)
 
@@ -1038,52 +1123,81 @@ def _forward_via_aiobale_stack(
             await asyncio.sleep(2.0)
             return bool(await _hist_ids(tgt_id) - before)
 
+        # --- forward ---
         for d in dates:
+            if not d:
+                continue
             for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 try:
                     new_id = generate_id()
-                    await client.forward_message(message=chosen_msg, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id)
+                    await client.forward_message(
+                        message=chosen_msg, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id,
+                    )
                     if await _verify():
-                        return {'ok': True, 'method': f'forward_Message/{ctype}', 'lib': lib_name, 'message_id': new_id, 'verified': True, 'src': src_id, 'dst': tgt_id}
+                        return {
+                            'ok': True, 'method': f'forward_Message/{ctype}',
+                            'lib': lib_name, 'message_id': new_id, 'verified': True,
+                            'src': src_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
+                        }
                     errors.append(f'Msg/{ctype}:not_visible')
                 except Exception as e:
                     errors.append(f'Msg/{ctype}:{type(e).__name__}:{e}')
 
             for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 for use_ah in (True, False):
-                    for date_plain in (False, True):
-                        try:
-                            new_id = generate_id()
-                            src_peer_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
-                            if use_ah and src_ah:
-                                src_peer_kw['access_hash'] = int(src_ah)
-                            date_val = int(d) if date_plain else IntValue(value=int(d))
-                            info = InfoMessage(message_id=int(msg_id), date=date_val, peer=Peer(**src_peer_kw))
-                            await client.forward_message(message=info, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id)
-                            if await _verify():
-                                return {'ok': True, 'method': f'forward_Info/{ctype}/ah={use_ah}/plain={date_plain}', 'lib': lib_name, 'message_id': new_id, 'verified': True, 'src': src_id, 'dst': tgt_id}
-                            errors.append(f'Info/{ctype}/ah={use_ah}/plain={date_plain}:not_visible')
-                        except Exception as e:
-                            errors.append(f'Info/{ctype}/ah={use_ah}/plain={date_plain}:{type(e).__name__}:{e}')
+                    try:
+                        new_id = generate_id()
+                        src_peer_kw = {'type': PeerType.GROUP, 'id': int(src_id)}
+                        if use_ah and src_ah:
+                            src_peer_kw['access_hash'] = int(src_ah)
+                        info = InfoMessage(
+                            message_id=int(msg_id),
+                            date=IntValue(value=int(d)),
+                            peer=Peer(**src_peer_kw),
+                        )
+                        await client.forward_message(
+                            message=info, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id,
+                        )
+                        if await _verify():
+                            return {
+                                'ok': True, 'method': f'forward_Info/{ctype}',
+                                'lib': lib_name, 'message_id': new_id, 'verified': True,
+                                'src': src_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
+                            }
+                        errors.append(f'Info/{ctype}/ah={use_ah}:not_visible')
+                    except Exception as e:
+                        errors.append(f'Info/{ctype}/ah={use_ah}:{type(e).__name__}:{e}')
 
             for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 try:
                     new_id = generate_id()
-                    target_peer = Peer(type=PeerType.GROUP, id=int(tgt_id))
-                    src_peer = Peer(type=PeerType.GROUP, id=int(src_id), access_hash=int(src_ah)) if src_ah else Peer(type=PeerType.GROUP, id=int(src_id))
+                    src_peer = (
+                        Peer(type=PeerType.GROUP, id=int(src_id), access_hash=int(src_ah))
+                        if src_ah else Peer(type=PeerType.GROUP, id=int(src_id))
+                    )
                     call = ForwardMessages(
-                        peer=target_peer,
+                        peer=Peer(type=PeerType.GROUP, id=int(tgt_id)),
                         message_ids=[int(new_id)],
-                        forwarded_messages=[InfoMessage(message_id=int(msg_id), date=IntValue(value=int(d)), peer=src_peer)],
+                        forwarded_messages=[
+                            InfoMessage(
+                                message_id=int(msg_id),
+                                date=IntValue(value=int(d)),
+                                peer=src_peer,
+                            )
+                        ],
                     )
                     raw = await _post_method_raw(client, call)
                     if raw.get('ok') and await _verify():
-                        return {'ok': True, 'method': f'raw/{ctype}', 'lib': lib_name, 'message_id': new_id, 'verified': True, 'src': src_id, 'dst': tgt_id}
+                        return {
+                            'ok': True, 'method': f'raw/{ctype}',
+                            'lib': lib_name, 'message_id': new_id, 'verified': True,
+                            'src': src_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
+                        }
                     errors.append(f'raw/{ctype}:ok={raw.get("ok")} err={raw.get("error")}')
                 except Exception as e:
                     errors.append(f'raw/{ctype}:{type(e).__name__}:{e}')
 
-        # fallback: same server file_id (no download)
+        # --- file_id همان پیام انتخاب‌شده ---
         try:
             content = getattr(chosen_msg, 'content', None)
             doc = getattr(content, 'document', None) if content else None
@@ -1092,11 +1206,7 @@ def _forward_via_aiobale_stack(
             file_size = int(getattr(doc, 'size', 0) or 0) if doc else 0
             file_name = (getattr(doc, 'name', None) or 'banner.jpg') if doc else 'banner.jpg'
             mime = (getattr(doc, 'mime_type', None) or 'image/jpeg') if doc else 'image/jpeg'
-            cap = ''
-            if doc is not None:
-                cap_obj = getattr(doc, 'caption', None)
-                if cap_obj is not None:
-                    cap = str(getattr(cap_obj, 'content', None) or getattr(cap_obj, 'text', None) or '')
+            cap = _msg_text(chosen_msg) or (caption_match or '')
             if file_id is not None and file_ah is not None:
                 for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                     try:
@@ -1116,9 +1226,10 @@ def _forward_via_aiobale_stack(
                         raw = await _post_method_raw(client, call)
                         if raw.get('ok') and await _verify():
                             return {
-                                'ok': True, 'method': f'file_id_send/{ctype}', 'lib': lib_name,
-                                'message_id': mid, 'verified': True, 'src': src_id, 'dst': tgt_id,
-                                'note': 'forward_api_failed; same server file_id sent',
+                                'ok': True, 'method': f'file_id_send/{ctype}',
+                                'lib': lib_name, 'message_id': mid, 'verified': True,
+                                'src': src_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
+                                'note': 'forward_failed; same server file_id of SELECTED banner',
                             }
                         errors.append(f'file_id/{ctype}:ok={raw.get("ok")}')
                     except Exception as e:
@@ -1131,7 +1242,7 @@ def _forward_via_aiobale_stack(
         return {
             'ok': False, 'error': 'forward_not_visible', 'lib': lib_name,
             'tries': errors[:24], 'src_peer': src_id, 'target': tgt_id, 'mid': msg_id,
-            'src_ah': src_ah, 'tgt_ah': tgt_ah, 'src_ctype': str(src_ctype_used),
+            'src_ah': src_ah, 'tgt_ah': tgt_ah, 'picked': pick_how,
             'before_count': len(before),
         }
 
