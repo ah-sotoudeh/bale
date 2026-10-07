@@ -1201,7 +1201,31 @@ def _forward_via_bale_sdk_from_self_or_source(
             else:
                 dst_info = await client.resolve(raw_dst)
                 dst_peer = dst_info.peer
+            # access_hash واقعی کانال (sentinel=1 اغلب باعث no-op فوروارد می‌شود)
+            try:
+                full = await client.get_full(dst_peer)
+                if full and getattr(full, 'peer', None):
+                    dst_peer = full.peer
+            except Exception as e:
+                errors.append(f'dst_get_full:{type(e).__name__}:{e}')
+            try:
+                groups = await client.load_groups()
+                for g in groups or []:
+                    gp = getattr(g, 'peer', None) or g
+                    gid = int(getattr(gp, 'id', 0) or getattr(g, 'id', 0) or 0)
+                    if gid == int(dst_peer.id):
+                        ah = int(getattr(gp, 'access_hash', 0) or getattr(g, 'access_hash', 0) or 0)
+                        if ah and ah not in (0, 1):
+                            dst_peer = Peer.channel(int(dst_peer.id), access_hash=ah)
+                            errors.append(f'dst_ah_from_groups={ah}')
+                        break
+            except Exception as e:
+                errors.append(f'load_groups:{type(e).__name__}')
             dst_id = int(dst_peer.id)
+            errors.append(
+                f'dst_peer type={getattr(dst_peer, "type", "?")} '
+                f'id={dst_id} ah={getattr(dst_peer, "access_hash", "?")}'
+            )
 
             # مبدأ
             raw_src = str(source_channel_ref or '').strip()
@@ -1216,6 +1240,12 @@ def _forward_via_bale_sdk_from_self_or_source(
             try:
                 src_info = await client.resolve(raw_src)
                 src_peer = src_info.peer
+                try:
+                    sfull = await client.get_full(src_peer)
+                    if sfull and getattr(sfull, 'peer', None):
+                        src_peer = sfull.peer
+                except Exception:
+                    pass
                 hist = list(await client.get_history(src_peer, limit=30) or [])
             except Exception as e:
                 errors.append(f'src_resolve:{type(e).__name__}:{e}')
@@ -1377,8 +1407,9 @@ def _forward_via_bale_sdk_from_self_or_source(
                 'dst': dst_id,
                 'picked': pick,
                 'note': (
-                    'فوروارد مستقیم و hop شخصی هر دو در کانال دیده نشد. '
-                    'ارسال متن کار می‌کند؛ مشکل فقط ForwardMessages به کانال است.'
+                    'تشخیص: ForwardMessages به شخصی موفق است؛ به کانال no-op (new=0). '
+                    'SendMessage به کانال کار می‌کند. احتمالاً محدودیت API کاربر برای '
+                    'فوروارد به کانال/گروه در بله.'
                 ),
             }
 
