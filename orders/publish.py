@@ -1064,10 +1064,14 @@ def test_upload_then_forward_same_channel(
             f'دو پیام در کانال: ۱) متن {marker} ۲) فوروارد همان. rid={rid} date={date}'
         )
     else:
+        tries = fwd.get('tries') or []
+        tries_txt = ' | '.join(str(x)[:80] for x in tries[:6]) if tries else '—'
         result['error'] = (
-            f'متن ارسال شد (rid={rid}) ولی فوروارد ناموفق: '
-            f'{fwd.get("error") or fwd.get("tries")}'
-        )[:400]
+            f'متن ارسال شد (rid={rid}) ولی فوروارد ناموفق: {fwd.get("error") or "forward_not_visible"}'
+            f' || tries: {tries_txt}'
+        )[:900]
+        result['tries'] = tries
+        result['forward_note'] = fwd.get('note')
     return result
 
 
