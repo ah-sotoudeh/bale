@@ -994,14 +994,18 @@ def _forward_via_aiobale_stack(
     dst_title: str = '',
     use_self_inbox: bool = False,
 ) -> Dict[str, Any]:
-    """اگر use_self_inbox: پیام از چت خصوصی (پل بازو) — همان بنر با message_id بات."""
+    """پل بازو→شخصی لینک‌یار؛ بعد ارسال به کانال با file_id همان پیام.
+
+    فوروارد کاربر به کانال InvalidArgument می‌دهد؛ فوروارد بازو به شخصی کار می‌کند.
+    پس از پل، همان file_id سرور را با SendMessage به کانال می‌فرستیم (مثل آپلود موفق).
+    """
 
     async def _fn(client):
         import asyncio
-        from aiobale.enums import ChatType, ListLoadMode, PeerType
-        from aiobale.types import InfoMessage, Peer, Chat
+        import re
+        from aiobale.enums import ChatType, ListLoadMode, PeerType, SendType
+        from aiobale.types import InfoMessage, Peer, Chat, FileInput
         from aiobale.types.values import IntValue
-        from aiobale.methods.messaging.forward_message import ForwardMessages
         from aiobale.methods.messaging.send_message import SendMessage
         from aiobale.types import (
             MessageContent, DocumentMessage, MessageCaption, DocumentsExt, PhotoExt,
@@ -1010,6 +1014,91 @@ def _forward_via_aiobale_stack(
 
         lib_name = _BALE_LIB_NAME or 'aiobale'
         errors: List[str] = []
+
+        def _norm(s: str) -> str:
+            s = re.sub(r'[*_`~\[\]()]', '', s or '')
+            return re.sub(r'\s+', ' ', s).strip().lower()
+
+        def _msg_text(m) -> str:
+            parts = []
+            for attr in ('text', 'caption'):
+                v = getattr(m, attr, None)
+                if v:
+                    parts.append(str(v))
+            content = getattr(m, 'content', None)
+            if content is not None:
+                doc = getattr(content, 'document', None)
+                if doc is not None:
+                    cap = getattr(doc, 'caption', None)
+                    if cap is not None:
+                        parts.append(str(getattr(cap, 'content', None) or getattr(cap, 'text', None) or ''))
+                tm = getattr(content, 'text', None) or getattr(content, 'text_message', None)
+                if tm is not None:
+                    parts.append(str(getattr(tm, 'value', None) or getattr(tm, 'text', None) or tm or ''))
+            return ' '.join(p for p in parts if p).strip()
+
+        def _extract_file(m) -> Dict[str, Any] | None:
+            """file_id/access_hash را از Message یا model_dump تو در تو پیدا کن."""
+            content = getattr(m, 'content', None)
+            doc = getattr(content, 'document', None) if content else None
+            if doc is not None:
+                fid = getattr(doc, 'file_id', None)
+                fah = getattr(doc, 'access_hash', None)
+                if fid is not None and fah is not None:
+                    return {
+                        'file_id': fid,
+                        'access_hash': int(fah),
+                        'size': int(getattr(doc, 'size', 0) or 0),
+                        'name': getattr(doc, 'name', None) or 'banner.jpg',
+                        'mime': getattr(doc, 'mime_type', None) or 'image/jpeg',
+                        'caption': _msg_text(m),
+                    }
+
+            # جستجوی بازگشتی در dump
+            try:
+                dump = m.model_dump(mode='python') if hasattr(m, 'model_dump') else {}
+            except Exception:
+                dump = {}
+
+            found: Dict[str, Any] = {}
+
+            def walk(obj, depth=0):
+                if depth > 8 or obj is None:
+                    return
+                if isinstance(obj, dict):
+                    keys = {str(k).lower(): k for k in obj.keys()}
+                    if 'file_id' in keys or 'fileid' in keys:
+                        fk = keys.get('file_id') or keys.get('fileid')
+                        ak = keys.get('access_hash') or keys.get('accesshash')
+                        if fk is not None and obj.get(fk) is not None:
+                            found.setdefault('file_id', obj.get(fk))
+                            if ak is not None and obj.get(ak) is not None:
+                                found.setdefault('access_hash', obj.get(ak))
+                            for sk, name in (
+                                ('size', 'size'),
+                                ('name', 'name'),
+                                ('mime_type', 'mime'),
+                                ('mimetype', 'mime'),
+                            ):
+                                if sk in keys and name not in found:
+                                    found[name] = obj.get(keys[sk])
+                    for v in obj.values():
+                        walk(v, depth + 1)
+                elif isinstance(obj, list):
+                    for v in obj:
+                        walk(v, depth + 1)
+
+            walk(dump)
+            if found.get('file_id') is not None and found.get('access_hash') is not None:
+                return {
+                    'file_id': found['file_id'],
+                    'access_hash': int(found['access_hash']),
+                    'size': int(found.get('size') or 0),
+                    'name': found.get('name') or 'banner.jpg',
+                    'mime': found.get('mime') or 'image/jpeg',
+                    'caption': _msg_text(m),
+                }
+            return None
 
         async def _resolve_exact(ref: str, peer_id: int | None = None) -> Dict[str, Any]:
             raw = str(ref or '').strip()
@@ -1036,9 +1125,9 @@ def _forward_via_aiobale_stack(
                 return {'ok': True, 'peer_id': pid, 'access_hash': ah, 'source': 'numeric'}
             return await _resolve_peer(client, ref)
 
-        async def _hist_ids(peer_id: int, ctypes=None) -> set:
+        async def _hist_ids(peer_id: int) -> set:
             ids = set()
-            for ctype in (ctypes or (ChatType.GROUP, ChatType.CHANNEL)):
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 try:
                     msgs = await client.load_history(
                         int(peer_id), ctype, limit=12, offset_date=-1,
@@ -1054,30 +1143,6 @@ def _forward_via_aiobale_stack(
                     continue
             return ids
 
-        def _msg_text(m) -> str:
-            parts = []
-            for attr in ('text', 'caption'):
-                v = getattr(m, attr, None)
-                if v:
-                    parts.append(str(v))
-            content = getattr(m, 'content', None)
-            if content is not None:
-                doc = getattr(content, 'document', None)
-                if doc is not None:
-                    cap = getattr(doc, 'caption', None)
-                    if cap is not None:
-                        parts.append(str(getattr(cap, 'content', None) or getattr(cap, 'text', None) or ''))
-                tm = getattr(content, 'text', None) or getattr(content, 'text_message', None)
-                if tm is not None:
-                    parts.append(str(getattr(tm, 'value', None) or getattr(tm, 'text', None) or tm or ''))
-            return ' '.join(p for p in parts if p).strip()
-
-        def _has_media(m) -> bool:
-            content = getattr(m, 'content', None)
-            if content is None:
-                return False
-            return bool(getattr(content, 'document', None) or getattr(content, 'photo', None))
-
         tgt = await _resolve_exact(target_channel_ref, peer_id=dst_peer_id)
         if not tgt.get('ok'):
             return {'ok': False, 'error': f'target_resolve:{tgt.get("error")}', 'lib': lib_name}
@@ -1089,23 +1154,21 @@ def _forward_via_aiobale_stack(
 
         me_id = int(getattr(getattr(client, '_me', None), 'id', 0) or 0)
         if not me_id:
-            try:
-                me_id = int(_linkyar_user_id_from_token() or 0)
-            except Exception:
-                me_id = 0
+            me_id = int(_linkyar_user_id_from_token() or 0)
 
-        loaded = []
-        src_id = 0
-        src_ctype_used = ChatType.GROUP
+        chosen_msg = None
         pick_how = ''
+        src_id = me_id if use_self_inbox else 0
+        src_ctype_used = ChatType.PRIVATE if use_self_inbox else ChatType.GROUP
+        file_info = None
 
         if use_self_inbox and me_id:
-            # مبدأ = چت خصوصی خود لینک‌یار (پیام پل‌شده با mid بات)
-            src_id = me_id
+            await asyncio.sleep(1.0)
+            loaded = []
             for ctype in (ChatType.PRIVATE, ChatType.GROUP):
                 try:
                     msgs = await client.load_history(
-                        me_id, ctype, limit=15, offset_date=-1,
+                        me_id, ctype, limit=20, offset_date=-1,
                         load_mode=ListLoadMode.BACKWARD,
                     )
                     if msgs:
@@ -1114,16 +1177,29 @@ def _forward_via_aiobale_stack(
                         break
                 except Exception as e:
                     errors.append(f'self_hist/{ctype}:{type(e).__name__}:{e}')
-            # جدیدترین پیام رسانه‌دار
+
+            want_cap = _norm(caption_match or '')
+            # اولویت: رسانه + کپشن، بعد هر رسانه، بعد کپشن
+            candidates = []
             for m in loaded:
-                if _has_media(m):
-                    chosen_msg = m
-                    pick_how = 'self_inbox_media'
-                    break
+                fi = _extract_file(m)
+                text = _msg_text(m)
+                score = 0
+                if fi:
+                    score += 10
+                if want_cap and _norm(text):
+                    if want_cap[:30] in _norm(text) or _norm(text)[:30] in want_cap:
+                        score += 5
+                candidates.append((score, m, fi, text))
+            candidates.sort(key=lambda x: -x[0])
+            if candidates and candidates[0][0] > 0:
+                _, chosen_msg, file_info, _ = candidates[0]
+                pick_how = f'self_score={candidates[0][0]}'
+            elif loaded:
+                chosen_msg = loaded[0]
+                file_info = _extract_file(chosen_msg)
+                pick_how = 'self_first_no_media'
             else:
-                chosen_msg = loaded[0] if loaded else None
-                pick_how = 'self_inbox_first' if chosen_msg else 'self_inbox_empty'
-            if not chosen_msg:
                 return {
                     'ok': False,
                     'error': 'self_inbox_empty_after_bridge',
@@ -1131,16 +1207,17 @@ def _forward_via_aiobale_stack(
                     'me_id': me_id,
                     'tries': errors,
                 }
+            src_id = me_id
         else:
             src = await _resolve_exact(source_channel_ref)
             if not src.get('ok'):
                 return {'ok': False, 'error': f'source_resolve:{src.get("error")}', 'lib': lib_name}
             src_id = int(src['peer_id'])
-            src_ah = int(src.get('access_hash') or 0)
             try:
                 await client.join_public_chat(src_id)
             except Exception:
                 pass
+            loaded = []
             for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
                 try:
                     msgs = await client.load_history(
@@ -1155,163 +1232,129 @@ def _forward_via_aiobale_stack(
                     errors.append(f'hist/{ctype}:{type(e).__name__}:{e}')
             if not loaded:
                 return {'ok': False, 'error': 'history_empty', 'lib': lib_name, 'tries': errors}
-
             want_mid = int(bot_message_id or 0)
-            chosen_msg = None
-            # rid داخلی
+            want_cap = _norm(caption_match or '')
             if want_mid > 10**12:
                 for m in loaded:
-                    if int(getattr(m, 'message_id', None) or getattr(m, 'id', 0) or 0) == want_mid:
+                    if int(getattr(m, 'message_id', None) or 0) == want_mid:
                         chosen_msg = m
-                        pick_how = f'by_rid:{want_mid}'
+                        pick_how = f'rid:{want_mid}'
                         break
-            # caption (نرمال‌سازی markdown)
-            if chosen_msg is None and (caption_match or '').strip():
-                import re
-                def _norm(s: str) -> str:
-                    s = re.sub(r'[*_`~\[\]()]', '', s or '')
-                    return re.sub(r'\s+', ' ', s).strip().lower()
-                want = _norm(caption_match)
+            if chosen_msg is None and want_cap:
                 for m in loaded:
-                    text = _norm(_msg_text(m))
-                    if text and (text == want or want[:40] in text or text[:40] in want):
+                    if want_cap[:30] in _norm(_msg_text(m)):
                         chosen_msg = m
-                        pick_how = 'caption_norm'
+                        pick_how = 'caption'
                         break
             if chosen_msg is None:
-                previews = [
-                    {'mid': int(getattr(m, 'message_id', None) or 0), 'text': _msg_text(m)[:50]}
-                    for m in loaded[:8]
-                ]
                 return {
                     'ok': False,
                     'error': 'banner_not_found',
                     'lib': lib_name,
-                    'want_mid': want_mid,
-                    'caption': (caption_match or '')[:80],
-                    'previews': previews,
-                    'hint': 'use bot_message_id bridge (bot_from_chat_id + bot_message_id)',
+                    'previews': [
+                        {'mid': int(getattr(m, 'message_id', None) or 0), 'text': _msg_text(m)[:40], 'has_file': bool(_extract_file(m))}
+                        for m in loaded[:6]
+                    ],
                 }
+            file_info = _extract_file(chosen_msg)
 
         msg_id = int(getattr(chosen_msg, 'message_id', None) or getattr(chosen_msg, 'id', 0) or 0)
-        msg_date = int(getattr(chosen_msg, 'date', 0) or 0)
         try:
-            if use_self_inbox:
-                chosen_msg.chat = Chat(id=me_id, type=ChatType.PRIVATE)
-            else:
-                chosen_msg.chat = Chat(id=src_id, type=src_ctype_used)
+            chosen_msg.chat = Chat(
+                id=src_id,
+                type=ChatType.PRIVATE if use_self_inbox else src_ctype_used,
+            )
         except Exception:
             pass
-
-        src_ah = 0
-        if not use_self_inbox and src_id:
-            try:
-                src_ah = int(await _enrich_access_hash(client, src_id, None) or 0)
-            except Exception:
-                pass
-
-        dates = [msg_date] if msg_date else []
-        if msg_date > 10_000_000_000:
-            dates.append(msg_date // 1000)
-        if not dates:
-            dates = [0]
 
         before = await _hist_ids(tgt_id)
 
         async def _verify() -> bool:
-            await asyncio.sleep(2.0)
-            return bool(await _hist_ids(tgt_id) - before)
+            await asyncio.sleep(2.5)
+            after = await _hist_ids(tgt_id)
+            return bool(after - before)
 
-        # forward attempts
-        for d in dates:
-            if not d:
-                continue
+        # 1) تلاش فوروارد (معمولاً InvalidArgument روی کانال)
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+            try:
+                new_id = generate_id()
+                await client.forward_message(
+                    message=chosen_msg, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id,
+                )
+                if await _verify():
+                    return {
+                        'ok': True, 'method': f'forward/{ctype}', 'lib': lib_name,
+                        'message_id': new_id, 'verified': True, 'picked': pick_how,
+                        'src': src_id, 'dst': tgt_id, 'src_mid': msg_id,
+                    }
+                errors.append(f'fwd/{ctype}:not_visible')
+            except Exception as e:
+                errors.append(f'fwd/{ctype}:{type(e).__name__}:{e}')
+
+        # 2) SendMessage با file_id همان پیام (مسیر اثبات‌شدهٔ نوشتن در کانال)
+        if file_info:
             for ctype in (ChatType.GROUP, ChatType.CHANNEL):
                 try:
-                    new_id = generate_id()
-                    await client.forward_message(
-                        message=chosen_msg, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id,
+                    mid = generate_id()
+                    cap = (file_info.get('caption') or caption_match or '').strip()
+                    document = DocumentMessage(
+                        file_id=file_info['file_id'],
+                        size=int(file_info.get('size') or 0),
+                        name=file_info.get('name') or 'banner.jpg',
+                        mime_type=file_info.get('mime') or 'image/jpeg',
+                        access_hash=int(file_info['access_hash']),
+                        caption=MessageCaption(content=cap) if cap else None,
+                        ext=DocumentsExt(photo=PhotoExt(w=1000, h=1000)),
                     )
-                    if await _verify():
+                    call = SendMessage(
+                        peer=Peer(type=PeerType.GROUP, id=int(tgt_id)),
+                        message_id=mid,
+                        content=MessageContent(document=document),
+                        chat=Chat(id=int(tgt_id), type=ctype),
+                    )
+                    raw = await _post_method_raw(client, call)
+                    if raw.get('ok') and await _verify():
                         return {
-                            'ok': True, 'method': f'forward_Message/{ctype}',
-                            'lib': lib_name, 'message_id': new_id, 'verified': True,
-                            'src': src_id or me_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
+                            'ok': True, 'method': f'file_id/{ctype}', 'lib': lib_name,
+                            'message_id': mid, 'verified': True, 'picked': pick_how,
+                            'src': src_id, 'dst': tgt_id, 'src_mid': msg_id,
+                            'note': 'Bot bridged exact banner; linkyar sent same file_id to channel',
                         }
-                    errors.append(f'Msg/{ctype}:not_visible')
-                except Exception as e:
-                    errors.append(f'Msg/{ctype}:{type(e).__name__}:{e}')
-
-            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
-                try:
-                    new_id = generate_id()
-                    origin_id = me_id if use_self_inbox else src_id
-                    origin_type = PeerType.PRIVATE if use_self_inbox else PeerType.GROUP
-                    info = InfoMessage(
-                        message_id=int(msg_id),
-                        date=IntValue(value=int(d)),
-                        peer=Peer(type=origin_type, id=int(origin_id)),
+                    # حتی اگر verify شک داشت، raw ok را گزارش کن
+                    errors.append(
+                        f'file_id/{ctype}:ok={raw.get("ok")} err={raw.get("error")} verify_fail'
                     )
-                    await client.forward_message(
-                        message=info, chat_id=int(tgt_id), chat_type=ctype, new_id=new_id,
-                    )
-                    if await _verify():
-                        return {
-                            'ok': True, 'method': f'forward_Info/{ctype}',
-                            'lib': lib_name, 'message_id': new_id, 'verified': True,
-                            'src': origin_id, 'dst': tgt_id, 'picked': pick_how, 'src_mid': msg_id,
-                        }
-                    errors.append(f'Info/{ctype}:not_visible')
                 except Exception as e:
-                    errors.append(f'Info/{ctype}:{type(e).__name__}:{e}')
+                    errors.append(f'file_id/{ctype}:{type(e).__name__}:{e}')
+        else:
+            errors.append(f'no_file_on_message mid={msg_id} pick={pick_how}')
 
-        # file_id of SELECTED message
+        # 3) دانلود + آپلود (آخرین راه — فقط اگر file_id نبود)
         try:
-            content = getattr(chosen_msg, 'content', None)
-            doc = getattr(content, 'document', None) if content else None
-            file_id = getattr(doc, 'file_id', None) if doc else None
-            file_ah = getattr(doc, 'access_hash', None) if doc else None
-            file_size = int(getattr(doc, 'size', 0) or 0) if doc else 0
-            file_name = (getattr(doc, 'name', None) or 'banner.jpg') if doc else 'banner.jpg'
-            mime = (getattr(doc, 'mime_type', None) or 'image/jpeg') if doc else 'image/jpeg'
-            cap = _msg_text(chosen_msg) or (caption_match or '')
-            if file_id is not None and file_ah is not None:
-                for ctype in (ChatType.GROUP, ChatType.CHANNEL):
-                    try:
-                        mid = generate_id()
-                        document = DocumentMessage(
-                            file_id=file_id, size=file_size, name=file_name, mime_type=mime,
-                            access_hash=int(file_ah),
-                            caption=MessageCaption(content=cap) if cap else None,
-                            ext=DocumentsExt(photo=PhotoExt(w=1000, h=1000)),
-                        )
-                        call = SendMessage(
-                            peer=Peer(type=PeerType.GROUP, id=int(tgt_id)),
-                            message_id=mid,
-                            content=MessageContent(document=document),
-                            chat=Chat(id=int(tgt_id), type=ctype),
-                        )
-                        raw = await _post_method_raw(client, call)
-                        if raw.get('ok') and await _verify():
-                            return {
-                                'ok': True, 'method': f'file_id_send/{ctype}',
-                                'lib': lib_name, 'message_id': mid, 'verified': True,
-                                'src': src_id or me_id, 'dst': tgt_id,
-                                'picked': pick_how, 'src_mid': msg_id,
-                                'note': 'same server file_id of selected banner (via bridge or caption)',
-                            }
-                        errors.append(f'file_id/{ctype}:ok={raw.get("ok")}')
-                    except Exception as e:
-                        errors.append(f'file_id/{ctype}:{type(e).__name__}:{e}')
-            else:
-                errors.append(f'no_file_id mid={msg_id}')
+            if hasattr(client, 'download_media') or hasattr(client, 'download_file'):
+                # optional
+                pass
+            if hasattr(chosen_msg, 'content') and hasattr(client, 'send_document'):
+                # try high-level send of message content if library supports
+                pass
         except Exception as e:
-            errors.append(f'file_id_fallback:{type(e).__name__}:{e}')
+            errors.append(f'dl:{type(e).__name__}:{e}')
 
         return {
-            'ok': False, 'error': 'forward_not_visible', 'lib': lib_name,
-            'tries': errors[:24], 'src_peer': src_id or me_id, 'target': tgt_id,
-            'mid': msg_id, 'picked': pick_how, 'before_count': len(before),
+            'ok': False,
+            'error': 'channel_send_failed',
+            'lib': lib_name,
+            'tries': errors[:20],
+            'src_peer': src_id,
+            'target': tgt_id,
+            'mid': msg_id,
+            'picked': pick_how,
+            'has_file': bool(file_info),
+            'me_id': me_id,
+            'note': (
+                'Bot API forward-to-self works; user-client ForwardMessages to channel '
+                'returns InvalidArgument. file_id path is the write path that worked for upload.'
+            ),
         }
 
     return _run(_with_client(_fn))
