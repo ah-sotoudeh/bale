@@ -960,6 +960,120 @@ def delete_test_post(
     return out
 
 
+
+def test_upload_then_forward_same_channel(
+    channel: Channel,
+    banner_id: int,
+) -> Dict[str, Any]:
+    """تست دقیق مسیر ایده‌آل:
+
+    1) لینک‌یار بنر را در *همین کانال* آپلود می‌کند
+    2) بلافاصله rid/date/seq را از تاریخچه می‌گیرد
+    3) همان پیام را در *همین کانال* فوروارد می‌کند
+
+    خروجی: دو پست تکراری در کانال (یکی آپلود، یکی فوروارد).
+    """
+    from orders.models import CustomerBanner
+    from orders.banner_media import materialize_banner_file
+    from integrations import linkyar_client as ly
+    from orders.banner_publish import linkbank_channel
+
+    result: Dict[str, Any] = {
+        'ok': False,
+        'mode': 'upload_then_forward',
+        'channel_id': channel.id,
+        'channel_name': channel.name,
+        'channel_ref': channel_ref(channel),
+        'banner_id': banner_id,
+    }
+
+    bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+    if not bn:
+        result['error'] = 'بنر پیدا نشد'
+        return result
+
+    path = materialize_banner_file(bn)
+    if path is None:
+        result['error'] = 'فایل بنر در دسترس نیست (storage/linkbank)'
+        return result
+
+    kind = (bn.media_kind or 'photo').lower() or 'photo'
+    if kind not in ('photo', 'video', 'document'):
+        kind = 'photo'
+    caption = bn.caption or ''
+    ref = channel_ref(channel)
+
+    # 1) آپلود
+    up = ly.publish_to_linkbank_and_capture(
+        ref, str(path), caption=caption, kind=kind,
+    )
+    result['upload'] = {
+        'ok': bool(up.get('ok')),
+        'method': up.get('method'),
+        'linkyar_rid': up.get('linkyar_rid'),
+        'linkyar_date': up.get('linkyar_date'),
+        'linkyar_seq': up.get('linkyar_seq'),
+        'error': up.get('error'),
+        'tries': (up.get('tries') or [])[:5],
+    }
+    if not up.get('ok') or not up.get('linkyar_rid') or not up.get('linkyar_date'):
+        result['error'] = (
+            f"آپلود یا capture ناموفق: {up.get('error') or 'no rid/date'} "
+            f"| rid={up.get('linkyar_rid')} date={up.get('linkyar_date')}"
+        )[:300]
+        return result
+
+    rid = str(up['linkyar_rid'])
+    date = str(up['linkyar_date'])
+    seq = str(up.get('linkyar_seq') or '')
+
+    # ذخیره روی بنر برای استفاده‌های بعدی
+    try:
+        bn.linkyar_rid = rid
+        bn.linkyar_date = date
+        bn.linkyar_seq = seq
+        bn.save(update_fields=['linkyar_rid', 'linkyar_date', 'linkyar_seq'])
+    except Exception:
+        logger.exception('save linkyar ids on test')
+
+    # 2) فوروارد همان پیام در همان کانال (مبدأ = مقصد)
+    fwd = ly.forward_banner_from_linkbank(
+        ref,  # target
+        ref,  # source = same channel
+        caption_match=caption,
+        linkyar_rid=rid,
+        linkyar_date=date,
+        linkyar_seq=seq,
+        dst_peer_id=getattr(channel, 'bale_peer_id', None) or None,
+        dst_title=str(channel.name or ''),
+    )
+    result['forward'] = {
+        'ok': bool(fwd.get('ok')),
+        'method': fwd.get('method'),
+        'lib': fwd.get('lib'),
+        'verified': fwd.get('verified'),
+        'message_id': fwd.get('message_id'),
+        'picked': fwd.get('picked'),
+        'used_stored_ids': fwd.get('used_stored_ids'),
+        'error': fwd.get('error'),
+        'tries': (fwd.get('tries') or [])[:8],
+        'src_rid': fwd.get('src_rid'),
+        'note': fwd.get('note'),
+    }
+    result['ok'] = bool(fwd.get('ok'))
+    if result['ok']:
+        result['message'] = (
+            'دو پست در کانال: ۱) آپلود ۲) فوروارد از همان rid. '
+            f'rid={rid} date={date}'
+        )
+    else:
+        result['error'] = (
+            f"آپلود ok بود (rid={rid}) ولی فوروارد ناموفق: "
+            f"{fwd.get('error') or fwd.get('tries')}"
+        )[:400]
+    return result
+
+
 def test_publish_to_channel(
     channel: Channel,
     from_chat_id: str,

@@ -1522,8 +1522,20 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
         }, status=400)
 
     mode = str(body.get('mode') or '').strip().lower() or None
-    if mode and mode not in ('bot', 'linkyar', 'manual'):
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'mode باید bot یا linkyar باشد.'}, status=400)
+    if mode and mode not in ('bot', 'linkyar', 'manual', 'upload_then_forward'):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'mode باید bot یا linkyar یا upload_then_forward باشد.'}, status=400)
+
+    # تست: آپلود در کانال → capture rid → فوروارد در همان کانال
+    if body.get('upload_then_forward') or mode == 'upload_then_forward':
+        if not banner_id:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'banner_id لازم است.'}, status=400)
+        from orders.publish import test_upload_then_forward_same_channel
+        try:
+            result = test_upload_then_forward_same_channel(ch, int(banner_id))
+        except Exception as e:
+            logger.exception('upload_then_forward test')
+            return JsonResponse({'ok': False, 'error': 'exception', 'message': str(e)[:200]}, status=500)
+        return JsonResponse(result)
 
     try:
         delete_after = int(body.get('delete_after_minutes') or 0)
