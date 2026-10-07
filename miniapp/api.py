@@ -1523,11 +1523,11 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
 
     # تست آپلود+فوروارد — قبل از اعتبارسنجی mode
     if body.get('upload_then_forward') or str(body.get('mode') or '').strip().lower() == 'upload_then_forward':
-        if not banner_id:
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'banner_id لازم است.'}, status=400)
         from orders.publish import test_upload_then_forward_same_channel
         try:
-            result = test_upload_then_forward_same_channel(ch, int(banner_id))
+            result = test_upload_then_forward_same_channel(
+                ch, int(banner_id) if banner_id else None,
+            )
         except Exception as e:
             logger.exception('upload_then_forward test')
             return JsonResponse({'ok': False, 'error': 'exception', 'message': str(e)[:200]}, status=500)

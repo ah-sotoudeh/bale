@@ -963,84 +963,82 @@ def delete_test_post(
 
 def test_upload_then_forward_same_channel(
     channel: Channel,
-    banner_id: int,
+    banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """تست دقیق مسیر ایده‌آل:
+    """تست فوروارد بدون فایل بنر:
 
-    1) لینک‌یار بنر را در *همین کانال* آپلود می‌کند
-    2) بلافاصله rid/date/seq را از تاریخچه می‌گیرد
-    3) همان پیام را در *همین کانال* فوروارد می‌کند
+    1) لینک‌یار یک پیام متنی یکتا در کانال انتخاب‌شده می‌فرستد
+    2) rid/date/seq همان پیام را از تاریخچه می‌گیرد
+    3) همان پیام را در همان کانال فوروارد می‌کند
 
-    خروجی: دو پست تکراری در کانال (یکی آپلود، یکی فوروارد).
+    خروجی مورد انتظار: دو پیام یکسان (یکی ارسال، یکی فوروارد).
     """
-    from orders.models import CustomerBanner
-    from orders.banner_media import materialize_banner_file
     from integrations import linkyar_client as ly
-    from orders.banner_publish import linkbank_channel
+    import time as _time
 
+    ref = channel_ref(channel)
+    marker = f'[ly-fwd-test-{int(_time.time())}]'
     result: Dict[str, Any] = {
         'ok': False,
         'mode': 'upload_then_forward',
         'channel_id': channel.id,
         'channel_name': channel.name,
-        'channel_ref': channel_ref(channel),
+        'channel_ref': ref,
         'banner_id': banner_id,
+        'marker': marker,
     }
 
-    bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
-    if not bn:
-        result['error'] = 'بنر پیدا نشد'
-        return result
-
-    path = materialize_banner_file(bn)
-    if path is None:
-        result['error'] = 'فایل بنر در دسترس نیست (storage/linkbank)'
-        return result
-
-    kind = (bn.media_kind or 'photo').lower() or 'photo'
-    if kind not in ('photo', 'video', 'document'):
-        kind = 'photo'
-    caption = bn.caption or ''
-    ref = channel_ref(channel)
-
-    # 1) آپلود
-    up = ly.publish_to_linkbank_and_capture(
-        ref, str(path), caption=caption, kind=kind,
-    )
+    # 1) ارسال متن
+    sent = ly.send_text_to_channel(ref, marker)
     result['upload'] = {
-        'ok': bool(up.get('ok')),
-        'method': up.get('method'),
-        'linkyar_rid': up.get('linkyar_rid'),
-        'linkyar_date': up.get('linkyar_date'),
-        'linkyar_seq': up.get('linkyar_seq'),
-        'error': up.get('error'),
-        'tries': (up.get('tries') or [])[:5],
+        'ok': bool(sent.get('ok')),
+        'method': sent.get('method') or 'send_text',
+        'error': sent.get('error'),
+        'message_id': sent.get('message_id'),
+        'date': sent.get('date'),
+        'tries': (sent.get('tries') or [])[:5],
     }
-    if not up.get('ok') or not up.get('linkyar_rid') or not up.get('linkyar_date'):
+    if not sent.get('ok'):
+        result['error'] = f"ارسال متن ناموفق: {sent.get('error') or sent.get('tries')}"[:300]
+        return result
+
+    _time.sleep(1.5)
+
+    # 2) capture rid از تاریخچه با تطبیق marker
+    cap = ly.capture_latest_forward_ids(ref, caption_match=marker)
+    result['capture'] = {
+        'ok': bool(cap.get('ok')),
+        'linkyar_rid': cap.get('linkyar_rid'),
+        'linkyar_date': cap.get('linkyar_date'),
+        'linkyar_seq': cap.get('linkyar_seq'),
+        'error': cap.get('error'),
+    }
+
+    rid = str(cap.get('linkyar_rid') or sent.get('message_id') or '')
+    date = str(cap.get('linkyar_date') or sent.get('date') or '')
+    seq = str(cap.get('linkyar_seq') or '')
+
+    # اگر send خودش mid/date داد
+    if (not rid or not date) and sent.get('message_id') and sent.get('date'):
+        rid = str(sent.get('message_id'))
+        date = str(sent.get('date'))
+
+    if not rid or not date:
         result['error'] = (
-            f"آپلود یا capture ناموفق: {up.get('error') or 'no rid/date'} "
-            f"| rid={up.get('linkyar_rid')} date={up.get('linkyar_date')}"
+            f'ارسال ok بود ولی rid/date گرفته نشد | cap={cap.get("error")} '
+            f'sent_mid={sent.get("message_id")} sent_date={sent.get("date")}'
         )[:300]
         return result
 
-    rid = str(up['linkyar_rid'])
-    date = str(up['linkyar_date'])
-    seq = str(up.get('linkyar_seq') or '')
+    result['upload']['linkyar_rid'] = rid
+    result['upload']['linkyar_date'] = date
+    result['upload']['linkyar_seq'] = seq
 
-    # ذخیره روی بنر برای استفاده‌های بعدی
-    try:
-        bn.linkyar_rid = rid
-        bn.linkyar_date = date
-        bn.linkyar_seq = seq
-        bn.save(update_fields=['linkyar_rid', 'linkyar_date', 'linkyar_seq'])
-    except Exception:
-        logger.exception('save linkyar ids on test')
-
-    # 2) فوروارد همان پیام در همان کانال (مبدأ = مقصد)
+    # 3) فوروارد همان پیام در همان کانال
     fwd = ly.forward_banner_from_linkbank(
-        ref,  # target
-        ref,  # source = same channel
-        caption_match=caption,
+        ref,
+        ref,
+        caption_match=marker,
         linkyar_rid=rid,
         linkyar_date=date,
         linkyar_seq=seq,
@@ -1063,13 +1061,12 @@ def test_upload_then_forward_same_channel(
     result['ok'] = bool(fwd.get('ok'))
     if result['ok']:
         result['message'] = (
-            'دو پست در کانال: ۱) آپلود ۲) فوروارد از همان rid. '
-            f'rid={rid} date={date}'
+            f'دو پیام در کانال: ۱) متن {marker} ۲) فوروارد همان. rid={rid} date={date}'
         )
     else:
         result['error'] = (
-            f"آپلود ok بود (rid={rid}) ولی فوروارد ناموفق: "
-            f"{fwd.get('error') or fwd.get('tries')}"
+            f'متن ارسال شد (rid={rid}) ولی فوروارد ناموفق: '
+            f'{fwd.get("error") or fwd.get("tries")}'
         )[:400]
     return result
 
