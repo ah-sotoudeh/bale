@@ -973,12 +973,15 @@ def test_upload_then_forward_same_channel(
     import time as _time
     import random
 
-    ref = channel_ref(channel)
-    peer_id = getattr(channel, 'bale_peer_id', None)
-    try:
-        peer_id = int(peer_id) if peer_id not in (None, '', 0, '0') else None
-    except (TypeError, ValueError):
-        peer_id = None
+    # کانال تست ثابت — هرگز SearchContact/resolve فازی
+    # @linkya = 1085567241 «کانال لینک یار» (مالک: لینک‌یار)
+    # NOT 1999418384 @linkyab_bale
+    FIXED_TEST_PEER_ID = 1085567241
+    FIXED_TEST_USERNAME = 'linkya'
+    FIXED_TEST_REF = '@linkya'
+
+    ref = FIXED_TEST_REF
+    peer_id = FIXED_TEST_PEER_ID
 
     marker = f'[ly-fwd-test-{int(_time.time())}-{random.randint(1000,9999)}]'
     result: Dict[str, Any] = {
@@ -988,8 +991,10 @@ def test_upload_then_forward_same_channel(
         'channel_name': channel.name,
         'channel_ref': ref,
         'channel_peer_id': peer_id,
+        'fixed_target': f'{FIXED_TEST_REF} id={FIXED_TEST_PEER_ID}',
         'banner_id': banner_id,
         'marker': marker,
+        'note': 'هدف تست همیشه @linkya است؛ انتخاب پنل برای این تست نادیده گرفته می‌شود.',
     }
 
     # کل مسیر داخل bale-sdk با peer صریح
@@ -1034,32 +1039,26 @@ def test_upload_then_forward_same_channel(
             return ''
 
         async with BaleClient(token) as client:
-            # resolve دقیق
-            if peer_id:
-                peer = Peer.channel(int(peer_id))
-                try:
-                    full = await client.get_full(peer)
-                    if full and getattr(full, 'peer', None):
-                        peer = full.peer
-                except Exception as e:
-                    errors.append(f'get_full:{type(e).__name__}:{e}')
-            else:
-                info = await client.resolve(ref)
-                peer = info.peer
-                want = ref.lstrip('@').lower()
-                got = (info.username or '').lstrip('@').lower()
-                if want and not want.isdigit() and got and got != want:
-                    return {
-                        'ok': False,
-                        'error': f'resolve_mismatch want=@{want} got=@{got} id={peer.id} title={info.title!r}',
-                        'errors': errors,
-                    }
-                try:
-                    full = await client.get_full(peer)
-                    if full and getattr(full, 'peer', None):
-                        peer = full.peer
-                except Exception:
-                    pass
+            # فقط peer عددی ثابت — بدون resolve/جستجو
+            peer = Peer.channel(int(peer_id), access_hash=1)
+            try:
+                full = await client.get_full(PeerInfo(peer=peer))
+                if full and getattr(full, 'peer', None):
+                    peer = full.peer
+                    # اگر get_full کانال اشتباه داد، رد کن
+                    fu = (getattr(full, 'username', None) or '').lstrip('@').lower()
+                    ft = (getattr(full, 'title', None) or '')
+                    if fu and fu not in ('linkya',) and 'لینک یاب' in ft:
+                        return {
+                            'ok': False,
+                            'error': f'wrong_channel_from_get_full id={peer.id} @{fu} «{ft}» — expected @linkya',
+                            'errors': errors,
+                        }
+            except Exception as e:
+                errors.append(f'get_full:{type(e).__name__}:{e}')
+            # قفل id
+            if int(peer.id) != int(peer_id):
+                peer = Peer.channel(int(peer_id), access_hash=int(getattr(peer, 'access_hash', 1) or 1))
 
             peer_out = {
                 'id': int(peer.id),
