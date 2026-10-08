@@ -1201,6 +1201,23 @@ def _forward_via_bale_sdk_from_self_or_source(
             else:
                 dst_info = await client.resolve(raw_dst)
                 dst_peer = dst_info.peer
+            # جلوگیری از resolve فازی: @linkya نباید به @linkyab_bale برود
+            want_u = raw_dst.lstrip('@').lower()
+            got_u = (getattr(dst_info, 'username', None) or '').lstrip('@').lower()
+            got_title = (getattr(dst_info, 'title', None) or '')
+            if want_u and not want_u.lstrip('-').isdigit() and got_u and got_u != want_u:
+                return {
+                    'ok': False,
+                    'error': (
+                        f'resolve_mismatch want=@{want_u} got=@{got_u} '
+                        f'title={got_title!r} id={getattr(dst_peer, "id", None)}'
+                    ),
+                    'lib': 'bale-sdk',
+                }
+            errors.append(
+                f'dst_resolved want=@{want_u} got=@{got_u or "?"} '
+                f'title={got_title[:30]!r} id={getattr(dst_peer, "id", None)}'
+            )
             # access_hash واقعی کانال (sentinel=1 اغلب باعث no-op فوروارد می‌شود)
             try:
                 full = await client.get_full(dst_peer)
@@ -1240,6 +1257,17 @@ def _forward_via_bale_sdk_from_self_or_source(
             try:
                 src_info = await client.resolve(raw_src)
                 src_peer = src_info.peer
+                want_su = raw_src.lstrip('@').lower()
+                got_su = (getattr(src_info, 'username', None) or '').lstrip('@').lower()
+                if want_su and not want_su.lstrip('-').isdigit() and got_su and got_su != want_su:
+                    return {
+                        'ok': False,
+                        'error': (
+                            f'src_resolve_mismatch want=@{want_su} got=@{got_su} '
+                            f'id={getattr(src_peer, "id", None)}'
+                        ),
+                        'lib': 'bale-sdk',
+                    }
                 try:
                     sfull = await client.get_full(src_peer)
                     if sfull and getattr(sfull, 'peer', None):
