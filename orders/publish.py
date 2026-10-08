@@ -965,14 +965,13 @@ def test_upload_then_forward_same_channel(
     channel: Channel,
     banner_id: int | None = None,
 ) -> Dict[str, Any]:
-    """تست با هدف ثابت @linkya (1085567241):
+    """تست فوروارد واقعی به سبک پروتکل بله:
 
-    1) ارسال متن با aiobale (مسیر قبلی ارسال)
-    2) ارسال متن با Bot API (برای اینکه در کانال دیده شود)
-    3) فوروارد با bale-sdk از پیام hop شخصی
+    در تاریخچهٔ بله، فوروارد = emptyMessage + quotedMessage (peer دیگر).
+    ForwardMessages به کانال no-op بود؛ این مسیر SendMessage با
+    emptyMessage + quotedMessageReference را امتحان می‌کند.
     """
     from integrations import linkyar_client as ly
-    from integrations import bale_client as bc
     import time as _time
     import random
 
@@ -985,38 +984,28 @@ def test_upload_then_forward_same_channel(
         'mode': 'upload_then_forward',
         'fixed_target': f'{FIXED_REF} id={FIXED_PEER}',
         'marker': marker,
-        'channel_selected_ignored': channel_ref(channel),
     }
 
-    # --- 1) aiobale text ---
+    # 1) ارسال متن معمولی (کاربر تأیید کرده دیده می‌شود)
     ly_send = ly.send_text_to_channel(FIXED_REF, marker)
     result['linkyar_send'] = {
         'ok': bool(ly_send.get('ok')),
         'error': ly_send.get('error'),
-        'method': ly_send.get('method'),
         'message_id': ly_send.get('message_id'),
         'date': ly_send.get('date'),
-        'peer_id': ly_send.get('peer_id') or ly_send.get('resolved', {}).get('peer_id') if isinstance(ly_send.get('resolved'), dict) else None,
-        'tries': (ly_send.get('tries') or [])[:4],
     }
-
-    # --- 2) Bot API text (باید در کانال دیده شود اگر بازو ادمین است) ---
-    bot_send = bc.send_message(FIXED_REF, f'{marker} [via-bot]')
-    result['bot_send'] = {
-        'ok': bool(bot_send.get('ok')),
-        'error': bot_send.get('error') or bot_send.get('description'),
-        'result': str(bot_send.get('result'))[:120] if bot_send.get('result') else None,
-    }
+    if not ly_send.get('ok'):
+        result['error'] = f"ارسال متن ناموفق: {ly_send.get('error')}"
+        return result
 
     _time.sleep(2.0)
 
-    # --- 3) capture + forward با bale-sdk روی peer ثابت ---
     token = ly.user_token()
     if not token:
         result['error'] = 'BALE_TOKEN missing'
         return result
 
-    async def _fwd():
+    async def _run():
         import asyncio
         import random as _rnd
         from bale import BaleClient
@@ -1037,27 +1026,21 @@ def test_upload_then_forward_same_channel(
                 return 0
 
         def _rid(h):
-            return _u64(getattr(h, 'rid', None) or getattr(h, 'message_id', None))
+            return _u64(getattr(h, 'rid', None))
 
         def _date(h):
             return _u64(getattr(h, 'date', None))
 
-        def _dump(h):
-            d = {}
-            for a in ('rid', 'date', 'seq', 'text', 'caption', 'preview', 'message'):
-                try:
-                    v = getattr(h, a, None)
-                    if v is not None:
-                        d[a] = str(v)[:60]
-                except Exception:
-                    pass
-            # model_dump if any
-            try:
-                if hasattr(h, 'model_dump'):
-                    d['dump_keys'] = list(h.model_dump().keys())[:12]
-            except Exception:
-                pass
-            return d
+        def _content_text(h) -> str:
+            c = getattr(h, 'content', None)
+            if c is None:
+                return ''
+            # Content dataclass from bale-sdk
+            for a in ('text', 'caption', 'body'):
+                v = getattr(c, a, None)
+                if v:
+                    return str(v)
+            return str(c)[:80]
 
         async with BaleClient(token) as client:
             peer = Peer.channel(FIXED_PEER, access_hash=1)
@@ -1065,143 +1048,176 @@ def test_upload_then_forward_same_channel(
                 full = await client.get_full(PeerInfo(peer=peer))
                 if full and getattr(full, 'peer', None):
                     peer = full.peer
-                title = getattr(full, 'title', None) if full else None
-                uname = getattr(full, 'username', None) if full else None
-            except Exception as e:
-                title, uname = None, None
-                full_err = f'{type(e).__name__}:{e}'
-            else:
-                full_err = None
+            except Exception:
+                pass
 
-            hist = list(await client.get_history(peer, limit=20) or [])
-            dumps = [_dump(h) for h in hist[:5]]
-
-            # پیدا کردن marker در تاریخچه
+            hist = list(await client.get_history(peer, limit=25) or [])
             chosen = None
             for h in hist:
-                blob = ' '.join(str(x) for x in _dump(h).values())
-                if marker[:18] in blob:
+                if marker[:18] in _content_text(h):
                     chosen = h
                     break
+            if chosen is None:
+                # تازه‌ترین پیام خودمان
+                me_id = int(getattr(client, 'me_id', 0) or 0)
+                for h in hist:
+                    if int(getattr(h, 'sender_id', 0) or 0) == me_id:
+                        chosen = h
+                        break
+            if chosen is None and hist:
+                chosen = hist[0]
 
+            if chosen is None:
+                return {'ok': False, 'error': 'no_source_message_in_history'}
+
+            rid = _rid(chosen)
+            date = _date(chosen)
+            seq = _u64(getattr(chosen, 'seq', None))
+            before_n = sum(1 for h in hist if marker[:18] in _content_text(h))
+            before_rids = {_rid(h) for h in hist}
+            before_fwd_flags = sum(1 for h in hist if getattr(h, 'is_forward', False))
+
+            tries = []
             me_id = int(getattr(client, 'me_id', 0) or 0)
             me = Peer.user(me_id) if me_id else None
 
-            # اگر در کانال پیدا نشد، از شخصی بعد از hop استفاده نمی‌کنیم تا rid اشتباه نگیریم
-            # اول متن را دوباره با sdk بفرست و mid برگردان
-            send_req = pb.SendMessageRequest()
-            send_req.peer.CopyFrom(peer.to_proto())
-            send_req.exPeer.CopyFrom(peer.to_out_proto())
-            new_rid = _rnd.getrandbits(63)
-            send_req.rid = new_rid
-            send_req.message.textMessage.text = marker + ' [sdk]'
+            # --- A) ForwardMessages مستقیم (قبلاً no-op) ---
             try:
-                send_resp = await client.call(
-                    'bale.messaging.v2.Messaging', 'SendMessage', send_req, timeout=10.0,
-                )
-                send_ok = True
-                send_info = str(send_resp)[:100]
-            except Exception as e:
-                send_ok = False
-                send_info = f'{type(e).__name__}:{e}'
-
-            await asyncio.sleep(2.0)
-            hist2 = list(await client.get_history(peer, limit=15) or [])
-            dumps2 = [_dump(h) for h in hist2[:5]]
-            for h in hist2:
-                blob = ' '.join(str(x) for x in _dump(h).values())
-                if marker[:18] in blob:
-                    chosen = h
-                    break
-            if chosen is None and hist2:
-                chosen = hist2[0]
-
-            rid = _rid(chosen) if chosen else new_rid
-            date = _date(chosen) if chosen else 0
-
-            # فوروارد به شخصی (می‌دانیم کار می‌کند)
-            hop = {}
-            if me and rid and date:
                 req = pb.ForwardMessagesRequest()
-                req.peer.CopyFrom(me.to_out_proto())
+                req.peer.CopyFrom(peer.to_out_proto())
                 f = req.forwardedMessages.add()
                 f.peer.CopyFrom(peer.to_proto())
                 f.rid = int(rid)
                 f.date.value = int(date)
+                if seq:
+                    f.seq.value = int(seq)
                 req.rid.append(_rnd.getrandbits(63))
+                await client.call(
+                    'bale.messaging.v2.Messaging', 'ForwardMessages', req, timeout=15.0,
+                )
+                tries.append('ForwardMessages_direct:called')
+            except Exception as e:
+                tries.append(f'ForwardMessages_direct:{type(e).__name__}:{e}')
+
+            # --- B) SendMessage با emptyMessage + quotedMessageReference = شکل فوروارد در پروتکل ---
+            try:
+                req = pb.SendMessageRequest()
+                req.peer.CopyFrom(peer.to_proto())
+                req.exPeer.CopyFrom(peer.to_out_proto())
+                req.rid = _rnd.getrandbits(63)
+                req.message.emptyMessage.SetInParent()
+                req.quotedMessageReference.peer.CopyFrom(peer.to_proto())
+                req.quotedMessageReference.rid = int(rid)
+                req.quotedMessageReference.date.value = int(date)
+                if seq:
+                    req.quotedMessageReference.seq.value = int(seq)
+                await client.call(
+                    'bale.messaging.v2.Messaging', 'SendMessage', req, timeout=15.0,
+                )
+                tries.append('empty+quote_same_peer:called')
+            except Exception as e:
+                tries.append(f'empty+quote_same_peer:{type(e).__name__}:{e}')
+
+            # --- C) hop به شخصی، بعد empty+quote از شخصی به کانال ---
+            if me:
                 try:
+                    req = pb.ForwardMessagesRequest()
+                    req.peer.CopyFrom(me.to_out_proto())
+                    f = req.forwardedMessages.add()
+                    f.peer.CopyFrom(peer.to_proto())
+                    f.rid = int(rid)
+                    f.date.value = int(date)
+                    req.rid.append(_rnd.getrandbits(63))
                     await client.call(
                         'bale.messaging.v2.Messaging', 'ForwardMessages', req, timeout=15.0,
                     )
                     await asyncio.sleep(1.5)
                     me_hist = list(await client.get_history(me, limit=5) or [])
-                    if me_hist:
-                        hop = {
-                            'ok': True,
-                            'rid': _rid(me_hist[0]),
-                            'date': _date(me_hist[0]),
-                            'dump': _dump(me_hist[0]),
-                        }
-                        # فوروارد از شخصی به کانال
-                        req2 = pb.ForwardMessagesRequest()
-                        req2.peer.CopyFrom(peer.to_out_proto())
-                        f2 = req2.forwardedMessages.add()
-                        f2.peer.CopyFrom(me.to_proto())
-                        f2.rid = int(hop['rid'])
-                        f2.date.value = int(hop['date'])
-                        req2.rid.append(_rnd.getrandbits(63))
-                        try:
-                            await client.call(
-                                'bale.messaging.v2.Messaging', 'ForwardMessages', req2, timeout=15.0,
-                            )
-                            hop['to_channel'] = 'called'
-                        except Exception as e:
-                            hop['to_channel'] = f'{type(e).__name__}:{e}'
+                    hop = me_hist[0] if me_hist else None
+                    if hop:
+                        hr, hd = _rid(hop), _date(hop)
+                        tries.append(f'hop_me:rid={hr}')
+                        # empty+quote با مبدأ = شخصی (peer ≠ کانال → is_forward در تاریخچه)
+                        req2 = pb.SendMessageRequest()
+                        req2.peer.CopyFrom(peer.to_proto())
+                        req2.exPeer.CopyFrom(peer.to_out_proto())
+                        req2.rid = _rnd.getrandbits(63)
+                        req2.message.emptyMessage.SetInParent()
+                        req2.quotedMessageReference.peer.CopyFrom(me.to_proto())
+                        req2.quotedMessageReference.rid = int(hr)
+                        req2.quotedMessageReference.date.value = int(hd)
+                        await client.call(
+                            'bale.messaging.v2.Messaging', 'SendMessage', req2, timeout=15.0,
+                        )
+                        tries.append('empty+quote_from_me:called')
+                        # ForwardMessages از me به channel
+                        req3 = pb.ForwardMessagesRequest()
+                        req3.peer.CopyFrom(peer.to_out_proto())
+                        f3 = req3.forwardedMessages.add()
+                        f3.peer.CopyFrom(me.to_proto())
+                        f3.rid = int(hr)
+                        f3.date.value = int(hd)
+                        req3.rid.append(_rnd.getrandbits(63))
+                        await client.call(
+                            'bale.messaging.v2.Messaging', 'ForwardMessages', req3, timeout=15.0,
+                        )
+                        tries.append('ForwardMessages_from_me:called')
                 except Exception as e:
-                    hop = {'ok': False, 'err': f'{type(e).__name__}:{e}'}
+                    tries.append(f'hop_path:{type(e).__name__}:{e}')
 
+            await asyncio.sleep(3.0)
+            after = list(await client.get_history(peer, limit=25) or [])
+            after_n = sum(1 for h in after if marker[:18] in _content_text(h))
+            after_rids = {_rid(h) for h in after}
+            new_rids = after_rids - before_rids
+            new_rids.discard(0)
+            after_fwd = sum(1 for h in after if getattr(h, 'is_forward', False))
+            # نمونه محتوا
+            samples = []
+            for h in after[:6]:
+                samples.append({
+                    'rid': _rid(h),
+                    'fwd': bool(getattr(h, 'is_forward', False)),
+                    'text': _content_text(h)[:40],
+                    'sender': getattr(h, 'sender_id', None),
+                })
+
+            ok = after_n >= 2 or after_fwd > before_fwd_flags or bool(new_rids and after_n >= 1)
             return {
-                'peer': {
-                    'id': int(peer.id),
-                    'ah': int(peer.access_hash),
-                    'title': title,
-                    'username': uname,
-                    'full_err': full_err,
-                },
-                'sdk_send': {'ok': send_ok, 'info': send_info, 'rid': new_rid},
-                'hist_dumps': dumps2 or dumps,
-                'chosen_rid': rid,
-                'chosen_date': date,
-                'hop': hop,
+                'ok': ok,
+                'src_rid': rid,
+                'src_date': date,
+                'marker_before': before_n,
+                'marker_after': after_n,
+                'fwd_flags_before': before_fwd_flags,
+                'fwd_flags_after': after_fwd,
+                'new_rids': list(new_rids)[:5],
+                'tries': tries,
+                'samples': samples,
+                'peer_id': int(peer.id),
+                'peer_ah': int(peer.access_hash),
             }
 
-    diag = ly._run(_fwd())
-    result['diag'] = diag if isinstance(diag, dict) else {'raw': str(diag)}
+    out = ly._run(_run())
+    if not isinstance(out, dict):
+        result['error'] = str(out)
+        return result
 
-    # نتیجه برای کاربر: صریح
-    bot_ok = result['bot_send'].get('ok')
-    ly_ok = result['linkyar_send'].get('ok')
-    lines = [
-        f'هدف ثابت: {FIXED_REF} ({FIXED_PEER})',
-        f'marker: {marker}',
-        f'ارسال لینک‌یار: {"✓" if ly_ok else "✗ " + str(result["linkyar_send"].get("error"))}',
-        f'ارسال بازو: {"✓ — این را در کانال چک کنید" if bot_ok else "✗ " + str(result["bot_send"].get("error"))}',
-    ]
-    if isinstance(diag, dict):
-        p = diag.get('peer') or {}
-        lines.append(f'peer واقعی: id={p.get("id")} @{p.get("username")} «{p.get("title")}»')
-        lines.append(f'sdk_send: {diag.get("sdk_send")}')
-        lines.append(f'hop: {diag.get("hop")}')
-        lines.append(f'hist_sample: {diag.get("hist_dumps")}')
-
-    result['message'] = ' | '.join(lines)[:900]
-    result['error'] = result['message']  # همیشه در لاگ پنل دیده شود
-    # ok فقط اگر بازو واقعا فرستاد (قابل مشاهده) — لینک‌یار فوروارد هنوز تأیید نشده
-    result['ok'] = False
-    result['note'] = (
-        'اگر پیام [via-bot] را در @linkya می‌بینید کانال درست است. '
-        'اگر فقط hop به شخصی ok است، فوروارد به کانال در API کاربر no-op است.'
-    )
+    result.update(out)
+    if out.get('ok'):
+        result['message'] = (
+            f'فوروارد/تکرار دیده شد در @linkya | marker {out.get("marker_before")}→{out.get("marker_after")} '
+            f'| is_forward {out.get("fwd_flags_before")}→{out.get("fwd_flags_after")} '
+            f'| tries={out.get("tries")}'
+        )
+        result['ok'] = True
+    else:
+        result['error'] = (
+            f'متن ok بود؛ فوروارد دیده نشد | marker {out.get("marker_before")}→{out.get("marker_after")} '
+            f'| is_forward {out.get("fwd_flags_before")}→{out.get("fwd_flags_after")} '
+            f'| tries={out.get("tries")} | samples={out.get("samples")}'
+        )[:900]
+        result['ok'] = False
     return result
 
 
