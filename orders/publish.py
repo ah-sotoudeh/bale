@@ -1185,7 +1185,24 @@ def test_upload_then_forward_same_channel(
                     except Exception as e:
                         hop_info['err'] = f'{type(e).__name__}:{e}'
 
-            ok = bool(new_fwd) or after_marker_n > before_marker_n
+            # تأیید سخت: فقط اگر marker حداقل ۲ بار در متن تاریخچه باشد
+            # (یکی ارسال، یکی فوروارد) — نه فقط تغییر ridهای شناور
+            ok_forward = after_marker_n >= 2 and after_marker_n > before_marker_n
+            ok_text = after_marker_n >= 1 or bool(new_rids) or bool(rid)
+            # عنوان کانال برای اینکه معلوم شود کجا پست شده
+            title = ''
+            uname = ''
+            try:
+                finfo = await client.get_full(peer)
+                title = (getattr(finfo, 'title', None) or '')[:40]
+                uname = (getattr(finfo, 'username', None) or '')[:40]
+            except Exception:
+                pass
+            peer_out['title'] = title
+            peer_out['username'] = uname
+
+            ok = bool(ok_forward)
+            where = f"id={peer_out['id']} @{uname or '?'} «{title or '?'}»"
             return {
                 'ok': ok,
                 'peer': peer_out,
@@ -1198,14 +1215,15 @@ def test_upload_then_forward_same_channel(
                 'hop': hop_info,
                 'method': 'forward_same_channel_test',
                 'message': (
-                    f'دو پیام در کانال (متن+فوروارد). rid={rid}'
+                    f'دو پیام با marker در کانال {where}. rid={rid} marker={marker}'
                     if ok else
-                    f'متن ok rid={rid} ولی فوروارد دیده نشد | peer={peer_out} | hop={hop_info}'
+                    f'API گفت ok ولی marker در تاریخچه تکرار نشد. '
+                    f'کانال هدف: {where} | marker={marker} | '
+                    f'count {before_marker_n}→{after_marker_n} | rid={rid} | hop={hop_info}'
                 ),
                 'error': None if ok else (
-                    f'forward_not_visible | peer id={peer_out["id"]} ah={peer_out["ah"]} '
-                    f'| rid={rid} date={date} | marker {before_marker_n}→{after_marker_n} '
-                    f'| hop={hop_info}'
+                    f'not_visible_strict | کانال={where} | marker={marker} | '
+                    f'count {before_marker_n}→{after_marker_n} | rid={rid} | hop={hop_info}'
                 ),
             }
 
