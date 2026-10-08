@@ -1182,7 +1182,8 @@ def test_upload_then_forward_same_channel(
                     'sender': getattr(h, 'sender_id', None),
                 })
 
-            ok = after_n >= 2 or after_fwd > before_fwd_flags or bool(new_rids and after_n >= 1)
+            # فقط افزایش واقعی — نه «از قبل چند marker بوده»
+            ok = (after_n > before_n) or (after_fwd > before_fwd_flags)
             return {
                 'ok': ok,
                 'src_rid': rid,
