@@ -1726,10 +1726,18 @@ var reset = document.getElementById("lb-theme-reset");
   function wireClearButtons() {
     document.querySelectorAll("main input[type=text], main input:not([type]), main input[type=search]").forEach(function (inp) {
       if (inp.dataset.lbClear) return;
+      if (inp.closest(".lb-input-wrap")) {
+        inp.dataset.lbClear = "1";
+        return;
+      }
       inp.dataset.lbClear = "1";
-      var wrap = inp.parentElement;
-      if (!wrap) return;
-      wrap.classList.add("lb-input-wrap");
+      /* wrapper فقط هم‌ارتفاع خود input — نه کل کارت/لیبل */
+      var wrap = document.createElement("div");
+      wrap.className = "lb-input-wrap";
+      var parent = inp.parentElement;
+      if (!parent) return;
+      parent.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "lb-clear-btn";
@@ -1738,6 +1746,7 @@ var reset = document.getElementById("lb-theme-reset");
       btn.hidden = !(inp.value || "").length;
       btn.addEventListener("click", function (e) {
         e.preventDefault();
+        e.stopPropagation();
         window.lbClearField(inp);
         btn.hidden = true;
         inp.focus();
