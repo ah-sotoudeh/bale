@@ -2987,3 +2987,116 @@ main.overflow-y-auto::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--lb-text-3) 40%, transparent);
   border-radius: 99px;
 }
+
+
+/* ========== ۲۰ بهبود بعدی ========== */
+
+/* textarea در حال تایپ */
+main textarea.lb-typing {
+  border-color: var(--lb-primary) !important;
+}
+
+/* فونت آماده — جلوگیری از FOIT شدید */
+html:not(.lb-fonts-ready) body {
+  opacity: 0.98;
+}
+html.lb-fonts-ready body {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+/* overscroll markers */
+html.lb-at-top header {
+  box-shadow: none;
+}
+
+/* در بله: کمی فشرده‌تر */
+html.lb-in-bale header h1 {
+  font-size: 15px !important;
+}
+
+/* hydrated */
+html.lb-booting #root {
+  visibility: hidden;
+}
+html.lb-hydrated #root {
+  visibility: visible;
+}
+
+/* swipe-friendly lightbox */
+.lb-lightbox {
+  touch-action: pan-y;
+}
+
+/* فیلتر اسکرول نرم */
+main .lb-chips {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* کارت‌ها در انتهای لیست فاصله از FAB */
+html.lb-ready main.overflow-y-auto {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+}
+
+/* حالت at-bottom: نشان ظریف */
+html.lb-at-bottom nav {
+  box-shadow: 0 -2px 12px rgba(15, 40, 60, 0.05);
+}
+
+/* صفحه از data-page */
+html[data-page*="سفارش"] .lb-fab {
+  display: none !important;
+}
+
+/* ورودی tel */
+main input[type="tel"] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* کاهش حرکت: بدون smooth scroll */
+html.lb-reduce-motion main.overflow-y-auto {
+  scroll-behavior: auto !important;
+}
+html.lb-reduce-motion .lb-chips {
+  scroll-behavior: auto !important;
+}
+
+/* هدر refresh-hint */
+header {
+  touch-action: pan-y;
+}
+
+/* تمرکز صفحه‌کلید روی ناو */
+nav button:focus-visible {
+  outline: 2px solid var(--lb-primary);
+  outline-offset: -2px;
+}
+
+/* متن muted در دارک کمی روشن‌تر */
+[data-theme="dark"] .text-muted {
+  color: var(--lb-text-2) !important;
+}
+
+/* اسکلت وقتی فونت نیامده */
+html:not(.lb-fonts-ready) .lb-skel {
+  opacity: 0.7;
+}
+
+/* دکمه clear در دارک */
+[data-theme="dark"] .lb-clear-btn {
+  background: var(--lb-surface-2);
+  color: var(--lb-text-2);
+}
+
+/* فاصله امن لایتبکس از notch */
+.lb-lightbox-close {
+  top: max(10px, env(safe-area-inset-top)) !important;
+}
+
+/* لیست فشرده: بج جدید کوچک‌تر */
+main.lb-compact .lb-new-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+}

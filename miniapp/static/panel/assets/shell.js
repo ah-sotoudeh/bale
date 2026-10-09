@@ -2024,4 +2024,210 @@
     } catch (e) {}
   };
 
+
+  /* —— ۲۰ بهبود بعدی —— */
+
+  /* 1) سوایپ پایین روی هدر = refresh */
+  (function () {
+    var y0 = 0, pulling = false;
+    document.addEventListener("touchstart", function (e) {
+      var h = document.querySelector("header");
+      if (!h || !h.contains(e.target)) return;
+      y0 = e.touches[0].clientY;
+      pulling = true;
+    }, { passive: true });
+    document.addEventListener("touchend", function (e) {
+      if (!pulling) return;
+      pulling = false;
+      var dy = e.changedTouches[0].clientY - y0;
+      if (dy > 64) {
+        window.dispatchEvent(new CustomEvent("lb:refresh"));
+        try { if (window.lbHaptic) window.lbHaptic("light"); } catch (err) {}
+      }
+    }, { passive: true });
+  })();
+
+  /* 2) ذخیره تم ترجیحی از Bale اگر کاربر دستی نگذاشته */
+  try {
+    if (!localStorage.getItem("lb.theme")) {
+      var w = window.Bale && Bale.WebApp;
+      var cs = w && w.colorScheme;
+      if (cs === "dark" || cs === "light") {
+        document.documentElement.dataset.baleScheme = cs;
+      }
+    }
+  } catch (e) {}
+
+  /* 3) نشان «در حال تایپ» روی textarea با کلاس */
+  document.addEventListener("input", function (e) {
+    if (!e.target || e.target.tagName !== "TEXTAREA") return;
+    e.target.classList.add("lb-typing");
+    clearTimeout(e.target._lbTypeT);
+    e.target._lbTypeT = setTimeout(function () {
+      e.target.classList.remove("lb-typing");
+    }, 600);
+  });
+
+  /* 4) اسکرول افقی فیلتر با شیفت چرخ ماوس */
+  document.addEventListener("wheel", function (e) {
+    var row = e.target.closest && e.target.closest(".lb-chips, main .flex:has(> button.lb-chip)");
+    if (!row) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      row.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  /* 5) میانبر: نگه داشتن خانه = برو به سفارش‌ها اگر badge دارد */
+  (function () {
+    var t = 0;
+    document.addEventListener("touchstart", function (e) {
+      var btn = e.target.closest && e.target.closest("nav button");
+      if (!btn || (btn.textContent || "").indexOf("خانه") < 0) return;
+      t = setTimeout(function () {
+        var orders = null;
+        document.querySelectorAll("nav button").forEach(function (b) {
+          if ((b.textContent || "").indexOf("سفارش") >= 0) orders = b;
+        });
+        if (orders) orders.click();
+      }, 550);
+    }, { passive: true });
+    document.addEventListener("touchend", function () { clearTimeout(t); });
+  })();
+
+  /* 6) نرمال‌سازی فاصله‌های اضافی در paste */
+  document.addEventListener("paste", function (e) {
+    var t = e.target;
+    if (!t || t.tagName !== "INPUT") return;
+    if (t.dataset.lbNoPasteNorm) return;
+    setTimeout(function () {
+      t.value = String(t.value || "").replace(/\s+/g, " ").trim();
+      t.dispatchEvent(new Event("input", { bubbles: true }));
+    }, 0);
+  });
+
+  /* 7) تشخیص overscroll و کلاس */
+  function wireOverscroll() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main || main.dataset.lbOver) return;
+    main.dataset.lbOver = "1";
+    main.addEventListener("scroll", function () {
+      var atTop = main.scrollTop <= 0;
+      var atBot = main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
+      document.documentElement.classList.toggle("lb-at-top", atTop);
+      document.documentElement.classList.toggle("lb-at-bottom", atBot);
+    }, { passive: true });
+  }
+
+  /* 8) لود فونت Vazirmatn با کلاس آماده */
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () {
+      document.documentElement.classList.add("lb-fonts-ready");
+    });
+  } else {
+    document.documentElement.classList.add("lb-fonts-ready");
+  }
+
+  /* 9) جلوگیری از ورود فاصله در ابتدای input */
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t || t.tagName !== "INPUT") return;
+    if (t.type && t.type !== "text" && t.type !== "search") return;
+    if (/^\s+/.test(t.value)) {
+      t.value = t.value.replace(/^\s+/, "");
+    }
+  });
+
+  /* 10) کلاس صفحه از data-page برای استایل اختصاصی */
+  /* قبلاً syncPageClass — فقط CSS */
+
+  /* 11) پیش‌بارگذاری مسیر لوگو جایگزین */
+  (function () {
+    var i = new Image();
+    i.src = "/miniapp/static/panel/assets/logo-linkban.jpg";
+  })();
+
+  /* 12) نمایش زمان آخرین refresh */
+  window.__lbLastRefresh = Date.now();
+  window.addEventListener("lb:refresh", function () {
+    window.__lbLastRefresh = Date.now();
+    document.documentElement.dataset.lastRefresh = String(window.__lbLastRefresh);
+  });
+
+  /* 13) تأیید خروج از لایتبکس با swipe down */
+  document.addEventListener("touchstart", function (e) {
+    var box = document.getElementById("lb-lightbox");
+    if (!box) return;
+    box._sy = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    var box = document.getElementById("lb-lightbox");
+    if (!box || box._sy == null) return;
+    if (e.changedTouches[0].clientY - box._sy > 80) box.remove();
+    box._sy = null;
+  }, { passive: true });
+
+  /* 14) شمارش کارت‌های visible برای analytics داخلی */
+  window.lbVisibleCards = function () {
+    var n = 0;
+    document.querySelectorAll("main .rounded-2xl.bg-surface").forEach(function (c) {
+      if (c.offsetParent !== null) n++;
+    });
+    return n;
+  };
+
+  /* 15) همگام‌سازی prefers-reduced-motion زنده */
+  try {
+    var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    function applyRm(m) {
+      document.documentElement.classList.toggle("lb-reduce-motion", !!m.matches);
+    }
+    applyRm(mq);
+    if (mq.addEventListener) mq.addEventListener("change", applyRm);
+  } catch (e) {}
+
+  /* 16) دکمه‌های اصلی: جلوگیری از فوکوس outline آبی سیستم */
+  document.addEventListener("mousedown", function (e) {
+    if (e.target.closest && e.target.closest("button")) {
+      /* keep focus-visible for keyboard only — CSS handles */
+    }
+  });
+
+  /* 17) بازیابی اسکرول افقی فیلتر بعد از برگشت */
+  var filterScrollMap = {};
+  document.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest("nav button")) {
+      document.querySelectorAll("main .lb-chips").forEach(function (row, i) {
+        filterScrollMap[i] = row.scrollLeft;
+      });
+    }
+  }, true);
+  function restoreFilterScroll() {
+    document.querySelectorAll("main .lb-chips").forEach(function (row, i) {
+      if (filterScrollMap[i] != null) row.scrollLeft = filterScrollMap[i];
+    });
+  }
+
+  /* 18) ابزار ساده clamp */
+  window.lbClamp = function (n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  };
+
+  /* 19) تشخیص WebView بله */
+  window.lbIsBale = !!(window.Bale && Bale.WebApp);
+  document.documentElement.classList.toggle("lb-in-bale", window.lbIsBale);
+
+  /* 20) آماده بودن: حذف کلاس boot اگر باشد */
+  document.documentElement.classList.remove("lb-booting");
+  document.documentElement.classList.add("lb-hydrated");
+
+  var _prevTick8 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick8 === "function") _prevTick8();
+    try {
+      wireOverscroll();
+      restoreFilterScroll();
+    } catch (e) {}
+  };
+
 })();
