@@ -243,8 +243,18 @@ def _pull_stored_message(banner: CustomerBanner) -> Path | None:
     return saved
 
 
+def save_uploaded_bytes(banner_id: int, data: bytes, kind: str = 'photo') -> Path | None:
+    """ذخیرهٔ فایل آپلودشده از مینی‌اپ (بدون file_id بله)."""
+    if not data:
+        return None
+    return _save_bytes(int(banner_id), data, kind or 'photo')
+
+
 def materialize_banner_file(banner) -> 'Path | None':
-    """مسیر فایل محلی بنر (storage یا لینک‌بانک)."""
+    """مسیر فایل محلی بنر (دیسک، storage یا لینک‌بانک)."""
+    found = stored_banner_file(int(banner.id))
+    if found is not None:
+        return found
     path = _pull_stored_message(banner)
     if path is not None:
         return path
