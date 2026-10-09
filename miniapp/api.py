@@ -67,7 +67,16 @@ def claim_pending_channels(user: User) -> int:
     handle = _norm_username(getattr(user, 'bale_username', None) or '')
     if not handle:
         return 0
-    qs = Channel.objects.filter(pending_manager_username__iexact=handle)
+    from django.db.models import Q
+    # تطبیق انعطاف‌پذیر: link_yar / linkyar / با و بدون زیرخط
+    variants = {handle, handle.replace('_', ''), handle.replace('-', '')}
+    q = Q()
+    for v in variants:
+        if not v:
+            continue
+        q |= Q(pending_manager_username__iexact=v)
+        q |= Q(pending_manager_username__iexact='@' + v)
+    qs = Channel.objects.filter(q).filter(Q(manager__isnull=True) | Q(manager=user))
     n = 0
     for ch in qs:
         ch.manager = user

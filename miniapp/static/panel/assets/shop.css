@@ -3338,3 +3338,102 @@ header > div.lb-header-row > span.size-11,
 header > div:first-child > span.grid {
   display: none !important;
 }
+
+
+/* ========== لیست کانال مدیر: یک خط + آواتار دایره‌ای ========== */
+.lb-ch-row {
+  gap: 10px !important;
+  align-items: center !important;
+}
+.lb-ch-ava {
+  position: relative;
+  display: grid !important;
+  place-items: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  background: var(--lb-primary-soft) !important;
+  color: var(--lb-primary) !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  flex-shrink: 0 !important;
+  aspect-ratio: 1 / 1 !important;
+}
+.lb-ch-ava img {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 50% !important;
+}
+.lb-ch-ava > span {
+  line-height: 1;
+}
+.lb-ch-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px !important;
+  color: var(--lb-text);
+}
+.lb-ch-meta {
+  flex: 0 0 auto;
+  font-size: 11px !important;
+  color: var(--lb-text-3) !important;
+  white-space: nowrap;
+  padding-inline: 2px;
+}
+.lb-ch-mode {
+  flex: 0 0 auto;
+  font-size: 10px !important;
+  font-weight: 600;
+  color: var(--lb-primary) !important;
+  background: var(--lb-primary-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* آواتار عمومی lb-ava هم دایره کامل */
+.lb-ava {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  aspect-ratio: 1 / 1 !important;
+  display: grid !important;
+  place-items: center !important;
+}
+.lb-ava img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 50% !important;
+}
+
+/* دکمه پاک‌کن وسط عمودی فیلد */
+.lb-input-wrap {
+  position: relative !important;
+  display: block !important;
+}
+.lb-input-wrap > input {
+  width: 100%;
+  padding-left: 34px !important;
+}
+.lb-clear-btn {
+  position: absolute !important;
+  left: 8px !important;
+  right: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  margin: auto 0 !important;
+  transform: none !important;
+  width: 22px !important;
+  height: 22px !important;
+  display: grid !important;
+  place-items: center !important;
+}
