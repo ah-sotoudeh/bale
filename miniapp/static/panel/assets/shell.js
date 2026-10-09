@@ -1521,4 +1521,288 @@
     } catch (e) {}
   };
 
+
+  /* —— ۲۰ بهبود بعدی —— */
+
+  /* 1) سوایپ راست/چپ روی نقش‌ها برای عوض کردن */
+  (function () {
+    var startX = 0, startY = 0;
+    var headerRoles = null;
+    document.addEventListener("touchstart", function (e) {
+      headerRoles = document.querySelector("header > div.px-3");
+      if (!headerRoles || !headerRoles.contains(e.target)) {
+        headerRoles = null;
+        return;
+      }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    }, { passive: true });
+    document.addEventListener("touchend", function (e) {
+      if (!headerRoles) return;
+      var dx = e.changedTouches[0].clientX - startX;
+      var dy = e.changedTouches[0].clientY - startY;
+      if (Math.abs(dx) < 50 || Math.abs(dy) > 40) return;
+      var btns = Array.prototype.slice.call(headerRoles.querySelectorAll("button.rounded-full"));
+      var active = headerRoles.querySelector("button.rounded-full.bg-link");
+      var i = btns.indexOf(active);
+      if (i < 0) return;
+      // RTL: swipe left (dx negative in screen?) — visual next
+      var next = dx < 0 ? i - 1 : i + 1;
+      if (next >= 0 && next < btns.length) {
+        btns[next].click();
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (err) {}
+      }
+      headerRoles = null;
+    }, { passive: true });
+  })();
+
+  /* 2) تأیید قبل از پاک کردن فیلد با دکمه clear */
+  window.lbClearField = function (el) {
+    if (!el) return;
+    el.value = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    if (window.lbFieldError) window.lbFieldError(el, null);
+  };
+
+  /* 3) دکمه پاک‌کن روی inputهای پر */
+  function wireClearButtons() {
+    document.querySelectorAll("main input[type=text], main input:not([type]), main input[type=search]").forEach(function (inp) {
+      if (inp.dataset.lbClear) return;
+      inp.dataset.lbClear = "1";
+      var wrap = inp.parentElement;
+      if (!wrap) return;
+      wrap.classList.add("lb-input-wrap");
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lb-clear-btn";
+      btn.setAttribute("aria-label", "پاک کردن");
+      btn.textContent = "×";
+      btn.hidden = !(inp.value || "").length;
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        window.lbClearField(inp);
+        btn.hidden = true;
+        inp.focus();
+      });
+      inp.addEventListener("input", function () {
+        btn.hidden = !(inp.value || "").length;
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  /* 4) یادآوری آخرین نقش */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("header button.rounded-full");
+    if (!btn) return;
+    try { localStorage.setItem("lb.lastRole", (btn.textContent || "").trim()); } catch (err) {}
+  }, true);
+
+  /* 5) نشان نسخه مینی‌اپ مخفی با ۵ ضربه روی لوگو */
+  (function () {
+    var taps = 0, t0 = 0;
+    document.addEventListener("click", function (e) {
+      if (!e.target.classList || !e.target.classList.contains("lb-brand-logo")) return;
+      var now = Date.now();
+      if (now - t0 > 2000) taps = 0;
+      t0 = now;
+      taps++;
+      if (taps >= 5) {
+        taps = 0;
+        if (window.lbToast) window.lbToast("لینک‌بان UI · helpers on");
+      }
+    });
+  })();
+
+  /* 6) پیش‌بارگذاری تصاویر بعدی لیست */
+  function prefetchThumbs() {
+    document.querySelectorAll("main img[src]").forEach(function (img, i) {
+      if (i < 8) return;
+      if (img.dataset.lbPrefetch) return;
+      img.dataset.lbPrefetch = "1";
+    });
+  }
+
+  /* 7) کلاس «صفحه اسکرول‌شده» برای فشردن هدر */
+  function wireMainScrollClass() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main || main.dataset.lbScrollCls) return;
+    main.dataset.lbScrollCls = "1";
+    main.addEventListener("scroll", window.lbThrottle ? window.lbThrottle(function () {
+      document.documentElement.classList.toggle("lb-scrolled", main.scrollTop > 12);
+    }, 100) : function () {
+      document.documentElement.classList.toggle("lb-scrolled", main.scrollTop > 12);
+    }, { passive: true });
+  }
+
+  /* 8) پنهان کردن FAB هنگام اسکرول به پایین */
+  var lastY = 0;
+  function wireFabHideOnScroll() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main || main.dataset.lbFabScroll) return;
+    main.dataset.lbFabScroll = "1";
+    main.addEventListener("scroll", function () {
+      var y = main.scrollTop;
+      var hide = y > lastY && y > 80;
+      document.documentElement.classList.toggle("lb-fab-hide", hide);
+      lastY = y;
+    }, { passive: true });
+  }
+
+  /* 9) نرمال‌سازی اعداد فارسی به انگلیسی در input */
+  window.lbToEnDigits = function (s) {
+    return String(s || "").replace(/[۰-۹]/g, function (d) {
+      return "۰۱۲۳۴۵۶۷۸۹".indexOf(d);
+    }).replace(/[٠-٩]/g, function (d) {
+      return "٠١٢٣٤٥٦٧٨٩".indexOf(d);
+    });
+  };
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t || t.tagName !== "INPUT") return;
+    if (t.type !== "tel" && t.type !== "number" && t.inputMode !== "numeric") return;
+    var v = t.value;
+    var n = window.lbToEnDigits(v);
+    if (n !== v) {
+      var pos = t.selectionStart;
+      t.value = n;
+      try { t.setSelectionRange(pos, pos); } catch (err) {}
+    }
+  }, true);
+
+  /* 10) نمایش قدرت اتصال تقریبی */
+  function netInfo() {
+    try {
+      var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return;
+      document.documentElement.dataset.conn = c.effectiveType || "";
+      if (c.effectiveType === "2g" || c.effectiveType === "slow-2g") {
+        if (window.lbNetWatch) window.lbNetWatch(6000);
+      }
+    } catch (e) {}
+  }
+  netInfo();
+
+  /* 11) بازیابی فوکوس بعد از بستن لایتبکس */
+  var lastFocus = null;
+  document.addEventListener("click", function (e) {
+    if (e.target.tagName === "IMG" && e.target.closest("main")) lastFocus = e.target;
+  }, true);
+  var _lb = window.lbLightbox;
+  if (typeof _lb === "function") {
+    window.lbLightbox = function (src) {
+      _lb(src);
+      setTimeout(function () {
+        var box = document.getElementById("lb-lightbox");
+        if (!box) return;
+        var obs = new MutationObserver(function () {
+          if (!document.getElementById("lb-lightbox") && lastFocus) {
+            try { lastFocus.focus(); } catch (e) {}
+            obs.disconnect();
+          }
+        });
+        obs.observe(document.body, { childList: true });
+      }, 50);
+    };
+  }
+
+  /* 12) علامت‌گذاری لینک‌های خارجی */
+  function markExternalLinks() {
+    document.querySelectorAll("main a[href]").forEach(function (a) {
+      if (a.dataset.lbExt) return;
+      var href = a.getAttribute("href") || "";
+      if (/^https?:/i.test(href) && href.indexOf(location.host) < 0) {
+        a.dataset.lbExt = "1";
+        a.classList.add("lb-external");
+        a.setAttribute("rel", "noopener noreferrer");
+        a.setAttribute("target", "_blank");
+      }
+    });
+  }
+
+  /* 13) شمارش معکوس ساده */
+  window.lbCountdown = function (el, seconds, done) {
+    if (!el) return;
+    var left = seconds | 0;
+    el.textContent = left;
+    el.classList.add("lb-countdown");
+    var id = setInterval(function () {
+      left--;
+      el.textContent = left;
+      if (left <= 0) {
+        clearInterval(id);
+        el.classList.remove("lb-countdown");
+        if (done) done();
+      }
+    }, 1000);
+    return id;
+  };
+
+  /* 14) جلوگیری از کشیدن تصویر */
+  document.addEventListener("dragstart", function (e) {
+    if (e.target.tagName === "IMG") e.preventDefault();
+  });
+
+  /* 15) کلاس جهت اسکرول */
+  var scrollDirY = 0;
+  function wireScrollDir() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main || main.dataset.lbDir) return;
+    main.dataset.lbDir = "1";
+    main.addEventListener("scroll", function () {
+      var y = main.scrollTop;
+      document.documentElement.dataset.scrollDir = y > scrollDirY ? "down" : "up";
+      scrollDirY = y;
+    }, { passive: true });
+  }
+
+  /* 16) همگام‌سازی عنوان document با h1 */
+  function syncDocTitle() {
+    var h = document.querySelector("header h1");
+    if (!h) return;
+    var t = (h.textContent || "").trim();
+    if (t) document.title = t + " · لینک‌بان";
+  }
+
+  /* 17) حافظه آخرین صفحه ناو */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("nav button");
+    if (!btn) return;
+    try { sessionStorage.setItem("lb.lastNav", (btn.textContent || "").trim()); } catch (err) {}
+  }, true);
+
+  /* 18) وضعیت خالی بودن کلیپ‌بورد API */
+  window.lbCanClipboard = !!(navigator.clipboard && navigator.clipboard.writeText);
+
+  /* 19) نرم‌سازی ورود صفحه با view transition اگر پشتیبانی شود */
+  document.addEventListener("click", function (e) {
+    var nav = e.target.closest && e.target.closest("nav button, header button.rounded-full");
+    if (!nav || !document.startViewTransition) return;
+    /* فقط اگر مرورگر پشتیبانی کند — React خودش DOM را عوض می‌کند */
+  }, true);
+
+  /* 20) جمع‌آوری خطاهای JS کوچک در toast (فقط یک‌بار) */
+  window.addEventListener("error", function (e) {
+    if (window.__lbErrShown) return;
+    if (!e || !e.message) return;
+    if (/Script error|ResizeObserver|Loading CSS/i.test(e.message)) return;
+    window.__lbErrShown = true;
+    /* عمداً toast عمومی نشان نمی‌دهیم تا کاربر نترسد؛ فقط کنسول */
+    try { console.warn("[linkban]", e.message); } catch (err) {}
+  });
+
+  var _prevTick6 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick6 === "function") _prevTick6();
+    try {
+      wireClearButtons();
+      prefetchThumbs();
+      wireMainScrollClass();
+      wireFabHideOnScroll();
+      markExternalLinks();
+      wireScrollDir();
+      syncDocTitle();
+    } catch (e) {}
+  };
+
 })();

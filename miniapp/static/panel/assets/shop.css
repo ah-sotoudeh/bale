@@ -2717,3 +2717,146 @@ main button.rounded-2xl:focus-visible {
   outline: 2px solid var(--lb-primary);
   outline-offset: 2px;
 }
+
+
+/* ========== ۲۰ بهبود بعدی ========== */
+
+/* پاک‌کن فیلد */
+.lb-input-wrap {
+  position: relative;
+}
+.lb-clear-btn {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--lb-surface-2);
+  color: var(--lb-text-3);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+.lb-input-wrap input {
+  padding-left: 32px !important;
+}
+.lb-clear-btn[hidden] { display: none !important; }
+
+/* هدر فشرده هنگام اسکرول */
+html.lb-scrolled header {
+  box-shadow: 0 2px 12px rgba(15, 40, 60, 0.06);
+}
+html.lb-scrolled header h1 {
+  font-size: 14px !important;
+}
+
+/* مخفی FAB هنگام اسکرول پایین */
+html.lb-fab-hide .lb-fab {
+  transform: translateY(72px) scale(0.9);
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* لینک خارجی */
+main a.lb-external::after {
+  content: " ↗";
+  font-size: 0.85em;
+  opacity: 0.6;
+}
+
+/* شمارش معکوس */
+.lb-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--lb-primary);
+}
+
+/* اتصال ضعیف */
+html[data-conn="2g"] .lb-skel,
+html[data-conn="slow-2g"] .lb-skel {
+  animation-duration: 2s;
+}
+
+/* جهت اسکرول — هدر کمی جمع */
+html[data-scroll-dir="down"].lb-scrolled header > div.px-3 {
+  max-height: 0;
+  opacity: 0;
+  margin: 0 !important;
+  overflow: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
+}
+html[data-scroll-dir="up"] header > div.px-3 {
+  max-height: 48px;
+  opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+/* لمس نقش‌ها */
+header > div.px-3 {
+  touch-action: pan-y;
+}
+
+/* placeholder واضح‌تر */
+main input::placeholder,
+main textarea::placeholder {
+  font-size: 12px;
+}
+
+/* کارت‌های لیست فاصله یکدست در compact */
+main.lb-compact .rounded-2xl.bg-surface + .rounded-2xl.bg-surface {
+  margin-top: 0;
+}
+
+/* وضعیت active ناو */
+nav button.font-bold svg {
+  transform: translateY(-1px);
+}
+
+/* فرم‌های بلند: sticky دکمه ارسال اگر در انتهای کارت باشد */
+main form .lb-sticky-actions {
+  position: sticky;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  background: var(--lb-bg);
+  padding-top: 8px;
+  z-index: 4;
+}
+
+/* جدول‌وار تراز مبالغ */
+main .flex.justify-between > .font-bold {
+  flex-shrink: 0;
+}
+
+/* کاهش حرکت برای countdown */
+html.lb-reduce-motion .lb-countdown {
+  transition: none;
+}
+
+/* badge فیلتر در دارک */
+[data-theme="dark"] .lb-filter-count {
+  background: rgba(46, 207, 196, 0.2);
+}
+
+/* تصویر بنر hover حس */
+main img {
+  transition: opacity 0.15s ease;
+}
+main img:active {
+  opacity: 0.85;
+}
+
+/* صفحه خانه عنوان بخش */
+main .text-muted.font-bold {
+  letter-spacing: -0.01em;
+}
+
+/* خط زیر فیلتر selected ضخامت ثابت */
+main button.lb-chip.on::after,
+main button.rounded-full.bg-link::after {
+  height: 2.5px !important;
+}
