@@ -2115,3 +2115,134 @@ main.lb-role-swap {
   from { opacity: 0.35; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+
+/* ========== دور بعدی — ۱۰ بهبود ========== */
+
+/* 1) برو بالا */
+.lb-scroll-top {
+  position: fixed;
+  z-index: 35;
+  left: 16px;
+  bottom: calc(128px + env(safe-area-inset-bottom));
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--lb-border);
+  border-radius: 50%;
+  background: var(--lb-surface);
+  color: var(--lb-primary);
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(15, 40, 60, 0.1);
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+.lb-scroll-top[hidden] { display: none !important; }
+.lb-scroll-top:active { transform: scale(0.94); }
+
+/* 3) ریپل */
+.lb-ripple-host {
+  position: relative !important;
+  overflow: hidden !important;
+}
+.lb-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0);
+  animation: lb-ripple 0.45s ease-out;
+  pointer-events: none;
+}
+@keyframes lb-ripple {
+  to { transform: scale(2.2); opacity: 0; }
+}
+
+/* 4) تعویض صفحه */
+main.lb-page-in {
+  animation: lb-page-in 0.22s ease;
+}
+@keyframes lb-page-in {
+  from { opacity: 0.4; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 5) دکمه busy */
+main button.lb-busy {
+  opacity: 0.7 !important;
+  pointer-events: none !important;
+}
+
+/* 6) کیبورد */
+html.lb-kb-open main.overflow-y-auto {
+  padding-bottom: calc(24px + var(--lb-kb, 0px)) !important;
+}
+html.lb-kb-open .lb-fab,
+html.lb-kb-open .lb-scroll-top {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 7) فلش موفقیت */
+.lb-success-flash {
+  position: fixed;
+  z-index: 150;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 28px;
+  border-radius: 16px;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+  animation: lb-fade-in 0.2s ease;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lb-text);
+}
+.lb-success-check {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--lb-success-bg);
+  color: var(--lb-success);
+  font-size: 22px;
+}
+
+/* 8) کاهش حرکت */
+html.lb-reduce-motion *,
+html.lb-reduce-motion *::before,
+html.lb-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 9) هندل قابل کپی */
+.lb-handle {
+  color: var(--lb-primary) !important;
+  font-weight: 600;
+  cursor: copy;
+}
+
+/* 10) شبکه کند */
+.lb-slow-net {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 145;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--lb-info-bg);
+  color: var(--lb-info);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--lb-info) 25%, transparent);
+}
+.lb-slow-net[hidden] { display: none !important; }

@@ -631,4 +631,204 @@
     } catch (e) {}
   };
 
+
+  /* —— دور بعدی UI —— */
+
+  /* 1) دکمه بازگشت به بالا */
+  function syncScrollTop() {
+    var btn = document.getElementById("lb-scroll-top");
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main) return;
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "lb-scroll-top";
+      btn.type = "button";
+      btn.className = "lb-scroll-top";
+      btn.setAttribute("aria-label", "برو بالا");
+      btn.textContent = "↑";
+      btn.hidden = true;
+      btn.addEventListener("click", function () {
+        main.scrollTo({ top: 0, behavior: "smooth" });
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+      });
+      document.body.appendChild(btn);
+      main.addEventListener("scroll", function () {
+        btn.hidden = main.scrollTop < 180;
+      }, { passive: true });
+    }
+  }
+
+  /* 2) کپی با لمس طولانی روی متن‌های @ و مبالغ */
+  window.lbCopy = function (text) {
+    text = String(text || "").trim();
+    if (!text) return Promise.resolve(false);
+    function ok() {
+      if (window.lbToast) window.lbToast("کپی شد");
+      try { if (window.lbHaptic) window.lbHaptic("success"); } catch (e) {}
+      return true;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(ok).catch(function () {
+        return fallback();
+      });
+    }
+    function fallback() {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        return ok();
+      } catch (e) {
+        return false;
+      }
+    }
+    return Promise.resolve(fallback());
+  };
+  (function () {
+    var timer = 0, target = null, startText = "";
+    document.addEventListener("touchstart", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var el = t.closest("main span, main p, main code, main .text-link, main .font-bold");
+      if (!el) return;
+      var tx = (el.textContent || "").trim();
+      if (tx.length < 2 || tx.length > 80) return;
+      if (!/^@/.test(tx) && !/\d/.test(tx) && tx.indexOf("تومان") < 0) return;
+      target = el;
+      startText = tx;
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        if (target === el) window.lbCopy(startText);
+      }, 520);
+    }, { passive: true });
+    document.addEventListener("touchend", function () {
+      clearTimeout(timer);
+      target = null;
+    });
+    document.addEventListener("touchmove", function () {
+      clearTimeout(timer);
+      target = null;
+    }, { passive: true });
+  })();
+
+  /* 3) ریپل روی دکمه‌های اصلی */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("main button.bg-link, main button.bg-ok, .lb-fab");
+    if (!btn) return;
+    var r = document.createElement("span");
+    r.className = "lb-ripple";
+    var rect = btn.getBoundingClientRect();
+    var size = Math.max(rect.width, rect.height);
+    r.style.width = r.style.height = size + "px";
+    r.style.left = e.clientX - rect.left - size / 2 + "px";
+    r.style.top = e.clientY - rect.top - size / 2 + "px";
+    btn.classList.add("lb-ripple-host");
+    btn.appendChild(r);
+    setTimeout(function () { r.remove(); }, 500);
+  }, true);
+
+  /* 4) هزتیک هنگام تعویض تب ناو */
+  document.addEventListener("click", function (e) {
+    var navBtn = e.target.closest && e.target.closest("nav button");
+    if (!navBtn) return;
+    try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (err) {}
+    var main = document.querySelector("main");
+    if (main) {
+      main.classList.remove("lb-page-in");
+      void main.offsetWidth;
+      main.classList.add("lb-page-in");
+    }
+  }, true);
+
+  /* 5) جلوگیری از دابل‌سابمیت دکمه‌های اصلی */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("main button.bg-link, main button.bg-ok");
+    if (!btn || btn.disabled) return;
+    if (btn.dataset.lbBusy) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    btn.dataset.lbBusy = "1";
+    btn.classList.add("lb-busy");
+    setTimeout(function () {
+      delete btn.dataset.lbBusy;
+      btn.classList.remove("lb-busy");
+    }, 900);
+  }, true);
+
+  /* 6) پدینگ صفحه هنگام باز شدن کیبورد */
+  if (window.visualViewport) {
+    var vv = window.visualViewport;
+    function onVv() {
+      var gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty("--lb-kb", gap > 40 ? gap + "px" : "0px");
+      document.documentElement.classList.toggle("lb-kb-open", gap > 40);
+    }
+    vv.addEventListener("resize", onVv);
+    vv.addEventListener("scroll", onVv);
+    onVv();
+  }
+
+  /* 7) فلش موفقیت کوتاه */
+  window.lbSuccessFlash = function (msg) {
+    var el = document.createElement("div");
+    el.className = "lb-success-flash";
+    el.innerHTML = '<span class="lb-success-check">✓</span><span></span>';
+    el.querySelector("span:last-child").textContent = msg || "انجام شد";
+    document.body.appendChild(el);
+    try { if (window.lbHaptic) window.lbHaptic("success"); } catch (e) {}
+    setTimeout(function () { el.remove(); }, 1600);
+  };
+
+  /* 8) کاهش حرکت اگر کاربر خواسته */
+  try {
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.classList.add("lb-reduce-motion");
+    }
+  } catch (e) {}
+
+  /* 9) هایلایت لینک‌های @username برای کپی */
+  function decorateHandles() {
+    document.querySelectorAll("main .text-muted, main .text-sm, main .text-xs").forEach(function (el) {
+      if (el.dataset.lbHandle) return;
+      var t = el.childNodes.length === 1 && el.firstChild && el.firstChild.nodeType === 3 ? el.textContent : null;
+      if (!t || !/^@[A-Za-z0-9_]{3,}$/.test(t.trim())) return;
+      el.dataset.lbHandle = "1";
+      el.classList.add("lb-handle");
+      el.title = "لمس طولانی برای کپی";
+    });
+  }
+
+  /* 10) وضعیت شبکه ضعیف — اگر fetch طول بکشد */
+  window.lbNetWatch = function (ms) {
+    var id = "lb-slow-net";
+    var el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = id;
+      el.className = "lb-slow-net";
+      el.textContent = "اتصال کند است…";
+      el.hidden = true;
+      document.body.appendChild(el);
+    }
+    el.hidden = false;
+    clearTimeout(window.__lbSlowT);
+    window.__lbSlowT = setTimeout(function () { el.hidden = true; }, ms || 4000);
+  };
+
+  var _prevTick2 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick2 === "function") _prevTick2();
+    try {
+      syncScrollTop();
+      decorateHandles();
+    } catch (e) {}
+  };
+
 })();
