@@ -3681,3 +3681,96 @@ header.lb-has-back .lb-header-back {
   from { opacity: 0; transform: translateY(-50%) scale(0.7); }
   to { opacity: 1; transform: translateY(-50%) scale(1); }
 }
+
+
+/* React back مخفی — shell کنترل می‌کند */
+header .lb-react-back-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  left: -9999px !important;
+}
+
+/* تعرفه گروهی */
+.lb-group-tariff {
+  margin: 14px 0 20px;
+  padding: 12px;
+  border: 1px solid var(--lb-border);
+}
+.lb-gt-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lb-text);
+}
+.lb-gt-lead {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--lb-text-3);
+  line-height: 1.45;
+}
+.lb-gt-chans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.lb-gt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lb-text-2);
+  cursor: pointer;
+}
+.lb-gt-chip:has(input:checked) {
+  border-color: var(--lb-primary);
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+}
+.lb-gt-chip input {
+  accent-color: var(--lb-primary);
+}
+.lb-gt-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-bg);
+  color: var(--lb-text);
+  font-size: 13px;
+}
+.lb-gt-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.lb-gt-save {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.lb-gt-msg {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.lb-gt-msg.ok { color: var(--lb-success); }
+.lb-gt-msg.err { color: var(--lb-danger); }
