@@ -215,4 +215,98 @@
   }
   if (document.getElementById("root")) requestAnimationFrame(markReady);
   else document.addEventListener("DOMContentLoaded", markReady);
+
+  /* —— UI helpers: logo, field error, skeleton host —— */
+  window.lbFieldError = function (inputOrId, message) {
+    var el = typeof inputOrId === "string" ? document.getElementById(inputOrId) : inputOrId;
+    if (!el) return;
+    var wrap = el.closest(".lb-field") || el.parentElement;
+    if (!wrap) return;
+    wrap.classList.add("lb-field");
+    var err = wrap.querySelector(".lb-field-err");
+    if (!message) {
+      if (err) err.remove();
+      el.classList.remove("lb-input-invalid");
+      return;
+    }
+    el.classList.add("lb-input-invalid");
+    if (!err) {
+      err = document.createElement("p");
+      err.className = "lb-field-err";
+      wrap.appendChild(err);
+    }
+    err.textContent = message;
+  };
+
+  function ensureLogo() {
+    var header = document.querySelector("header");
+    if (!header || header.querySelector(".lb-brand-logo")) return;
+    var row = header.querySelector("div.flex, div:first-child") || header;
+    var img = document.createElement("img");
+    img.src = "/miniapp/assets/logo-linkban.jpg";
+    img.alt = "لینک‌بان";
+    img.className = "lb-brand-logo";
+    img.width = 28;
+    img.height = 28;
+    // بگذار کنار عنوان اگر h1 هست
+    var h1 = header.querySelector("h1");
+    if (h1 && h1.parentElement) {
+      h1.parentElement.insertBefore(img, h1);
+    } else {
+      row.insertBefore(img, row.firstChild);
+    }
+  }
+
+  function markLoadingBlocks() {
+    document.querySelectorAll("main p.text-center.text-muted.py-8, main p.px-1.py-8").forEach(function (p) {
+      if (p.dataset.lbSkel) return;
+      if ((p.textContent || "").indexOf("در حال") >= 0) {
+        p.dataset.lbSkel = "1";
+        p.classList.add("lb-loading-msg");
+        var sk = document.createElement("div");
+        sk.className = "lb-skeleton-stack";
+        sk.innerHTML = '<div class="lb-skel"></div><div class="lb-skel"></div><div class="lb-skel short"></div>';
+        p.parentElement && p.parentElement.insertBefore(sk, p);
+      }
+    });
+  }
+
+  function enhanceEmptyNotes() {
+    document.querySelectorAll(".empty-note").forEach(function (el) {
+      if (el.dataset.lbEmpty) return;
+      el.dataset.lbEmpty = "1";
+      if (!el.querySelector(".lb-empty-icon")) {
+        var icon = document.createElement("div");
+        icon.className = "lb-empty-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = "◇";
+        el.insertBefore(icon, el.firstChild);
+      }
+    });
+  }
+
+  function tickUi() {
+    try {
+      ensureLogo();
+      markLoadingBlocks();
+      enhanceEmptyNotes();
+    } catch (e) {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () {
+      tickUi();
+      setInterval(tickUi, 1200);
+    });
+  } else {
+    tickUi();
+    setInterval(tickUi, 1200);
+  }
+
+  var mo = new MutationObserver(function () { tickUi(); });
+  if (document.body) mo.observe(document.body, { childList: true, subtree: true });
+  else document.addEventListener("DOMContentLoaded", function () {
+    mo.observe(document.body, { childList: true, subtree: true });
+  });
+
 })();

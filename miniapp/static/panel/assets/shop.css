@@ -1379,3 +1379,243 @@ main .bg-link.rounded-2xl:not(button) {
   --lb-primary-pressed: #008f87;
   --lb-hero: #00a39a;
 }
+
+
+/* ========== دور دوم UI: ۱۰ قابلیت ========== */
+
+/* 1) Skeleton loading */
+.lb-skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 4px 8px;
+}
+.lb-skel {
+  height: 14px;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--lb-surface-2) 0%,
+    color-mix(in srgb, var(--lb-primary) 12%, var(--lb-surface-2)) 50%,
+    var(--lb-surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: lb-shimmer 1.2s ease-in-out infinite;
+}
+.lb-skel.short { width: 55%; }
+.lb-skel.block {
+  height: 64px;
+  border-radius: 12px;
+}
+@keyframes lb-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.lb-loading-msg {
+  margin-top: 4px !important;
+  font-size: 12px !important;
+  opacity: 0.85;
+}
+
+/* 2) Empty state معنادار */
+.empty-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 !important;
+  padding: 28px 16px !important;
+  border: 1px dashed var(--lb-border) !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--lb-surface-2) 55%, var(--lb-surface)) !important;
+  box-shadow: none !important;
+  color: var(--lb-text-2) !important;
+  font-size: 13px !important;
+  line-height: 1.65 !important;
+}
+.lb-empty-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+/* 3) انیمیشن تب و نقش */
+header button.rounded-full,
+nav button,
+main button.lb-chip,
+main button.lb-pill,
+.lb-chip {
+  transition: color 0.18s ease, background 0.18s ease, transform 0.12s ease;
+}
+header button.rounded-full.bg-link,
+nav button.font-bold {
+  transition: color 0.18s ease, background 0.18s ease;
+}
+main button.lb-chip.on::after,
+.lb-chip.on::after,
+main button.lb-pill.bg-link::after,
+main button.rounded-full.bg-link::after {
+  transition: inset-inline 0.2s ease, opacity 0.2s ease;
+  animation: lb-tab-in 0.2s ease;
+}
+@keyframes lb-tab-in {
+  from { transform: scaleX(0.6); opacity: 0.4; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+nav button.font-bold::after {
+  transition: inset-inline 0.2s ease;
+}
+
+/* 4) پیش‌نمایش بنر یکدست */
+main img.rounded-md,
+main img.object-cover,
+main .lb-banner-thumb,
+main img.h-12,
+main img.w-12,
+main img.h-14,
+main img.w-14 {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  object-fit: cover !important;
+  border-radius: 10px !important;
+  background: var(--lb-surface-2) !important;
+  border: 1px solid var(--lb-border);
+}
+
+/* 5) Safe area */
+html {
+  padding: 0;
+}
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: 0;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+header {
+  padding-top: max(4px, env(safe-area-inset-top)) !important;
+}
+nav.fixed,
+nav.bg-header {
+  padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+main.overflow-y-auto {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+}
+.lb-toast {
+  bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+  left: 50% !important;
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100vw - 24px));
+}
+
+/* 6) حالت تاریک هم‌خوان با فیروزه‌ای/سرمه‌ای */
+[data-theme="dark"] {
+  --lb-bg: #0b1218;
+  --lb-surface: #152028;
+  --lb-surface-2: #1c2b36;
+  --lb-header: #101820;
+  --lb-border: #2a3f4e;
+  --lb-text: #e8f1f6;
+  --lb-text-2: #b3c5d1;
+  --lb-text-3: #7d94a6;
+  --lb-primary: #2ecfc4;
+  --lb-primary-pressed: #22b8ae;
+  --lb-on-primary: #04211e;
+  --lb-primary-soft: rgba(46, 207, 196, 0.18);
+  --lb-hero: #2ecfc4;
+  --lb-info: #5eb0e8;
+  --lb-toast-bg: #1a3038;
+  --lb-toast-fg: #e8f6f4;
+}
+
+/* 7) فوکوس واضح فیلد */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none !important;
+  border-color: var(--lb-primary) !important;
+  box-shadow: 0 0 0 3px var(--lb-primary-soft) !important;
+  background: var(--lb-surface) !important;
+}
+input.lb-input-invalid,
+textarea.lb-input-invalid,
+select.lb-input-invalid {
+  border-color: var(--lb-danger) !important;
+  box-shadow: 0 0 0 3px var(--lb-danger-bg) !important;
+}
+
+/* 8) خطای زیر فیلد */
+.lb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lb-field-err {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--lb-danger);
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+/* 9) دکمه بازگشت یکدست */
+header button[aria-label*="بازگشت"],
+header button[aria-label*="back" i],
+header button.grid.size-9,
+header .grid.size-9 {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  border-radius: 10px !important;
+  background: var(--lb-surface-2) !important;
+  color: var(--lb-text) !important;
+  border: 1px solid var(--lb-border) !important;
+  display: grid !important;
+  place-items: center !important;
+  flex-shrink: 0 !important;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+header button[aria-label*="بازگشت"]:active,
+header button[aria-label*="back" i]:active {
+  transform: scale(0.96);
+  background: var(--lb-surface) !important;
+}
+header button[aria-label*="بازگشت"] svg,
+header button[aria-label*="back" i] svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* 10) لوگو در هدر */
+.lb-brand-logo {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  object-fit: contain !important;
+  border-radius: 8px !important;
+  margin-inline-end: 8px;
+  flex-shrink: 0;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--lb-border);
+}
+[data-theme="dark"] .lb-brand-logo {
+  background: var(--lb-surface);
+}
+
+/* عنوان کنار لوگو */
+header h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
