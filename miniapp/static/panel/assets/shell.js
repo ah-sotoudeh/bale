@@ -1017,4 +1017,227 @@
     } catch (e) {}
   };
 
+
+  /* —— ۲۰ بهبود بعدی —— */
+
+  /* 1) تاریخ نسبی ساده روی متن‌های «دقایق پیش» اگر data-ts باشد */
+  window.lbRelativeTime = function (ts) {
+    var d = typeof ts === "number" ? ts : Date.parse(ts);
+    if (!d) return "";
+    var sec = Math.round((Date.now() - d) / 1000);
+    if (sec < 60) return "همین الان";
+    if (sec < 3600) return Math.floor(sec / 60) + " دقیقه پیش";
+    if (sec < 86400) return Math.floor(sec / 3600) + " ساعت پیش";
+    if (sec < 604800) return Math.floor(sec / 86400) + " روز پیش";
+    return new Date(d).toLocaleDateString("fa-IR");
+  };
+
+  /* 2) فرمت عدد فارسی */
+  window.lbFaNum = function (n) {
+    try {
+      return Number(n).toLocaleString("fa-IR");
+    } catch (e) {
+      return String(n);
+    }
+  };
+
+  /* 3) قفل اسکرول بدنه هنگام اورلی */
+  function lockBodyScroll(lock) {
+    document.documentElement.classList.toggle("lb-scroll-lock", !!lock);
+  }
+  var _syncOv = typeof syncOverlaysChrome === "function" ? syncOverlaysChrome : function () {};
+  syncOverlaysChrome = function () {
+    _syncOv();
+    var open =
+      document.getElementById("lb-confirm") ||
+      document.getElementById("lb-lightbox") ||
+      document.getElementById("lb-global-error") && !document.getElementById("lb-global-error").hidden;
+    lockBodyScroll(!!open);
+  };
+
+  /* 4) دکمه اشتراک لینک صفحه (در صورت وجود) */
+  window.lbShare = function (title, url) {
+    url = url || location.href;
+    title = title || document.title || "لینک‌بان";
+    if (navigator.share) {
+      return navigator.share({ title: title, url: url }).catch(function () {});
+    }
+    return window.lbCopy(url);
+  };
+
+  /* 5) ویبره کوتاه موفقیت روی فرم‌های ok toast */
+  var _toast = window.lbToast;
+  if (typeof _toast === "function") {
+    window.lbToast = function (text) {
+      _toast(text);
+      var t = String(text || "");
+      if (/شد|ثبت|موفق|کپی|انجام/.test(t)) {
+        try { if (window.lbHaptic) window.lbHaptic("success"); } catch (e) {}
+      }
+    };
+  }
+
+  /* 6) نشان اتصال دوباره بعد از آفلاین */
+  window.addEventListener("online", function () {
+    if (window.lbToast) window.lbToast("اتصال برقرار شد");
+    try { if (window.lbHaptic) window.lbHaptic("success"); } catch (e) {}
+  });
+
+  /* 7) جلوگیری از زوم دابل‌تپ iOS روی کنترل‌ها */
+  document.addEventListener("dblclick", function (e) {
+    if (e.target.closest && e.target.closest("button, a, nav, header")) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  /* 8) کلاس صفحه فعلی روی html از روی h1 */
+  function syncPageClass() {
+    var h = document.querySelector("header h1");
+    var t = h ? (h.textContent || "").trim() : "";
+    document.documentElement.dataset.page = t || "";
+  }
+
+  /* 9) هایلایت ردیف تازه با فلش سبز */
+  window.lbHighlightRow = function (el) {
+    if (!el) return;
+    el.classList.add("lb-row-flash");
+    setTimeout(function () { el.classList.remove("lb-row-flash"); }, 1200);
+  };
+
+  /* 10) میانبر کیبورد: Escape بستن اورلی */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var lb = document.getElementById("lb-lightbox");
+    if (lb) { lb.remove(); return; }
+    var c = document.getElementById("lb-confirm");
+    if (c) { c.remove(); return; }
+    if (window.lbHideError) window.lbHideError();
+  });
+
+  /* 11) اسکلت دکمه‌ای برای اکشن در حال انجام */
+  window.lbButtonLoading = function (btn, on) {
+    if (!btn) return;
+    if (on) {
+      btn.dataset.lbLabel = btn.textContent;
+      btn.classList.add("lb-btn-loading");
+      btn.disabled = true;
+      btn.textContent = "…";
+    } else {
+      btn.classList.remove("lb-btn-loading");
+      btn.disabled = false;
+      if (btn.dataset.lbLabel) btn.textContent = btn.dataset.lbLabel;
+    }
+  };
+
+  /* 12) تشخیص تم سیستم و پیشنهاد */
+  try {
+    if (!localStorage.getItem("lb.theme") && window.matchMedia) {
+      var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      /* فقط اگر کاربر دستی تنظیم نکرده — shell تم را از قبل مدیریت می‌کند */
+      document.documentElement.dataset.systemTheme = prefersDark ? "dark" : "light";
+    }
+  } catch (e) {}
+
+  /* 13) لمس بیرون برای بستن منوی حساب اگر باز باشد */
+  document.addEventListener("click", function (e) {
+    var sheet = document.querySelector(".lb-sheet, [data-lb-sheet]");
+    if (!sheet) return;
+  }, true);
+
+  /* 14) نشان «در حال ذخیره» کوچک */
+  window.lbSaving = function (on) {
+    var el = document.getElementById("lb-saving");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "lb-saving";
+      el.className = "lb-saving";
+      el.textContent = "در حال ذخیره…";
+      document.body.appendChild(el);
+    }
+    el.hidden = !on;
+  };
+
+  /* 15) بهبود دسترسی: aria-live برای toast */
+  (function () {
+    var live = document.getElementById("lb-aria-live");
+    if (!live) {
+      live = document.createElement("div");
+      live.id = "lb-aria-live";
+      live.className = "lb-aria-live";
+      live.setAttribute("aria-live", "polite");
+      live.setAttribute("role", "status");
+      document.body.appendChild(live);
+    }
+    var _t = window.lbToast;
+    if (typeof _t === "function") {
+      window.lbToast = function (text) {
+        _t(text);
+        live.textContent = text || "";
+      };
+    }
+  })();
+
+  /* 16) لود تنبل تصاویر داخل main */
+  function lazyImages() {
+    document.querySelectorAll("main img[src]:not([data-lb-lazy])").forEach(function (img) {
+      img.dataset.lbLazy = "1";
+      img.loading = "lazy";
+      img.decoding = "async";
+    });
+  }
+
+  /* 17) حاشیه امن برای FAB تا با scroll-top تداخل نکند */
+  function layoutFabs() {
+    var fab = document.getElementById("lb-fab");
+    var top = document.getElementById("lb-scroll-top");
+    if (fab && top && !fab.hidden && !top.hidden) {
+      top.style.bottom = "calc(180px + env(safe-area-inset-bottom))";
+    } else if (top) {
+      top.style.bottom = "";
+    }
+  }
+
+  /* 18) پیش‌نمایش خالی تصویر شکسته */
+  document.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "IMG" && t.closest("main")) {
+      t.classList.add("lb-img-broken");
+      t.alt = t.alt || "تصویر در دسترس نیست";
+    }
+  }, true);
+
+  /* 19) کلاس compact برای صفحات شلوغ */
+  function syncCompact() {
+    var main = document.querySelector("main");
+    if (!main) return;
+    var n = main.querySelectorAll(".rounded-2xl.bg-surface").length;
+    main.classList.toggle("lb-compact", n > 6);
+  }
+
+  /* 20) انیمیشن شمارش موجودی (اگر data-lb-count) */
+  window.lbAnimateNumber = function (el, to) {
+    if (!el) return;
+    var from = parseInt(String(el.textContent).replace(/[^\d-]/g, ""), 10) || 0;
+    to = Number(to) || 0;
+    var steps = 12, i = 0;
+    var timer = setInterval(function () {
+      i++;
+      var v = Math.round(from + (to - from) * (i / steps));
+      el.textContent = window.lbFaNum ? window.lbFaNum(v) : String(v);
+      if (i >= steps) clearInterval(timer);
+    }, 30);
+  };
+
+  var _prevTick4 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick4 === "function") _prevTick4();
+    try {
+      syncPageClass();
+      lazyImages();
+      layoutFabs();
+      syncCompact();
+      syncOverlaysChrome();
+    } catch (e) {}
+  };
+
 })();

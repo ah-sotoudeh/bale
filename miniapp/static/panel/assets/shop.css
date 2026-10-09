@@ -2400,3 +2400,187 @@ main button.text-link.underline,
 main .text-center button.bg-link {
   min-height: 38px;
 }
+
+
+/* ========== ۲۰ بهبود بعدی ========== */
+
+/* قفل اسکرول */
+html.lb-scroll-lock,
+html.lb-scroll-lock body {
+  overflow: hidden !important;
+  touch-action: none;
+}
+
+/* فلش ردیف */
+.lb-row-flash {
+  animation: lb-row-flash 1.1s ease;
+}
+@keyframes lb-row-flash {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lb-primary) 50%, transparent); }
+  40% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--lb-primary) 25%, transparent); }
+  100% { box-shadow: none; }
+}
+
+/* دکمه لودینگ */
+main button.lb-btn-loading {
+  opacity: 0.75 !important;
+  letter-spacing: 0.15em;
+}
+
+/* در حال ذخیره */
+.lb-saving {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  color: var(--lb-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--lb-shadow);
+}
+.lb-saving[hidden] { display: none !important; }
+
+/* aria live مخفی */
+.lb-aria-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* تصویر شکسته */
+main img.lb-img-broken {
+  object-fit: scale-down !important;
+  background: var(--lb-surface-2) !important;
+  opacity: 0.55;
+}
+
+/* لیست فشرده */
+main.lb-compact .rounded-2xl.bg-surface {
+  margin-bottom: 6px !important;
+}
+main.lb-compact .p-3 {
+  padding: 0.45rem !important;
+}
+
+/* جداکننده بخش */
+main hr,
+main .lb-sep {
+  border: 0;
+  border-top: 1px solid var(--lb-border);
+  margin: 10px 0;
+}
+
+/* کارت راهنما خانه */
+main .rounded-2xl.bg-surface ol,
+main .rounded-2xl.bg-surface ul {
+  padding-inline-start: 1.1rem;
+  margin: 0;
+}
+
+/* چک‌باکس / رادیو لمس‌پذیرتر */
+main input[type="checkbox"],
+main input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--lb-primary);
+}
+
+/* سوئیچ‌مانند */
+main input[type="checkbox"] {
+  border-radius: 4px;
+}
+
+/* فوکوس لینک */
+main a:focus-visible {
+  outline: 2px solid var(--lb-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* جدول‌مانند لیست سفارش: تراز دو طرف */
+main .flex.justify-between {
+  gap: 8px;
+  align-items: center;
+}
+
+/* قیمت سمت چپ در RTL خواناتر */
+main .text-left,
+main .text-start {
+  font-variant-numeric: tabular-nums;
+}
+
+/* هشدار داخل کارت */
+main .rounded-2xl .text-danger {
+  max-width: 100%;
+}
+
+/* نوار نقش: سایه خیلی ملایم */
+header > div.px-3 {
+  box-shadow: 0 1px 0 rgba(15, 40, 60, 0.03);
+}
+
+/* صفحه بدون داده: empty-note مرکز عمودی‌تر */
+main:has(> .empty-note:only-child) .empty-note,
+main .empty-note:first-child:last-child {
+  margin-top: 24px !important;
+}
+
+/* اسکلت کارت لیست نرم‌تر */
+.lb-skel-card .lb-skel {
+  height: 12px;
+}
+
+/* بهبود toast در دارک */
+[data-theme="dark"] .lb-toast {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* دکمه‌های grid تست ارسال کوچک‌تر ماندگار */
+main .grid button {
+  line-height: 1.25;
+}
+
+/* فاصله آخرین کارت از ناو */
+main.overflow-y-auto > *:last-child {
+  margin-bottom: 8px;
+}
+
+/* وضعیت active برای لینک‌های لیست */
+main button.flex.items-center.gap-2 {
+  border-radius: 10px;
+}
+
+/* کپشن بنر چندخطی */
+main #lbTestCap,
+main .line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* هدر چسبان محکم‌تر */
+header.sticky {
+  backdrop-filter: blur(14px) saturate(1.3);
+}
+
+/* نشان اپراتور/پشتیبانی اگر باشد */
+main .lb-op-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--lb-info-bg);
+  color: var(--lb-info);
+  font-size: 10px;
+  font-weight: 700;
+}
