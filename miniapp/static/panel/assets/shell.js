@@ -147,20 +147,89 @@
     back.id = "lb-account";
     back.className = "lb-sheet-back";
     var manual = root.dataset.themeSource === "user";
+    var u = getBaleUser ? getBaleUser() : null;
+    if (!u) {
+      try {
+        var w = window.Bale && Bale.WebApp;
+        u = w && w.initDataUnsafe && w.initDataUnsafe.user;
+      } catch (e) {}
+    }
+    var name = u
+      ? [u.first_name || u.firstName || "", u.last_name || u.lastName || ""].join(" ").trim() || (u.username ? "@" + u.username : "کاربر")
+      : "کاربر";
+    var uname = u && u.username ? "@" + u.username : "";
+    var initials = (typeof userInitials === "function") ? userInitials(u) : "؟";
+    var photo = u && (u.photo_url || u.photoUrl);
+
+    /* نقش‌های فعلی از هدر (حتی اگر مخفی) */
+    var roleBtns = [];
+    document.querySelectorAll("header button.rounded-full").forEach(function (b) {
+      var t = (b.textContent || "").trim();
+      if (/پشتیبانی|کانال|مشتری/.test(t)) roleBtns.push({ el: b, label: t, on: b.classList.contains("bg-link") });
+    });
+
+    var rolesHtml = "";
+    if (roleBtns.length) {
+      rolesHtml = '<p class="lb-acc-label">نقش فعال</p><div class="lb-acc-roles">';
+      roleBtns.forEach(function (r, i) {
+        rolesHtml +=
+          '<button type="button" class="lb-acc-role' + (r.on ? " on" : "") + '" data-role-i="' + i + '">' +
+          r.label +
+          "</button>";
+      });
+      rolesHtml += "</div>";
+    }
+
     back.innerHTML =
       '<div class="lb-sheet" role="dialog" aria-label="حساب شما">' +
       '<div class="lb-handle"></div>' +
-      "<h2>حساب شما</h2>" +
+      '<div class="lb-acc-head">' +
+      (photo
+        ? '<img class="lb-acc-photo" src="' + photo + '" alt="" />'
+        : '<div class="lb-acc-photo lb-acc-photo-fallback">' + initials + "</div>") +
+      '<div class="lb-acc-meta"><div class="lb-acc-name"></div><div class="lb-acc-user"></div></div>' +
+      "</div>" +
+      rolesHtml +
       '<a class="row" href="/miniapp/rules/">شرایط و قوانین</a>' +
+      '<button type="button" class="row" id="lb-font-sm">اندازه متن: کوچک</button>' +
+      '<button type="button" class="row" id="lb-font-md">اندازه متن: متوسط</button>' +
+      '<button type="button" class="row" id="lb-font-lg">اندازه متن: بزرگ</button>' +
       (manual ? '<button type="button" class="row" id="lb-theme-reset">هم‌رنگ گفتگوی بله</button>' : "") +
-      '<p style="margin:16px 0 4px;font-size:13px;color:var(--lb-text)">اگر جایی ماندید، در گفتگو به پشتیبانی بگویید.</p>' +
-      '<p style="margin:0 0 8px;font-size:12px;color:var(--lb-text-2)">نسخهٔ ۴</p>' +
+      '<p class="lb-acc-foot">اگر جایی ماندید، در گفتگو به پشتیبانی بگویید.</p>' +
       "</div>";
     back.addEventListener("click", function (ev) {
       if (ev.target === back) closeSheet();
     });
     document.body.appendChild(back);
-    var reset = document.getElementById("lb-theme-reset");
+    var nameEl = back.querySelector(".lb-acc-name");
+    var userEl = back.querySelector(".lb-acc-user");
+    if (nameEl) nameEl.textContent = name;
+    if (userEl) userEl.textContent = uname;
+
+    back.querySelectorAll("[data-role-i]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var i = parseInt(btn.getAttribute("data-role-i"), 10);
+        if (roleBtns[i]) {
+          roleBtns[i].el.click();
+          closeSheet();
+          try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+        }
+      });
+    });
+
+    function bindFont(id, level) {
+      var b = document.getElementById(id);
+      if (b) b.addEventListener("click", function () {
+        if (window.lbSetFontScale) window.lbSetFontScale(level);
+        if (window.lbToast) window.lbToast("اندازه متن تنظیم شد");
+        closeSheet();
+      });
+    }
+    bindFont("lb-font-sm", "sm");
+    bindFont("lb-font-md", "md");
+    bindFont("lb-font-lg", "lg");
+
+var reset = document.getElementById("lb-theme-reset");
     if (reset) {
       reset.addEventListener("click", function () {
         try { localStorage.removeItem("lb.theme"); } catch (e) {}
@@ -240,21 +309,71 @@
     err.textContent = message;
   };
 
-  function ensureLogo() {
+  function getBaleUser() {
+    try {
+      var w = window.Bale && Bale.WebApp;
+      var u = (w && w.initDataUnsafe && w.initDataUnsafe.user) || (w && w.initDataUnsafe) || null;
+      if (u && u.user) u = u.user;
+      return u || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function userInitials(u) {
+    if (!u) return "؟";
+    var a = (u.first_name || u.firstName || "").trim();
+    var b = (u.last_name || u.lastName || "").trim();
+    if (a || b) return ((a[0] || "") + (b[0] || "")).toUpperCase() || a.slice(0, 2);
+    if (u.username) return String(u.username).slice(0, 2).toUpperCase();
+    return "من";
+  }
+
+  function ensureAvatar() {
     var header = document.querySelector("header");
-    if (!header || header.querySelector(".lb-brand-logo")) return;
+    if (!header) return;
+    /* مخفی کردن سوییچ نقش بالای صفحه — نقش فقط در تنظیمات */
+    header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
+      row.classList.add("lb-roles-hidden");
+    });
+    /* هر div که سه دکمه نقش دارد */
+    header.querySelectorAll("div").forEach(function (row) {
+      var btns = row.querySelectorAll("button.rounded-full");
+      if (btns.length >= 2 && btns.length <= 4) {
+        var txt = row.textContent || "";
+        if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
+      }
+    });
+
+    if (header.querySelector(".lb-user-avatar")) return;
     var h1 = header.querySelector("h1");
     if (!h1 || !h1.parentElement) return;
-    var img = document.createElement("img");
-    img.src = "/miniapp/static/panel/assets/logo-linkban.jpg";
-    img.onerror = function () {
-      this.src = "/miniapp/assets/logo-linkban.jpg";
-    };
-    img.alt = "لینک‌بان";
-    img.className = "lb-brand-logo";
-    img.width = 28;
-    img.height = 28;
-    h1.parentElement.insertBefore(img, h1);
+    var u = getBaleUser();
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lb-user-avatar";
+    btn.setAttribute("aria-label", "حساب و تنظیمات");
+    var photo = u && (u.photo_url || u.photoUrl);
+    if (photo) {
+      var img = document.createElement("img");
+      img.src = photo;
+      img.alt = "";
+      btn.appendChild(img);
+    } else {
+      var span = document.createElement("span");
+      span.className = "lb-user-avatar-initials";
+      span.textContent = userInitials(u);
+      btn.appendChild(span);
+    }
+    btn.addEventListener("click", function () {
+      if (window.lbOpenAccount) window.lbOpenAccount();
+      try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+    });
+    h1.parentElement.insertBefore(btn, h1);
+  }
+
+  function ensureLogo() {
+    ensureAvatar();
   }
 
   function isLoadingParagraph(p) {
@@ -537,9 +656,9 @@
       fab.type = "button";
       fab.className = "lb-fab";
       fab.textContent = "＋ بنر";
-      fab.addEventListener("click", function () {
+      fab.addEventListener("click", function (ev) {
+        ev.preventDefault();
         try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
-        // کلیک روی تب بنرها در ناو
         var btns = document.querySelectorAll("nav button");
         for (var i = 0; i < btns.length; i++) {
           if ((btns[i].textContent || "").indexOf("بنر") >= 0) {
@@ -547,10 +666,19 @@
             break;
           }
         }
+        /* بعد از کلیک همان جایگاه ثابت بماند */
+        fab.style.left = "16px";
+        fab.style.right = "auto";
+        fab.style.insetInlineStart = "16px";
+        fab.style.insetInlineEnd = "auto";
       });
       document.body.appendChild(fab);
     }
     fab.hidden = false;
+    fab.style.left = "16px";
+    fab.style.right = "auto";
+    fab.style.insetInlineStart = "16px";
+    fab.style.insetInlineEnd = "auto";
   }
 
   /* 9) اندازه فونت دسترسی — سه سطح */
@@ -609,13 +737,12 @@
 
   /* 10) انیمیشن تعویض نقش */
   document.addEventListener("click", function (e) {
-    var btn = e.target.closest && e.target.closest("header button.rounded-full");
+    var btn = e.target.closest && e.target.closest("header button.rounded-full, .lb-acc-role");
     if (!btn) return;
     var main = document.querySelector("main");
     if (main) {
-      main.classList.remove("lb-role-swap");
-      void main.offsetWidth;
       main.classList.add("lb-role-swap");
+      setTimeout(function () { main.classList.remove("lb-role-swap"); }, 280);
     }
   }, true);
 
@@ -866,30 +993,41 @@
     if (el) el.hidden = true;
   };
 
-  /* 2) رهگیری fetchهای ناموفق API مینی‌اپ */
+  /* 2) پایش fetch — فقط شمارش خطا، بدون مزاحمت برای کاربر عادی */
   if (!window.__lbFetchPatched && typeof window.fetch === "function") {
     window.__lbFetchPatched = true;
     var _fetch = window.fetch.bind(window);
+    var _failCount = 0;
     window.fetch = function () {
       var args = arguments;
       var url = String((args[0] && args[0].url) || args[0] || "");
-      var slow = setTimeout(function () {
-        if (window.lbNetWatch) window.lbNetWatch(5000);
-      }, 2500);
       return _fetch.apply(null, args).then(function (res) {
-        clearTimeout(slow);
-        if (!res.ok && url.indexOf("/miniapp/") >= 0 && res.status >= 500) {
-          window.lbShowError("سرور پاسخ نداد (" + res.status + ")", function () {
-            window.dispatchEvent(new CustomEvent("lb:refresh"));
-          });
+        if (url.indexOf("/miniapp/api") >= 0 && res.status >= 500) {
+          _failCount++;
+          /* فقط بعد از ۳ خطای ۵۰۰ متوالی پیام بده */
+          if (_failCount >= 3) {
+            _failCount = 0;
+            if (window.lbShowError) {
+              window.lbShowError("سرور پاسخ نداد", function () {
+                window.dispatchEvent(new CustomEvent("lb:refresh"));
+              });
+            }
+          }
+        } else if (res.ok) {
+          _failCount = 0;
+          if (window.lbHideError) window.lbHideError();
         }
         return res;
       }).catch(function (err) {
-        clearTimeout(slow);
-        if (url.indexOf("/miniapp/") >= 0) {
-          window.lbShowError("ارتباط برقرار نشد", function () {
-            window.dispatchEvent(new CustomEvent("lb:refresh"));
-          });
+        /* خطای شبکه prefs و غیره را بی‌صدا نادیده بگیر مگر چندبار پشت‌سرهم */
+        _failCount++;
+        if (_failCount >= 5 && url.indexOf("/miniapp/api") >= 0) {
+          _failCount = 0;
+          if (window.lbShowError) {
+            window.lbShowError("ارتباط برقرار نشد", function () {
+              window.dispatchEvent(new CustomEvent("lb:refresh"));
+            });
+          }
         }
         throw err;
       });
@@ -1190,6 +1328,10 @@
   function layoutFabs() {
     var fab = document.getElementById("lb-fab");
     var top = document.getElementById("lb-scroll-top");
+    if (fab) {
+      fab.style.left = "16px";
+      fab.style.right = "auto";
+    }
     if (fab && top && !fab.hidden && !top.hidden) {
       top.style.bottom = "calc(180px + env(safe-area-inset-bottom))";
     } else if (top) {

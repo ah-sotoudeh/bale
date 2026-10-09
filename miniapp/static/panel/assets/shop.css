@@ -2784,18 +2784,8 @@ html[data-conn="slow-2g"] .lb-skel {
 }
 
 /* جهت اسکرول — هدر کمی جمع */
-html[data-scroll-dir="down"].lb-scrolled header > div.px-3 {
-  max-height: 0;
-  opacity: 0;
-  margin: 0 !important;
-  overflow: hidden;
-  transition: max-height 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
-}
-html[data-scroll-dir="up"] header > div.px-3 {
-  max-height: 48px;
-  opacity: 1;
-  transition: max-height 0.2s ease, opacity 0.2s ease;
-}
+/* role tabs no longer auto-hide on scroll */
+
 
 /* لمس نقش‌ها */
 header > div.px-3 {
@@ -2959,10 +2949,7 @@ main input, main textarea {
 }
 
 /* کاهش فاصله نقش‌ها در scrolled */
-html.lb-scrolled header > div.px-3 {
-  transform: scale(0.98);
-  transform-origin: top center;
-}
+
 
 /* فوکوس واضح‌تر select */
 main select:focus {
@@ -3099,4 +3086,145 @@ html:not(.lb-fonts-ready) .lb-skel {
 main.lb-compact .lb-new-badge {
   font-size: 9px;
   padding: 1px 5px;
+}
+
+
+/* ========== پروفایل + رفع باگ FAB/نقش/خطا ========== */
+
+/* مخفی سوییچ نقش هدر — نقش فقط در صفحه حساب */
+header .lb-roles-hidden,
+header > div.px-3.lb-roles-hidden {
+  display: none !important;
+  max-height: none !important;
+  opacity: 1 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+/* آواتار کاربر به‌جای لوگو */
+.lb-user-avatar {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  border-radius: 50% !important;
+  border: 1.5px solid var(--lb-border);
+  padding: 0 !important;
+  margin-inline-end: 8px;
+  overflow: hidden;
+  background: var(--lb-primary-soft);
+  display: grid !important;
+  place-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.lb-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lb-user-avatar-initials {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--lb-primary);
+  line-height: 1;
+}
+.lb-brand-logo { display: none !important; }
+
+/* شیت حساب */
+.lb-acc-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.lb-acc-photo {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--lb-surface-2);
+  border: 1px solid var(--lb-border);
+}
+.lb-acc-photo-fallback {
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--lb-primary);
+  background: var(--lb-primary-soft);
+}
+.lb-acc-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--lb-text);
+}
+.lb-acc-user {
+  font-size: 12px;
+  color: var(--lb-text-3);
+  margin-top: 2px;
+}
+.lb-acc-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lb-text-2);
+}
+.lb-acc-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.lb-acc-role {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface);
+  color: var(--lb-text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.lb-acc-role.on {
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  border-color: var(--lb-primary);
+}
+.lb-acc-foot {
+  margin: 16px 0 4px;
+  font-size: 12px;
+  color: var(--lb-text-3);
+  line-height: 1.5;
+}
+
+/* FAB ثابت سمت چپ (در RTL همان چپ بصری) */
+.lb-fab {
+  position: fixed !important;
+  left: 16px !important;
+  right: auto !important;
+  inset-inline-start: 16px !important;
+  inset-inline-end: auto !important;
+  bottom: calc(72px + env(safe-area-inset-bottom)) !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+html.lb-fab-hide .lb-fab {
+  transform: translateY(72px) !important;
+  opacity: 0 !important;
+}
+html[dir="rtl"] .lb-fab {
+  left: 16px !important;
+  right: auto !important;
+}
+
+/* مخفی خطای سراسری پیش‌فرض تا واقعاً لازم شود */
+.lb-global-error[hidden] {
+  display: none !important;
+}
+
+/* انیمیشن نقش فقط یک‌بار کوتاه — بدون چشمک */
+main.lb-role-swap {
+  animation: lb-role-in 0.22s ease;
 }
