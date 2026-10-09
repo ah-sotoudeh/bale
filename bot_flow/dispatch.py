@@ -163,3 +163,292 @@ def handle_legacy_commands(chat_id: str, bale_uid: str, text: str) -> bool:
         return True
 
     return False
+
+
+def _callback_is_repeat(bale_uid: str, data: str, message_id) -> bool:
+    """لمس دوبارهٔ همان دکمه، تا چند ثانیه، پیام تازه نمی‌سازد."""
+    now = time.monotonic()
+    key = (str(bale_uid), data, str(message_id or ''))
+    stale = [item for item, seen in _recent_callbacks.items() if now - seen > 30]
+    for item in stale:
+        _recent_callbacks.pop(item, None)
+    seen = _recent_callbacks.get(key)
+    _recent_callbacks[key] = now
+    return seen is not None and now - seen < 4
+
+
+def handle_callback_query(cq: dict) -> None:
+    cq_id = cq.get('id')
+    data = (cq.get('data') or '').strip()
+    from_user = cq.get('from') or {}
+    bale_uid = str(from_user.get('id') or '')
+    username = from_user.get('username') or ''
+    msg = cq.get('message') or {}
+    chat_id = str((msg.get('chat') or {}).get('id') or '')
+
+    _answer(cq_id, '')
+    if _callback_is_repeat(bale_uid, data, msg.get('message_id')):
+        log.info('callback repeat ignored %r user=%s', data, bale_uid)
+        return
+
+    log.info('callback %r user=%s', data, bale_uid)
+
+    if data.startswith('bappr:') or data.startswith('brej:'):
+        from orders.banner_publish import operator_decide
+
+        req_id = int(data.split(':')[1])
+        r = operator_decide(req_id, bale_uid, approve=data.startswith('bappr:'))
+        _answer(cq_id, '')
+        msg_out = r.get('message') or (
+            'انجام شد.' if r.get('ok') else 'انجام نشد. یک بار دیگر بزنید.'
+        )
+        bc.send_message(chat_id, msg_out)
+        return
+
+    if opanel.try_handle_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
+    ):
+        return
+
+    if cust.handle_customer_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None
+    ):
+        return
+
+    if mpanel.try_handle_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
+    ):
+        return
+
+    if flow.try_handle_callback(
+        chat_id, bale_uid, data, cq_id=str(cq_id) if cq_id else None, username=username
+    ):
+        return
+
+    if data.startswith('approve:'):
+        text = run_mgr('approve', bale_uid, int(data.split(':')[1]))
+        _answer(cq_id)
+        bc.send_message(chat_id, text)
+        return
+    if data.startswith('reject:'):
+        text = run_mgr('reject', bale_uid, int(data.split(':')[1]))
+        _answer(cq_id)
+        bc.send_message(chat_id, text)
+        return
+    if data.startswith('editask:'):
+        item_id = int(data.split(':')[1])
+        _answer(cq_id, '')
+        sess = get_bot_session(bale_uid)
+        d = dict(sess.data or {})
+        d['edit_item_id'] = item_id
+        sess.state = 'mgr_edit_date'
+        sess.data = d
+        sess.save()
+        bc.send_message(
+            chat_id,
+            'تاریخ تازهٔ همین کانال را به شکل ۱۴۰۴/۰۶/۱۵ بفرستید.',
+        )
+        return
+    if data.startswith('paid:'):
+        from bot_flow.access import is_debug_user
+
+        if not is_debug_user(bale_uid):
+            _answer(cq_id, '')
+            bc.send_message(chat_id, 'پرداخت فقط از فاکتور کیف پول بله ثبت می‌شود.')
+            return
+        r = process_payment_paid(int(data.split(':')[1]))
+        _answer(cq_id)
+        from bot_flow.messages import user_error
+
+        bc.send_message(
+            chat_id,
+            'سفارش پرداخت شد.' if r.get('ok') else user_error(r.get('error')),
+        )
+        return
+
+    if data.startswith('published:'):
+        parts = data.split(':')
+        item_id = int(parts[1])
+        channel_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+        r = verify_manager_published(item_id, bale_uid, channel_id=channel_id)
+        _answer(cq_id, '')
+        if r.get('ok'):
+            links = r.get('permalinks') or []
+            bc.send_message(
+                chat_id,
+                '✅ انتشار تأیید شد.\n' + '\n'.join(str(x) for x in links if x),
+            )
+        else:
+            bc.send_message(chat_id, 'انتشار تأیید نشد. یک بار دیگر بزنید.')
+        return
+
+    if data.startswith('execok:') or data.startswith('execno:'):
+        item_id = int(data.split(':')[1])
+        ok = data.startswith('execok:')
+        r = customer_confirm_execution(item_id, bale_uid, ok)
+        _answer(cq_id, '')
+        bc.send_message(chat_id, 'ثبت شد.' if r.get('ok') else 'ثبت نشد. یک بار دیگر تلاش کنید.')
+        return
+
+    if data.startswith('opok:') or data.startswith('opno:'):
+        item_id = int(data.split(':')[1])
+        r = operator_resolve(item_id, bale_uid, executed=data.startswith('opok:'))
+        _answer(cq_id, '')
+        if r.get('ok'):
+            bc.send_message(chat_id, 'ثبت شد.')
+        else:
+            from bot_flow.messages import user_error
+
+            bc.send_message(chat_id, user_error(r.get('error')))
+        return
+
+    _answer(cq_id, '')
+
+
+def _parse_manager_date(text: str):
+    text = text.strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789'))
+    text = text.replace('/', '-')
+    parts = text.split('-')
+    if len(parts) != 3:
+        return None
+    try:
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+    if 1300 <= y <= 1500:
+        try:
+            from bot_flow.jalali import parse_jalali_date
+
+            day = parse_jalali_date(y, m, d)
+        except ValueError:
+            return None
+    else:
+        try:
+            day = datetime(y, m, d).date()
+        except ValueError:
+            return None
+    return timezone.make_aware(datetime.combine(day, dtime(hour=10)))
+
+
+def handle_update(update: dict) -> None:
+    log.info('── update_id=%s ──', update.get('update_id'))
+
+    if update.get('pre_checkout_query'):
+        try:
+            from orders.bale_pay import handle_pre_checkout
+
+            handle_pre_checkout(update['pre_checkout_query'])
+        except Exception:
+            log.exception('pre_checkout failed')
+            qid = (update.get('pre_checkout_query') or {}).get('id')
+            if qid:
+                bc.answer_pre_checkout_query(qid, False, 'خطای موقت. یک بار دیگر پرداخت کنید.')
+        return
+
+    if update.get('callback_query'):
+        try:
+            handle_callback_query(update['callback_query'])
+        except Exception:
+            log.exception('callback failed')
+        return
+
+    msg = update.get('message') or update.get('edited_message')
+    if not msg:
+        return
+
+    if msg.get('successful_payment'):
+        try:
+            from orders.bale_pay import handle_successful_payment
+
+            handle_successful_payment(msg)
+        except Exception:
+            log.exception('successful_payment failed')
+        return
+
+    chat_id = str((msg.get('chat') or {}).get('id') or '')
+    from_user = msg.get('from') or {}
+    bale_uid = str(from_user.get('id') or '')
+    username = from_user.get('username') or ''
+    text = msg.get('text') or ''
+    norm = normalize_text(text)
+
+    if not chat_id or not bale_uid:
+        return
+
+    if norm.startswith('/start') or norm in ('/menu', '/منو'):
+        flow.handle_start(chat_id, bale_uid, username)
+        return
+
+    if norm in ('/help', '/راهنما'):
+        from bot_flow.messages import MSG_HELP
+
+        bc.send_message(chat_id, MSG_HELP, reply_markup=flow.role_keyboard(is_operator=is_operator(bale_uid)))
+        return
+
+    if norm in ('/rules', '/law', '/قوانین'):
+        bc.send_message(
+            chat_id,
+            'شرایط و قوانین لینک‌بان را از دکمهٔ «شرایط و قوانین» بخوانید.\n'
+            'خلاصه: تبلیغ قمار، رمزارز، محتوای مستهجن، فریب برای گرفتن اطلاعات و ادعای «تضمینی» پذیرفته نمی‌شود. '
+            'پول تا پایان مدت انتشار امانی می‌ماند و اگر کانال منتشر نکند برمی‌گردد. '
+            'معامله بیرون از لینک‌بان قبول نمی‌شود. حذف خودکار پست فقط تا ۴۸ ساعت بعد از ارسال ممکن است.',
+            reply_markup=flow.role_keyboard(is_operator=is_operator(bale_uid)),
+        )
+        return
+
+    try:
+        sess = BotSession.objects.filter(bale_user_id=bale_uid).first()
+        if sess and sess.state == 'mgr_edit_date' and norm:
+            item_id = (sess.data or {}).get('edit_item_id')
+            start = _parse_manager_date(norm)
+            if not start or not item_id:
+                bc.send_message(chat_id, 'این تاریخ درست نیست. نمونه: ۱۴۰۴/۰۶/۱۵')
+                return
+            text_out = run_mgr('edit', bale_uid, int(item_id), new_start=start)
+            sess.state = 'idle'
+            sess.data = {}
+            sess.save()
+            bc.send_message(chat_id, text_out)
+            return
+    except Exception:
+        log.exception('mgr edit date')
+
+    is_forward = bool(
+        msg.get('forward_date')
+        or msg.get('forward_from_chat')
+        or msg.get('forward_origin')
+        or msg.get('forward_from')
+    )
+    waiting_banner = False
+    try:
+        sess_now = BotSession.objects.filter(bale_user_id=bale_uid).only('state').first()
+        waiting_banner = bool(sess_now and sess_now.state in ('cust_await_banner', 'cust_banner_hub'))
+    except Exception:
+        log.exception('banner state')
+    has_media = bool(msg.get('photo') or msg.get('video') or msg.get('animation') or msg.get('document'))
+    if has_media or is_forward or waiting_banner:
+        try:
+            if cust.handle_banner_message(chat_id, bale_uid, msg):
+                return
+        except Exception:
+            log.exception('banner handle')
+            bc.send_message(chat_id, 'بنر را نگرفتم. یک بار دیگر همان عکس یا متن را بفرستید.')
+            return
+
+    if handle_legacy_commands(chat_id, bale_uid, norm):
+        return
+
+    if mpanel.try_handle_text(chat_id, bale_uid, text, username=username):
+        return
+
+    if cust.try_handle_customer_text(chat_id, bale_uid, text):
+        return
+
+    if flow.try_handle_text(chat_id, bale_uid, text):
+        return
+
+    if norm:
+        bc.send_message(
+            chat_id,
+            'این پیام را نشناختم. از دکمه‌های منو یکی را بزنید.',
+        )
