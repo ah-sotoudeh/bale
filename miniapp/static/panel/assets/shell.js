@@ -33,10 +33,12 @@
     var el = document.createElement("div");
     el.id = "lb-toast";
     el.className = "lb-toast";
+    el.setAttribute("role", "status");
     el.textContent = text;
+    try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
     document.body.appendChild(el);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.remove(); }, 2600);
+    toastTimer = setTimeout(function () { el.remove(); }, 2800);
   };
 
   function themeLabel() {

@@ -1733,3 +1733,163 @@ header .lb-brand-logo {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+
+/* ========== دور بعدی — ۱۰ بهبود UI ========== */
+
+/* 1) برچسب وضعیت سفارش: قرص نرم رنگی */
+main .text-danger {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lb-danger-bg);
+  color: var(--lb-danger) !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.35;
+}
+main .text-ok {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lb-success-bg);
+  color: var(--lb-success) !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.35;
+}
+main .text-link:not(button):not(a.font-bold) {
+  font-weight: 600;
+}
+
+/* 2) Toast بهتر — ورود از پایین */
+.lb-toast {
+  position: fixed !important;
+  z-index: 100 !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: calc(78px + env(safe-area-inset-bottom)) !important;
+  transform: translateX(-50%) !important;
+  max-width: min(400px, calc(100vw - 28px)) !important;
+  width: max-content !important;
+  padding: 10px 16px !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+  text-align: center !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  animation: lb-toast-in 0.28s ease !important;
+}
+@keyframes lb-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 3) دکمه غیرفعال واضح */
+main button:disabled,
+main button[disabled],
+main button.opacity-50 {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.15);
+  pointer-events: none;
+}
+
+/* 4) شیت / مودال */
+.lb-sheet,
+[class*="sheet"] {
+  border-radius: 16px 16px 0 0 !important;
+}
+.lb-scrim,
+.lb-sheet-backdrop {
+  background: var(--lb-scrim) !important;
+  backdrop-filter: blur(2px);
+}
+
+/* 5) select یکدست با input */
+main select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236a7d8c' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: left 12px center !important;
+  padding-left: 28px !important;
+  padding-right: 10px !important;
+}
+[dir="rtl"] main select {
+  background-position: left 12px center !important;
+}
+
+/* 6) ردیف فیلتر چسبان زیر هدر هنگام اسکرول */
+main .lb-chips,
+main .flex:has(> button.lb-chip),
+main .flex:has(> button.lb-pill) {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--lb-bg);
+  padding-top: 2px;
+}
+
+/* 7) ردیف‌های دارای فلش — ناحیه لمس بهتر */
+main button.w-full.text-start,
+main button.flex.w-full.items-center {
+  min-height: 48px;
+  border-radius: 12px;
+  padding-inline: 10px;
+  transition: background 0.12s ease;
+}
+main button.w-full.text-start:active,
+main button.flex.w-full.items-center:active {
+  background: var(--lb-surface-2) !important;
+}
+
+/* 8) مبالغ — اعداد هم‌تراز و پررنگ */
+main .font-bold.text-link,
+main .text-link.font-bold,
+main [class*="toman"],
+main .tabular-nums {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* 9) دکمه ثانویه (border) یکدست */
+main button.border.border-line,
+main button.border {
+  background: var(--lb-surface) !important;
+  border: 1px solid var(--lb-border) !important;
+  color: var(--lb-text) !important;
+  border-radius: 10px !important;
+  font-weight: 500 !important;
+}
+main button.border.border-line:active,
+main button.border:active {
+  background: var(--lb-surface-2) !important;
+}
+
+/* 10) نوار پایین سبک‌تر + هدف لمس */
+nav.bg-header,
+nav.fixed {
+  border-top: 1px solid var(--lb-border) !important;
+  box-shadow: 0 -4px 16px rgba(15, 40, 60, 0.04) !important;
+  background: color-mix(in srgb, var(--lb-header) 92%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+nav button {
+  min-height: 54px !important;
+  padding-bottom: 2px !important;
+}
+nav button .lb-nav-ico {
+  margin-bottom: 1px;
+}
+nav button span:not(.lb-nav-badge):not(.lb-nav-ico):not(.absolute) {
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+}
+
+/* بهبود اضافه: محو شدن لبه اسکرول افقی فیلتر */
+main .lb-chips,
+main .flex:has(> button.lb-chip) {
+  mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+}
