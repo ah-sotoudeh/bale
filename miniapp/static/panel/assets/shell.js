@@ -378,6 +378,7 @@ var reset = document.getElementById("lb-theme-reset");
     row.insertBefore(btn, row.firstChild);
     /* عنوان وسط — کلاس */
     h1.classList.add("lb-header-title");
+    syncHeaderBack();
     /* تم را به انتهای ردیف ببر */
     var tt = row.querySelector("button.tt");
     if (tt) row.appendChild(tt);
@@ -385,6 +386,45 @@ var reset = document.getElementById("lb-theme-reset");
     var back = row.querySelector('button[aria-label]');
     if (back && back !== btn && !back.classList.contains("tt")) {
       back.classList.add("lb-header-back");
+    }
+  }
+
+  
+  function syncHeaderBack() {
+    var header = document.querySelector("header");
+    if (!header) return;
+    var row = header.querySelector(".lb-header-row") || header.querySelector(":scope > div");
+    if (!row) return;
+    row.classList.add("lb-header-row");
+    var tt = row.querySelector("button.tt");
+    /* دکمه بازگشت اپ: aria-label برگشت یا آیکون size-11 */
+    var back = null;
+    row.querySelectorAll("button").forEach(function (b) {
+      if (b.classList.contains("tt") || b.classList.contains("lb-user-avatar")) return;
+      var al = (b.getAttribute("aria-label") || "") + (b.textContent || "");
+      if (/برگشت|back|بازگشت/i.test(al) || b.classList.contains("lb-header-back")) {
+        back = b;
+      }
+    });
+    /* گاهی فقط grid size-11 بدون متن */
+    if (!back) {
+      row.querySelectorAll("button.grid, button.size-11").forEach(function (b) {
+        if (b.classList.contains("tt") || b.classList.contains("lb-user-avatar")) return;
+        if (!back) back = b;
+      });
+    }
+    if (back) {
+      back.classList.add("lb-header-back");
+      /* سمت راست: انتهای ردیف */
+      if (tt) {
+        row.insertBefore(back, tt);
+        row.appendChild(back);
+      } else {
+        row.appendChild(back);
+      }
+      header.classList.add("lb-has-back");
+    } else {
+      header.classList.remove("lb-has-back");
     }
   }
 
@@ -1960,6 +2000,7 @@ var reset = document.getElementById("lb-theme-reset");
       markExternalLinks();
       wireScrollDir();
       syncDocTitle();
+      syncHeaderBack();
     } catch (e) {}
   };
 

@@ -3626,3 +3626,58 @@ header > div:first-child > span.grid {
   color: var(--lb-danger);
   border-color: color-mix(in srgb, var(--lb-danger) 30%, var(--lb-border));
 }
+
+
+/* ========== برگشت جای تم (راست) — دایره هم‌اندازه آواتار ========== */
+header .lb-header-back,
+header button.lb-header-back,
+header:has(.lb-user-avatar) .lb-header-back {
+  display: grid !important;
+  place-items: center !important;
+  position: absolute !important;
+  right: 10px !important;
+  left: auto !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 50% !important;
+  border: 1.5px solid var(--lb-border) !important;
+  background: var(--lb-surface) !important;
+  color: var(--lb-text) !important;
+  z-index: 3 !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transition: opacity 0.22s ease, transform 0.22s ease !important;
+}
+header .lb-header-back svg,
+header .lb-header-back .size-5 {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+/* وقتی برگشت هست، تم محو می‌شود */
+header.lb-has-back button.tt {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: translateY(-50%) scale(0.6) !important;
+  transition: opacity 0.22s ease, transform 0.22s ease !important;
+}
+header:not(.lb-has-back) button.tt {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transition: opacity 0.22s ease, transform 0.22s ease !important;
+}
+
+/* برگشت ورود انیمیشنی */
+header.lb-has-back .lb-header-back {
+  animation: lb-back-in 0.28s ease;
+}
+@keyframes lb-back-in {
+  from { opacity: 0; transform: translateY(-50%) scale(0.7); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
+}
