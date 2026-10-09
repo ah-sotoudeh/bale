@@ -1240,4 +1240,285 @@
     } catch (e) {}
   };
 
+
+  /* —— ۲۰ بهبود بعدی (دور تازه) —— */
+
+  /* 1) کپی سریع با دابل‌کلیک روی مبلغ/شناسه */
+  document.addEventListener("dblclick", function (e) {
+    var el = e.target.closest && e.target.closest("main .font-bold, main .text-link, main code");
+    if (!el) return;
+    var t = (el.textContent || "").trim();
+    if (t.length >= 2 && t.length <= 64 && window.lbCopy) window.lbCopy(t);
+  });
+
+  /* 2) نشان «در حال ارسال» روی submit */
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form || form.tagName !== "FORM") return;
+    var btn = form.querySelector("button[type=submit], button.bg-link");
+    if (btn && window.lbButtonLoading) window.lbButtonLoading(btn, true);
+  }, true);
+
+  /* 3) ذخیره پیش‌نویس textarea در sessionStorage */
+  function wireDrafts() {
+    document.querySelectorAll("main textarea[name], main textarea[id]").forEach(function (ta) {
+      if (ta.dataset.lbDraft) return;
+      ta.dataset.lbDraft = "1";
+      var key = "lb.draft." + (ta.name || ta.id || "ta");
+      try {
+        var saved = sessionStorage.getItem(key);
+        if (saved && !ta.value) ta.value = saved;
+      } catch (e) {}
+      ta.addEventListener("input", function () {
+        try { sessionStorage.setItem(key, ta.value || ""); } catch (e) {}
+      });
+    });
+  }
+  window.lbClearDraft = function (name) {
+    try { sessionStorage.removeItem("lb.draft." + name); } catch (e) {}
+  };
+
+  /* 4) هشدار خروج اگر پیش‌نویس دارد */
+  window.addEventListener("beforeunload", function (e) {
+    try {
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var k = sessionStorage.key(i);
+        if (k && k.indexOf("lb.draft.") === 0 && sessionStorage.getItem(k)) {
+          e.preventDefault();
+          e.returnValue = "";
+          return;
+        }
+      }
+    } catch (err) {}
+  });
+
+  /* 5) فوکوس تله داخل confirm sheet */
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Tab") return;
+    var sheet = document.querySelector("#lb-confirm .lb-confirm-sheet");
+    if (!sheet) return;
+    var focusables = sheet.querySelectorAll("button");
+    if (!focusables.length) return;
+    var first = focusables[0], last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
+  /* 6) اسکرول به لنگر داخلی */
+  window.lbScrollTo = function (sel) {
+    var el = typeof sel === "string" ? document.querySelector(sel) : sel;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("lb-row-flash");
+    setTimeout(function () { el.classList.remove("lb-row-flash"); }, 1000);
+  };
+
+  /* 7) وضعیت «خالی از نتیجه جستجو» زیر لیست */
+  function searchEmptyState() {
+    var inp = document.querySelector("main input[placeholder*='جستجو']");
+    if (!inp) return;
+    var q = (inp.value || "").trim();
+    var main = document.querySelector("main");
+    if (!main) return;
+    var box = main.querySelector(".lb-no-results");
+    var cards = main.querySelectorAll(".rounded-2xl.bg-surface");
+    var visible = 0;
+    cards.forEach(function (c) {
+      if (c.offsetParent !== null) visible++;
+    });
+    if (q.length >= 2 && visible === 0 && !main.querySelector(".empty-note")) {
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "lb-no-results empty-note";
+        box.textContent = "نتیجه‌ای پیدا نشد";
+        main.appendChild(box);
+      }
+    } else if (box) {
+      box.remove();
+    }
+  }
+
+  /* 8) نشان تعداد فیلتر فعال */
+  function filterActiveCount() {
+    var on = document.querySelectorAll("main button.lb-chip.on, main button.lb-pill.bg-link, main button.rounded-full.bg-link").length;
+    var host = document.querySelector("main .lb-chips");
+    if (!host) return;
+    var badge = host.querySelector(".lb-filter-count");
+    if (on <= 1) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "lb-filter-count";
+      host.appendChild(badge);
+    }
+    badge.textContent = on + " فیلتر";
+  }
+
+  /* 9) لرزش ناو وقتی badge جدید می‌آید */
+  var lastBadge = "";
+  function watchNavBadge() {
+    var badges = document.querySelectorAll("nav .lb-nav-badge, nav span.absolute");
+    var sig = "";
+    badges.forEach(function (b) { sig += (b.textContent || "").trim(); });
+    if (sig && sig !== lastBadge && lastBadge !== "") {
+      try { if (window.lbHaptic) window.lbHaptic("warning"); } catch (e) {}
+      document.querySelector("nav") && document.querySelector("nav").classList.add("lb-nav-pulse");
+      setTimeout(function () {
+        var n = document.querySelector("nav");
+        if (n) n.classList.remove("lb-nav-pulse");
+      }, 500);
+    }
+    lastBadge = sig;
+  }
+
+  /* 10) پین کردن هدر کارت اول (اختیاری با کلاس) */
+  /* CSS-only mostly */
+
+  /* 11) حالت خواندن بهتر برای کپشن‌های بلند */
+  function expandCaptions() {
+    document.querySelectorAll("main .line-clamp-2, main #lbTestCap").forEach(function (el) {
+      if (el.dataset.lbExp) return;
+      el.dataset.lbExp = "1";
+      el.addEventListener("click", function () {
+        el.classList.toggle("lb-caption-open");
+      });
+    });
+  }
+
+  /* 12) جلوگیری از submit خالی */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("main button.bg-link");
+    if (!btn) return;
+    var form = btn.closest("form");
+    if (!form) return;
+    var required = form.querySelectorAll("[required]");
+    var bad = null;
+    required.forEach(function (inp) {
+      if (!bad && !(inp.value || "").trim()) bad = inp;
+    });
+    if (bad) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.lbFieldError) window.lbFieldError(bad, "این فیلد لازم است");
+      if (window.lbShake) window.lbShake(bad);
+      bad.focus();
+    }
+  }, true);
+
+  /* 13) نشانگر اسکرول افقی فیلتر */
+  function filterScrollCue() {
+    document.querySelectorAll("main .lb-chips").forEach(function (row) {
+      if (row.dataset.lbCue) return;
+      row.dataset.lbCue = "1";
+      row.addEventListener("scroll", function () {
+        row.classList.toggle("lb-scrolled-end", row.scrollLeft + row.clientWidth >= row.scrollWidth - 4);
+        row.classList.toggle("lb-scrolled-start", Math.abs(row.scrollLeft) > 4);
+      }, { passive: true });
+    });
+  }
+
+  /* 14) تأخیر نمایش FAB تا بعد از لود */
+  setTimeout(function () {
+    document.documentElement.classList.add("lb-ready");
+  }, 400);
+
+  /* 15) گزارش نسخه UI در console برای دیباگ */
+  try {
+    console.info("[linkban-ui] build helpers active");
+  } catch (e) {}
+
+  /* 16) لمس و نگه‌داشتن روی کارت = کلاس selected */
+  (function () {
+    var t = 0, card = null;
+    document.addEventListener("touchstart", function (e) {
+      card = e.target.closest && e.target.closest("main .rounded-2xl.bg-surface");
+      if (!card) return;
+      t = setTimeout(function () {
+        if (card) card.classList.add("lb-card-selected");
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (err) {}
+      }, 450);
+    }, { passive: true });
+    document.addEventListener("touchend", function () {
+      clearTimeout(t);
+      setTimeout(function () {
+        document.querySelectorAll(".lb-card-selected").forEach(function (c) {
+          c.classList.remove("lb-card-selected");
+        });
+      }, 800);
+    });
+  })();
+
+  /* 17) همگام‌سازی رنگ status bar بله با تم */
+  function syncStatusBar() {
+    try {
+      var w = window.Bale && Bale.WebApp;
+      if (!w) return;
+      var dark = document.documentElement.dataset.theme === "dark";
+      if (w.setHeaderColor) {
+        var c = getComputedStyle(document.documentElement).getPropertyValue("--lb-header").trim();
+        if (c) w.setHeaderColor(c);
+      }
+      if (w.setBackgroundColor) {
+        var b = getComputedStyle(document.documentElement).getPropertyValue("--lb-bg").trim();
+        if (b) w.setBackgroundColor(b);
+      }
+    } catch (e) {}
+  }
+
+  /* 18) debounce عمومی */
+  window.lbDebounce = function (fn, ms) {
+    var t;
+    return function () {
+      var ctx = this, args = arguments;
+      clearTimeout(t);
+      t = setTimeout(function () { fn.apply(ctx, args); }, ms || 300);
+    };
+  };
+
+  /* 19) throttle عمومی */
+  window.lbThrottle = function (fn, ms) {
+    var last = 0;
+    return function () {
+      var now = Date.now();
+      if (now - last < (ms || 200)) return;
+      last = now;
+      return fn.apply(this, arguments);
+    };
+  };
+
+  /* 20) پاک‌سازی toastهای تکراری پشت‌سرهم */
+  var lastToast = "";
+  var lastToastAt = 0;
+  var _toast2 = window.lbToast;
+  if (typeof _toast2 === "function") {
+    window.lbToast = function (text) {
+      var now = Date.now();
+      if (text === lastToast && now - lastToastAt < 1200) return;
+      lastToast = text;
+      lastToastAt = now;
+      _toast2(text);
+    };
+  }
+
+  var _prevTick5 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick5 === "function") _prevTick5();
+    try {
+      wireDrafts();
+      searchEmptyState();
+      filterActiveCount();
+      watchNavBadge();
+      expandCaptions();
+      filterScrollCue();
+      syncStatusBar();
+    } catch (e) {}
+  };
+
 })();

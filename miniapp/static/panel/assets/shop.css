@@ -2584,3 +2584,136 @@ main .lb-op-badge {
   font-size: 10px;
   font-weight: 700;
 }
+
+
+/* ========== ۲۰ بهبود دور تازه ========== */
+
+/* نتیجه جستجو خالی */
+.lb-no-results {
+  margin-top: 12px !important;
+}
+
+/* تعداد فیلتر */
+.lb-filter-count {
+  flex: 0 0 auto;
+  margin-inline-start: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  font-size: 10px;
+  font-weight: 700;
+  align-self: center;
+  white-space: nowrap;
+}
+
+/* پالس ناو */
+nav.lb-nav-pulse {
+  animation: lb-nav-pulse 0.45s ease;
+}
+@keyframes lb-nav-pulse {
+  0%, 100% { transform: none; }
+  40% { transform: scale(1.01); }
+}
+
+/* کپشن باز */
+.lb-caption-open {
+  -webkit-line-clamp: unset !important;
+  display: block !important;
+  overflow: visible !important;
+  cursor: pointer;
+}
+main .line-clamp-2 {
+  cursor: pointer;
+}
+
+/* کارت انتخاب‌شده با لمس طولانی */
+.lb-card-selected {
+  outline: 2px solid var(--lb-primary) !important;
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--lb-primary-soft) 40%, var(--lb-surface)) !important;
+}
+
+/* FAB بعد از ready */
+.lb-fab {
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.12s ease;
+}
+html.lb-ready .lb-fab:not([hidden]) {
+  opacity: 1;
+}
+
+/* نشانه اسکرول فیلتر */
+main .lb-chips {
+  position: relative;
+}
+
+/* ورودی جستجو با آیکون حس */
+main input[placeholder*="جستجو"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236a7d8c' stroke-width='1.5'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l3 3'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: left 10px center !important;
+  padding-left: 32px !important;
+}
+
+/* کارت موجودی برجسته‌تر */
+main .rounded-2xl.bg-surface:has(.text-link.font-bold) {
+  border-color: color-mix(in srgb, var(--lb-primary) 22%, var(--lb-border)) !important;
+}
+
+/* دکمه تمام‌عرض ثانویه */
+main button.w-full.border {
+  justify-content: center;
+}
+
+/* فاصله بین چیپ نقش و محتوا */
+header + main,
+header ~ main {
+  scroll-margin-top: 8px;
+}
+
+/* وضعیت success روی toast سبز کم‌رنگ */
+.lb-toast:empty {
+  display: none !important;
+}
+
+/* لیست کانال: ستاره علاقه‌مندی لمس‌پذیرتر */
+main button .text-lg,
+main .text-yellow-500,
+main button:has(svg) {
+  line-height: 1;
+}
+
+/* فرم انتساب مدیر: textarea کانال‌ها */
+main textarea {
+  resize: vertical;
+  max-height: 160px;
+}
+
+/* خطای شبکه سراسری بالاتر از FAB */
+.lb-global-error {
+  bottom: calc(100px + env(safe-area-inset-bottom)) !important;
+}
+
+/* صفحه خانه: قدم‌ها خواناتر */
+main .rounded-2xl.bg-surface .flex.gap-2 {
+  align-items: flex-start;
+}
+
+/* حالت چاپ/اسکرین‌شات تمیزتر */
+@media print {
+  nav, .lb-fab, .lb-scroll-top, .lb-offline-bar { display: none !important; }
+  main { padding: 0 !important; }
+}
+
+/* کاهش شفافیت عناصر غیرفعال در لیست */
+main .opacity-60,
+main .opacity-50 {
+  filter: grayscale(0.1);
+}
+
+/* فوکوس حلقه روی کارت دکمه‌ای */
+main button.rounded-2xl:focus-visible {
+  outline: 2px solid var(--lb-primary);
+  outline-offset: 2px;
+}
