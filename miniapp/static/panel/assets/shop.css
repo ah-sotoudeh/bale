@@ -3228,3 +3228,113 @@ html[dir="rtl"] .lb-fab {
 main.lb-role-swap {
   animation: lb-role-in 0.22s ease;
 }
+
+
+/* ========== هدر یک‌خطی باریک: پروفایل چپ | عنوان وسط | تم راست ========== */
+header.sticky,
+header {
+  min-height: 48px !important;
+  height: auto !important;
+  padding: 0 !important;
+  border-bottom: 1px solid var(--lb-border) !important;
+  box-shadow: none !important;
+}
+
+header > div.lb-header-row,
+header > div:first-child {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 48px !important;
+  height: 48px !important;
+  max-height: 48px !important;
+  padding: 0 48px !important;
+  margin: 0 !important;
+  gap: 0 !important;
+  overflow: visible !important;
+  box-sizing: border-box;
+}
+
+/* عنوان دقیقاً وسط */
+header h1,
+header h1.lb-header-title {
+  position: static !important;
+  flex: 1 1 auto !important;
+  margin: 0 !important;
+  padding: 0 8px !important;
+  text-align: center !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  line-height: 48px !important;
+  height: 48px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  pointer-events: none;
+}
+
+/* پروفایل — چپ فیزیکی */
+header .lb-user-avatar {
+  position: absolute !important;
+  left: 10px !important;
+  right: auto !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  margin: 0 !important;
+  z-index: 2;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+}
+
+/* تم شب/روز — راست فیزیکی */
+header button.tt {
+  position: absolute !important;
+  right: 8px !important;
+  left: auto !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  margin: 0 !important;
+  z-index: 2;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+  padding: 0 !important;
+  flex: none !important;
+}
+
+/* دکمه بازگشت — اگر هست، کنار پروفایل نیاید؛ مخفی وقتی آواتار هست */
+header .lb-header-back,
+header button.grid.size-11 {
+  position: absolute !important;
+  left: 44px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  z-index: 1;
+}
+/* وقتی آواتار هست بازگشت را جمع کن تا یک خط بماند */
+header:has(.lb-user-avatar) .lb-header-back {
+  display: none !important;
+}
+
+/* هیچ چیز زیر هدر از نقش‌ها */
+header .lb-roles-hidden {
+  display: none !important;
+}
+
+/* span های خالی جای back را نگیرند */
+header > div.lb-header-row > span.size-11,
+header > div:first-child > span.grid {
+  display: none !important;
+}

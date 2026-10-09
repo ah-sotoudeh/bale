@@ -112,14 +112,16 @@
   }
 
   function mount(header) {
-    if (!header || header.querySelector("button.tt")) return;
+    if (!header) return;
     var row = header.querySelector(":scope > div");
     if (!row) return;
+    row.classList.add("lb-header-row");
+    if (header.querySelector("button.tt")) return;
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "tt";
     btn.innerHTML =
-      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' +
       '<mask id="lb-tt-m"><rect width="24" height="24" fill="#fff"/><circle class="tt-cut" cx="8" cy="8" r="7" fill="#000"/></mask>' +
       '<circle class="tt-core" cx="13" cy="13" r="8.5" fill="currentColor" mask="url(#lb-tt-m)"/>' +
       '<g class="tt-rays" fill="currentColor">' + rays() + "</g>" +
@@ -129,6 +131,7 @@
       "</g></svg>";
     paintButton(btn);
     btn.addEventListener("click", toggle);
+    /* سمت راست بصری */
     row.appendChild(btn);
   }
 
@@ -369,7 +372,20 @@ var reset = document.getElementById("lb-theme-reset");
       if (window.lbOpenAccount) window.lbOpenAccount();
       try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
     });
-    h1.parentElement.insertBefore(btn, h1);
+    var row = h1.parentElement;
+    row.classList.add("lb-header-row");
+    /* پروفایل سمت چپ: اول در DOM برای absolute left */
+    row.insertBefore(btn, row.firstChild);
+    /* عنوان وسط — کلاس */
+    h1.classList.add("lb-header-title");
+    /* تم را به انتهای ردیف ببر */
+    var tt = row.querySelector("button.tt");
+    if (tt) row.appendChild(tt);
+    /* دکمه بازگشت اگر هست، کنار پروفایل نباشد — مخفی یا کوچک */
+    var back = row.querySelector('button[aria-label]');
+    if (back && back !== btn && !back.classList.contains("tt")) {
+      back.classList.add("lb-header-back");
+    }
   }
 
   function ensureLogo() {
