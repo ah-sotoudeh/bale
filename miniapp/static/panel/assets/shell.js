@@ -216,7 +216,7 @@
   if (document.getElementById("root")) requestAnimationFrame(markReady);
   else document.addEventListener("DOMContentLoaded", markReady);
 
-  /* —— UI helpers: logo, field error, skeleton host —— */
+  /* —— UI helpers: logo, field error, skeleton (only while loading) —— */
   window.lbFieldError = function (inputOrId, message) {
     var el = typeof inputOrId === "string" ? document.getElementById(inputOrId) : inputOrId;
     if (!el) return;
@@ -241,33 +241,45 @@
   function ensureLogo() {
     var header = document.querySelector("header");
     if (!header || header.querySelector(".lb-brand-logo")) return;
-    var row = header.querySelector("div.flex, div:first-child") || header;
+    var h1 = header.querySelector("h1");
+    if (!h1 || !h1.parentElement) return;
     var img = document.createElement("img");
-    img.src = "/miniapp/assets/logo-linkban.jpg";
+    img.src = "/miniapp/static/panel/assets/logo-linkban.jpg";
+    img.onerror = function () {
+      this.src = "/miniapp/assets/logo-linkban.jpg";
+    };
     img.alt = "لینک‌بان";
     img.className = "lb-brand-logo";
     img.width = 28;
     img.height = 28;
-    // بگذار کنار عنوان اگر h1 هست
-    var h1 = header.querySelector("h1");
-    if (h1 && h1.parentElement) {
-      h1.parentElement.insertBefore(img, h1);
-    } else {
-      row.insertBefore(img, row.firstChild);
-    }
+    h1.parentElement.insertBefore(img, h1);
   }
 
-  function markLoadingBlocks() {
-    document.querySelectorAll("main p.text-center.text-muted.py-8, main p.px-1.py-8").forEach(function (p) {
-      if (p.dataset.lbSkel) return;
-      if ((p.textContent || "").indexOf("در حال") >= 0) {
-        p.dataset.lbSkel = "1";
-        p.classList.add("lb-loading-msg");
-        var sk = document.createElement("div");
-        sk.className = "lb-skeleton-stack";
-        sk.innerHTML = '<div class="lb-skel"></div><div class="lb-skel"></div><div class="lb-skel short"></div>';
-        p.parentElement && p.parentElement.insertBefore(sk, p);
+  function isLoadingParagraph(p) {
+    if (!p || !p.isConnected) return false;
+    var t = (p.textContent || "").trim();
+    return t.indexOf("در حال خواندن") >= 0 || t.indexOf("در حال بارگذاری") >= 0;
+  }
+
+  function syncSkeletons() {
+    // پاک‌سازی اسکلت‌های یتیم — علت نمایش دائمی روی همه صفحات
+    document.querySelectorAll(".lb-skeleton-stack").forEach(function (sk) {
+      var next = sk.nextElementSibling;
+      if (!isLoadingParagraph(next)) {
+        sk.remove();
       }
+    });
+    // فقط وقتی پیام لودینگ واقعاً هست اسکلت بساز
+    document.querySelectorAll("main p.lb-loading-msg, main p.text-center.text-muted").forEach(function (p) {
+      if (!isLoadingParagraph(p)) return;
+      p.classList.add("lb-loading-msg");
+      var prev = p.previousElementSibling;
+      if (prev && prev.classList && prev.classList.contains("lb-skeleton-stack")) return;
+      var sk = document.createElement("div");
+      sk.className = "lb-skeleton-stack";
+      sk.setAttribute("aria-hidden", "true");
+      sk.innerHTML = '<div class="lb-skel"></div><div class="lb-skel"></div><div class="lb-skel short"></div>';
+      p.parentElement && p.parentElement.insertBefore(sk, p);
     });
   }
 
@@ -285,28 +297,41 @@
     });
   }
 
+  var tickScheduled = false;
   function tickUi() {
-    try {
-      ensureLogo();
-      markLoadingBlocks();
-      enhanceEmptyNotes();
-    } catch (e) {}
+    if (tickScheduled) return;
+    tickScheduled = true;
+    requestAnimationFrame(function () {
+      tickScheduled = false;
+      try {
+        ensureLogo();
+        syncSkeletons();
+        enhanceEmptyNotes();
+      } catch (e) {}
+    });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () {
-      tickUi();
-      setInterval(tickUi, 1200);
-    });
+    document.addEventListener("DOMContentLoaded", tickUi);
   } else {
     tickUi();
-    setInterval(tickUi, 1200);
   }
+  // فقط چند بار اول، نه هر 1.2s برای همیشه
+  var n = 0;
+  var boot = setInterval(function () {
+    tickUi();
+    if (++n > 8) clearInterval(boot);
+  }, 400);
 
-  var mo = new MutationObserver(function () { tickUi(); });
-  if (document.body) mo.observe(document.body, { childList: true, subtree: true });
-  else document.addEventListener("DOMContentLoaded", function () {
-    mo.observe(document.body, { childList: true, subtree: true });
+  var moTimer = 0;
+  var mo = new MutationObserver(function () {
+    clearTimeout(moTimer);
+    moTimer = setTimeout(tickUi, 80);
   });
+  function observe() {
+    if (document.body) mo.observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.body) observe();
+  else document.addEventListener("DOMContentLoaded", observe);
 
 })();
