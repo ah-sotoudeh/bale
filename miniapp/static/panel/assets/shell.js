@@ -831,4 +831,190 @@
     } catch (e) {}
   };
 
+
+  /* —— دور بعد UI —— */
+
+  /* 1) بنر خطای سراسری + تلاش دوباره */
+  window.lbShowError = function (message, onRetry) {
+    var id = "lb-global-error";
+    var el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = id;
+      el.className = "lb-global-error";
+      el.innerHTML =
+        '<p class="lb-global-error-msg"></p>' +
+        '<button type="button" class="lb-global-error-retry">تلاش دوباره</button>' +
+        '<button type="button" class="lb-global-error-close" aria-label="بستن">×</button>';
+      document.body.appendChild(el);
+      el.querySelector(".lb-global-error-close").onclick = function () {
+        el.hidden = true;
+      };
+    }
+    el.querySelector(".lb-global-error-msg").textContent = message || "خطایی رخ داد";
+    var retry = el.querySelector(".lb-global-error-retry");
+    retry.hidden = !onRetry;
+    retry.onclick = function () {
+      el.hidden = true;
+      try { onRetry && onRetry(); } catch (e) {}
+    };
+    el.hidden = false;
+    try { if (window.lbHaptic) window.lbHaptic("error"); } catch (e) {}
+  };
+  window.lbHideError = function () {
+    var el = document.getElementById("lb-global-error");
+    if (el) el.hidden = true;
+  };
+
+  /* 2) رهگیری fetchهای ناموفق API مینی‌اپ */
+  if (!window.__lbFetchPatched && typeof window.fetch === "function") {
+    window.__lbFetchPatched = true;
+    var _fetch = window.fetch.bind(window);
+    window.fetch = function () {
+      var args = arguments;
+      var url = String((args[0] && args[0].url) || args[0] || "");
+      var slow = setTimeout(function () {
+        if (window.lbNetWatch) window.lbNetWatch(5000);
+      }, 2500);
+      return _fetch.apply(null, args).then(function (res) {
+        clearTimeout(slow);
+        if (!res.ok && url.indexOf("/miniapp/") >= 0 && res.status >= 500) {
+          window.lbShowError("سرور پاسخ نداد (" + res.status + ")", function () {
+            window.dispatchEvent(new CustomEvent("lb:refresh"));
+          });
+        }
+        return res;
+      }).catch(function (err) {
+        clearTimeout(slow);
+        if (url.indexOf("/miniapp/") >= 0) {
+          window.lbShowError("ارتباط برقرار نشد", function () {
+            window.dispatchEvent(new CustomEvent("lb:refresh"));
+          });
+        }
+        throw err;
+      });
+    };
+  }
+
+  /* 3) نوار پیشرفت کوچک بالای صفحه */
+  window.lbProgress = function (show) {
+    var el = document.getElementById("lb-top-progress");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "lb-top-progress";
+      el.className = "lb-top-progress";
+      el.innerHTML = '<div class="lb-top-progress-bar"></div>';
+      document.body.appendChild(el);
+    }
+    el.classList.toggle("on", !!show);
+    el.hidden = !show;
+  };
+
+  /* 4) مخفی کردن FAB هنگام شیت/لایتباکس */
+  function syncOverlaysChrome() {
+    var open =
+      document.getElementById("lb-confirm") ||
+      document.getElementById("lb-lightbox") ||
+      document.querySelector(".lb-sheet:not([hidden])");
+    document.documentElement.classList.toggle("lb-overlay-open", !!open);
+  }
+
+  /* 5) ذخیرهٔ موقعیت اسکرول هر صفحه (تقریبی با عنوان) */
+  var scrollMap = {};
+  try {
+    scrollMap = JSON.parse(sessionStorage.getItem("lb.scroll") || "{}");
+  } catch (e) {}
+  function pageKey() {
+    var h = document.querySelector("header h1");
+    return h ? (h.textContent || "").trim() : "page";
+  }
+  function saveScroll() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main) return;
+    scrollMap[pageKey()] = main.scrollTop;
+    try { sessionStorage.setItem("lb.scroll", JSON.stringify(scrollMap)); } catch (e) {}
+  }
+  function restoreScroll() {
+    var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+    if (!main) return;
+    var y = scrollMap[pageKey()];
+    if (typeof y === "number" && y > 0) {
+      requestAnimationFrame(function () { main.scrollTop = y; });
+    }
+  }
+  document.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest("nav button")) {
+      saveScroll();
+      setTimeout(restoreScroll, 120);
+    }
+  }, true);
+
+  /* 6) راهنمای یک‌باره فیلتر افقی */
+  function filterHint() {
+    try {
+      if (localStorage.getItem("lb.filterHint") === "1") return;
+    } catch (e) {}
+    var row = document.querySelector("main .lb-chips, main .flex:has(> button.lb-chip)");
+    if (!row || row.dataset.lbHint) return;
+    row.dataset.lbHint = "1";
+    var tip = document.createElement("div");
+    tip.className = "lb-filter-hint";
+    tip.textContent = "← برای دیدن بقیه بکشید";
+    row.parentElement && row.parentElement.insertBefore(tip, row.nextSibling);
+    setTimeout(function () {
+      tip.remove();
+      try { localStorage.setItem("lb.filterHint", "1"); } catch (e) {}
+    }, 3200);
+  }
+
+  /* 7) انتقال نرم تم */
+  document.documentElement.classList.add("lb-theme-anim");
+
+  /* 8) فوکوس اولین فیلد خطا بعد از submit ناموفق */
+  window.lbFocusInvalid = function () {
+    var el = document.querySelector("main .lb-input-invalid, main input:invalid");
+    if (el && el.focus) {
+      el.focus();
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  };
+
+  /* 9) لرزش کوتاه فیلد نامعتبر */
+  window.lbShake = function (el) {
+    if (!el) return;
+    el.classList.remove("lb-shake");
+    void el.offsetWidth;
+    el.classList.add("lb-shake");
+    setTimeout(function () { el.classList.remove("lb-shake"); }, 450);
+  };
+
+  /* 10) شمارنده کاراکتر برای textareaهای کپشن */
+  function wireCounters() {
+    document.querySelectorAll("main textarea").forEach(function (ta) {
+      if (ta.dataset.lbCounter) return;
+      ta.dataset.lbCounter = "1";
+      var max = parseInt(ta.getAttribute("maxlength") || "0", 10);
+      var counter = document.createElement("div");
+      counter.className = "lb-char-count";
+      function upd() {
+        var n = (ta.value || "").length;
+        counter.textContent = max ? n + " / " + max : n + " نویسه";
+        counter.classList.toggle("over", max && n > max);
+      }
+      ta.addEventListener("input", upd);
+      upd();
+      if (ta.parentElement) ta.parentElement.appendChild(counter);
+    });
+  }
+
+  var _prevTick3 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick3 === "function") _prevTick3();
+    try {
+      syncOverlaysChrome();
+      filterHint();
+      wireCounters();
+    } catch (e) {}
+  };
+
 })();

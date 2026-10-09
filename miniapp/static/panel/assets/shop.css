@@ -2246,3 +2246,157 @@ html.lb-reduce-motion *::after {
   border: 1px solid color-mix(in srgb, var(--lb-info) 25%, transparent);
 }
 .lb-slow-net[hidden] { display: none !important; }
+
+
+/* ========== دور بعد — ۱۰ بهبود ========== */
+
+/* 1) خطای سراسری */
+.lb-global-error {
+  position: fixed;
+  z-index: 160;
+  left: 50%;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(400px, calc(100vw - 24px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--lb-danger-bg);
+  border: 1px solid color-mix(in srgb, var(--lb-danger) 35%, transparent);
+  color: var(--lb-danger);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  animation: lb-toast-in 0.25s ease;
+}
+.lb-global-error[hidden] { display: none !important; }
+.lb-global-error-msg {
+  flex: 1 1 140px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.lb-global-error-retry {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--lb-danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.lb-global-error-close {
+  border: 0;
+  background: transparent;
+  color: var(--lb-danger);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+/* 2) نوار پیشرفت بالا */
+.lb-top-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 170;
+  height: 3px;
+  pointer-events: none;
+  overflow: hidden;
+}
+.lb-top-progress[hidden] { display: none !important; }
+.lb-top-progress-bar {
+  height: 100%;
+  width: 40%;
+  background: var(--lb-primary);
+  border-radius: 0 2px 2px 0;
+  animation: lb-progress 1s ease-in-out infinite;
+}
+.lb-top-progress.on .lb-top-progress-bar {
+  opacity: 1;
+}
+@keyframes lb-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(280%); }
+}
+
+/* 3) مخفی FAB روی اورلی */
+html.lb-overlay-open .lb-fab,
+html.lb-overlay-open .lb-scroll-top {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 4) راهنمای فیلتر */
+.lb-filter-hint {
+  margin: -2px 0 8px;
+  font-size: 11px;
+  color: var(--lb-text-3);
+  text-align: center;
+  animation: lb-fade-in 0.3s ease;
+}
+
+/* 5) انتقال تم */
+html.lb-theme-anim,
+html.lb-theme-anim body,
+html.lb-theme-anim main,
+html.lb-theme-anim header,
+html.lb-theme-anim nav {
+  transition: background-color 0.25s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+/* 6) لرزش فیلد */
+.lb-shake {
+  animation: lb-shake 0.4s ease;
+}
+@keyframes lb-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+
+/* 7) شمارنده نویسه */
+.lb-char-count {
+  margin-top: 4px;
+  text-align: left;
+  font-size: 10px;
+  color: var(--lb-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.lb-char-count.over {
+  color: var(--lb-danger);
+  font-weight: 600;
+}
+
+/* 8) گروه فیلد */
+main label + input,
+main label + textarea,
+main label + select {
+  margin-top: 4px;
+}
+main label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lb-text-2);
+}
+
+/* 9) مخفی کردن spin عدد */
+main input[type="number"] {
+  -moz-appearance: textfield;
+}
+main input[type="number"]::-webkit-outer-spin-button,
+main input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 10) دکمه‌های تلاش دوباره در محتوا */
+main button.text-link.underline,
+main .text-center button.bg-link {
+  min-height: 38px;
+}
