@@ -908,42 +908,7 @@ main .bg-link.rounded-2xl {
   background: var(--lb-primary) !important;
 }
 
-/* ========== بج عددی: سمت چپ آیکون (نه روی مرکز) ========== */
-nav button {
-  position: relative !important;
-}
 
-nav button > span.relative,
-nav button span.relative {
-  position: relative !important;
-  display: inline-flex !important;
-}
-
-nav button span.absolute,
-nav button .rounded-full.bg-danger {
-  position: absolute !important;
-  top: -4px !important;
-  /* سمت چپ فیزیکی آیکون */
-  left: -8px !important;
-  right: auto !important;
-  inset-inline: auto !important;
-  display: grid !important;
-  place-items: center !important;
-  width: 16px !important;
-  height: 16px !important;
-  min-width: 16px !important;
-  min-height: 16px !important;
-  padding: 0 !important;
-  border-radius: 50% !important;
-  background: var(--lb-danger) !important;
-  color: #fff !important;
-  font-size: 9px !important;
-  font-weight: 700 !important;
-  line-height: 1 !important;
-  box-shadow: 0 0 0 1.5px var(--lb-header);
-  z-index: 2;
-  pointer-events: none;
-}
 
 /* ========== فیلترها مثل بله: متن کنار هم + خط زیر انتخاب ========== */
 .lb-chips {
@@ -1210,4 +1175,207 @@ main input[placeholder*="جستجو"],
 main input[placeholder*="شناسه"] {
   min-height: 36px !important;
   border-radius: 10px !important;
+}
+
+
+/* ========== 1) بج نوار پایین: چپِ آیکون، نه روی مرکز ========== */
+.lb-nav-ico {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 24px !important;
+  overflow: visible !important;
+}
+
+.lb-nav-badge {
+  position: absolute !important;
+  top: -5px !important;
+  left: -6px !important;
+  right: auto !important;
+  inset-inline: auto !important;
+  z-index: 5 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 15px !important;
+  height: 15px !important;
+  min-width: 15px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  background: #e53935 !important;
+  color: #fff !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  box-shadow: 0 0 0 1.5px var(--lb-header, #fff);
+  pointer-events: none !important;
+}
+
+nav button {
+  position: relative !important;
+  overflow: visible !important;
+  min-height: 52px !important;
+  gap: 2px !important;
+}
+
+nav button svg {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+nav button.font-bold {
+  color: var(--lb-primary) !important;
+}
+
+/* ========== 2) فیلترهای همه صفحات: تب خطی ========== */
+main button.lb-chip,
+.lb-chip,
+main button.lb-pill,
+main button.min-h-9.rounded-full,
+main button.min-h-8.rounded-full,
+main button.min-h-11.rounded-full,
+main button.shrink-0.rounded-full.px-3 {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  min-height: 34px !important;
+  padding: 6px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+}
+
+main button.lb-chip.on,
+.lb-chip.on,
+main button.lb-pill.bg-link,
+main button.rounded-full.bg-link,
+main button.rounded-full.text-on,
+main button.bg-link.rounded-full {
+  background: transparent !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
+}
+
+main button.lb-chip.on::after,
+.lb-chip.on::after,
+main button.lb-pill.bg-link::after,
+main button.rounded-full.bg-link::after,
+main button.rounded-full.text-on::after {
+  content: "" !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  inset-inline: 10px !important;
+  height: 2.5px !important;
+  border-radius: 2px 2px 0 0 !important;
+  background: var(--lb-primary) !important;
+}
+
+main .lb-chips,
+main .flex:has(> button.lb-chip),
+main .flex:has(> button.lb-pill),
+main .flex-wrap:has(> button.rounded-full.px-3),
+main .flex:has(> button.min-h-9.rounded-full) {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0 !important;
+  overflow-x: auto !important;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--lb-border);
+  margin-bottom: 8px;
+}
+main .lb-chips::-webkit-scrollbar { display: none; }
+
+/* هدر نقش‌ها قرص بماند */
+header button.rounded-full {
+  border-radius: 999px !important;
+}
+header button.rounded-full.bg-link {
+  background: var(--lb-primary) !important;
+  color: var(--lb-on-primary) !important;
+}
+header button.rounded-full::after { display: none !important; }
+
+/* ========== 3) ورودی‌ها جمع‌وجور ========== */
+main input, main textarea, main select {
+  min-height: 36px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+main textarea { min-height: 70px !important; }
+
+/* ========== 4) دکمه اصلی ========== */
+main button.bg-link:not(.rounded-full):not(.lb-pill):not(.lb-chip),
+main button.bg-ok {
+  min-height: 40px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+}
+
+/* ========== 5) کارت‌ها سبک ========== */
+main .rounded-2xl.bg-surface,
+main .empty-note {
+  border-radius: 12px !important;
+  border: 1px solid var(--lb-border) !important;
+  box-shadow: none !important;
+  background: var(--lb-surface) !important;
+}
+
+/* ========== 6) فاصله صفحه ========== */
+main.overflow-y-auto {
+  padding-top: 10px !important;
+  padding-bottom: calc(68px + env(safe-area-inset-bottom)) !important;
+}
+main .mb-3 { margin-bottom: 0.5rem !important; }
+main .mb-4 { margin-bottom: 0.65rem !important; }
+main .p-3 { padding: 0.55rem !important; }
+main .p-4 { padding: 0.65rem !important; }
+main .gap-3 { gap: 0.45rem !important; }
+
+/* ========== 7) تایپوگرافی لیست ========== */
+main .text-sm { font-size: 12.5px !important; }
+main .text-xs { font-size: 11px !important; }
+main h2, main .text-base.font-bold { font-size: 14px !important; }
+
+/* ========== 8) هدر جمع‌تر ========== */
+header { min-height: 46px !important; }
+header h1 { font-size: 15px !important; line-height: 26px !important; }
+header > div.px-3 {
+  margin: 0 10px 6px !important;
+  padding: 2px !important;
+  border-radius: 999px !important;
+  background: var(--lb-surface-2) !important;
+}
+header button.rounded-full {
+  min-height: 30px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+/* ========== 9) ردیف سفارش/کانال ========== */
+main .rounded-2xl.bg-surface + .rounded-2xl.bg-surface,
+main .divide-y > * {
+  border-color: var(--lb-border) !important;
+}
+main .text-danger { font-size: 11.5px !important; }
+main .text-muted { line-height: 1.45 !important; }
+
+/* ========== 10) بدون گرادیان + رنگ تخت فیروزه‌ای ========== */
+.lb-hero,
+main .bg-link.rounded-2xl:not(button) {
+  background: var(--lb-primary) !important;
+}
+:root, [data-theme="light"] {
+  --lb-primary: #00a39a;
+  --lb-primary-pressed: #008f87;
+  --lb-hero: #00a39a;
 }
