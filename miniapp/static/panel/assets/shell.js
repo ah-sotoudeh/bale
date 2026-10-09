@@ -336,4 +336,299 @@
   if (document.body) observe();
   else document.addEventListener("DOMContentLoaded", observe);
 
+
+  /* —— دور بعد: ۱۰ قابلیت UI —— */
+
+  /* 7) بنر آفلاین */
+  function ensureOfflineBar() {
+    var bar = document.getElementById("lb-offline-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "lb-offline-bar";
+      bar.className = "lb-offline-bar";
+      bar.hidden = true;
+      bar.textContent = "اتصال اینترنت برقرار نیست";
+      document.body.appendChild(bar);
+    }
+    var offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    bar.hidden = !offline;
+    document.documentElement.classList.toggle("lb-offline", offline);
+  }
+  window.addEventListener("online", ensureOfflineBar);
+  window.addEventListener("offline", ensureOfflineBar);
+  ensureOfflineBar();
+
+  /* 3) تأیید با شیت پایین */
+  window.lbConfirm = function (message, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var old = document.getElementById("lb-confirm");
+      if (old) old.remove();
+      var wrap = document.createElement("div");
+      wrap.id = "lb-confirm";
+      wrap.className = "lb-confirm-root";
+      wrap.innerHTML =
+        '<div class="lb-confirm-scrim" data-act="no"></div>' +
+        '<div class="lb-confirm-sheet" role="dialog" aria-modal="true">' +
+        '<p class="lb-confirm-msg"></p>' +
+        '<div class="lb-confirm-actions">' +
+        '<button type="button" class="lb-confirm-no" data-act="no"></button>' +
+        '<button type="button" class="lb-confirm-yes" data-act="yes"></button>' +
+        "</div></div>";
+      wrap.querySelector(".lb-confirm-msg").textContent = message || "مطمئن هستید؟";
+      wrap.querySelector(".lb-confirm-no").textContent = opts.cancelText || "انصراف";
+      wrap.querySelector(".lb-confirm-yes").textContent = opts.okText || "تأیید";
+      if (opts.danger) wrap.querySelector(".lb-confirm-yes").classList.add("danger");
+      function close(v) {
+        wrap.remove();
+        resolve(!!v);
+      }
+      wrap.addEventListener("click", function (e) {
+        var a = e.target.getAttribute && e.target.getAttribute("data-act");
+        if (a === "yes") close(true);
+        if (a === "no") close(false);
+      });
+      document.body.appendChild(wrap);
+      try { if (window.lbHaptic) window.lbHaptic("warning"); } catch (e) {}
+    });
+  };
+
+  /* 5) پیش‌نمایش تمام‌صفحه تصویر */
+  window.lbLightbox = function (src) {
+    if (!src) return;
+    var old = document.getElementById("lb-lightbox");
+    if (old) old.remove();
+    var box = document.createElement("div");
+    box.id = "lb-lightbox";
+    box.className = "lb-lightbox";
+    box.innerHTML = '<button type="button" class="lb-lightbox-close" aria-label="بستن">×</button><img alt="" />';
+    box.querySelector("img").src = src;
+    function close() { box.remove(); }
+    box.addEventListener("click", function (e) {
+      if (e.target === box || e.target.classList.contains("lb-lightbox-close")) close();
+    });
+    document.body.appendChild(box);
+  };
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || t.tagName !== "IMG") return;
+    if (t.classList.contains("lb-brand-logo")) return;
+    if (t.closest("nav") || t.closest("header")) return;
+    var src = t.currentSrc || t.src || "";
+    if (!src || src.indexOf("data:") === 0) return;
+    // فقط تصاویر بنر/لیست با اندازه معقول
+    if (t.naturalWidth && t.naturalWidth < 40) return;
+    if (t.closest("main")) {
+      e.preventDefault();
+      window.lbLightbox(src);
+    }
+  }, true);
+
+  /* 4) جستجو: debounce + پیام یافت نشد */
+  function wireSearch() {
+    document.querySelectorAll("main input[placeholder*='جستجو'], main input[placeholder*='شناسه']").forEach(function (inp) {
+      if (inp.dataset.lbSearch) return;
+      inp.dataset.lbSearch = "1";
+      var timer = 0;
+      inp.addEventListener("input", function () {
+        clearTimeout(timer);
+        var q = (inp.value || "").trim();
+        timer = setTimeout(function () {
+          var host = inp.closest("main") || document;
+          var empty = host.querySelector(".lb-search-empty");
+          // اگر لیست کارت خالی شد بعد از فیلتر کلاینتی — تقریبی
+          var cards = host.querySelectorAll("main .rounded-2xl.bg-surface, .rounded-2xl.bg-surface");
+          // فقط وقتی خود input خالی نیست و هیچ نتیجه‌ای در دید نیست سخت است؛ پیام کمکی زیر فیلد
+          var hint = inp.parentElement && inp.parentElement.querySelector(".lb-search-hint");
+          if (!hint && inp.parentElement) {
+            hint = document.createElement("p");
+            hint.className = "lb-search-hint";
+            inp.parentElement.appendChild(hint);
+          }
+          if (hint) {
+            if (q.length >= 2) hint.textContent = "در حال پالایش…";
+            else hint.textContent = "";
+            if (q.length >= 2) {
+              setTimeout(function () {
+                if (hint && (inp.value || "").trim() === q) hint.textContent = "";
+              }, 400);
+            }
+          }
+        }, 280);
+      });
+    });
+  }
+
+  /* 2) Pull-to-refresh ساده */
+  (function () {
+    var startY = 0, pulling = false, indicator;
+    function ensureInd() {
+      if (indicator) return indicator;
+      indicator = document.createElement("div");
+      indicator.className = "lb-ptr";
+      indicator.hidden = true;
+      indicator.textContent = "رها کنید تا نو شود";
+      document.body.appendChild(indicator);
+      return indicator;
+    }
+    document.addEventListener("touchstart", function (e) {
+      var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+      if (!main || main.scrollTop > 2) return;
+      startY = e.touches[0].clientY;
+      pulling = true;
+    }, { passive: true });
+    document.addEventListener("touchmove", function (e) {
+      if (!pulling) return;
+      var dy = e.touches[0].clientY - startY;
+      var ind = ensureInd();
+      if (dy > 56) {
+        ind.hidden = false;
+        ind.classList.add("ready");
+        ind.textContent = "رها کنید تا نو شود";
+      } else if (dy > 24) {
+        ind.hidden = false;
+        ind.classList.remove("ready");
+        ind.textContent = "بکشید برای تازه‌سازی";
+      } else {
+        ind.hidden = true;
+      }
+    }, { passive: true });
+    document.addEventListener("touchend", function () {
+      if (!pulling) return;
+      pulling = false;
+      var ind = ensureInd();
+      if (!ind.hidden && ind.classList.contains("ready")) {
+        ind.textContent = "در حال تازه‌سازی…";
+        try { if (window.lbHaptic) window.lbHaptic("light"); } catch (e) {}
+        setTimeout(function () {
+          ind.hidden = true;
+          ind.classList.remove("ready");
+          // رفرش نرم: رویداد سفارشی برای اپ
+          window.dispatchEvent(new CustomEvent("lb:refresh"));
+          // اگر API زنده است، یک reload سبک ترجیحات/صفحه
+          try {
+            if (window.__LIVE_API && window.Bale && Bale.WebApp) {
+              /* عمداً location.reload کامل نمی‌کنیم مگر نیاز */
+            }
+          } catch (e) {}
+        }, 600);
+      } else {
+        ind.hidden = true;
+      }
+    });
+  })();
+
+  /* 8) دکمه شناور — فقط در نقش مشتری روی خانه/کانال‌ها */
+  function syncFab() {
+    var fab = document.getElementById("lb-fab");
+    var roleBtn = document.querySelector("header button.rounded-full.bg-link");
+    var role = roleBtn ? (roleBtn.textContent || "").trim() : "";
+    var show = role.indexOf("مشتری") >= 0;
+    var h1 = document.querySelector("header h1");
+    var title = h1 ? (h1.textContent || "") : "";
+    var onUseful = /خانه|کانال/.test(title);
+    if (!show || !onUseful) {
+      if (fab) fab.hidden = true;
+      return;
+    }
+    if (!fab) {
+      fab = document.createElement("button");
+      fab.id = "lb-fab";
+      fab.type = "button";
+      fab.className = "lb-fab";
+      fab.textContent = "＋ بنر";
+      fab.addEventListener("click", function () {
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+        // کلیک روی تب بنرها در ناو
+        var btns = document.querySelectorAll("nav button");
+        for (var i = 0; i < btns.length; i++) {
+          if ((btns[i].textContent || "").indexOf("بنر") >= 0) {
+            btns[i].click();
+            break;
+          }
+        }
+      });
+      document.body.appendChild(fab);
+    }
+    fab.hidden = false;
+  }
+
+  /* 9) اندازه فونت دسترسی — سه سطح */
+  window.lbSetFontScale = function (level) {
+    var map = { sm: "15px", md: "16px", lg: "18px" };
+    var v = map[level] || map.md;
+    document.documentElement.style.setProperty("--lb-font-base", v);
+    document.documentElement.dataset.font = level || "md";
+    try { localStorage.setItem("lb.font", level || "md"); } catch (e) {}
+  };
+  try {
+    var fs = localStorage.getItem("lb.font") || "md";
+    window.lbSetFontScale(fs);
+  } catch (e) {}
+
+  /* 1) اسکلت لیست وقتی main تقریباً خالی است و لودینگ حساب نیست */
+  function listSkeleton() {
+    var main = document.querySelector("main");
+    if (!main) return;
+    var existing = main.querySelector(".lb-list-skeleton");
+    var hasCards = main.querySelectorAll(".rounded-2xl.bg-surface").length > 0;
+    var loading = main.querySelector(".lb-loading-msg, p.text-center.text-muted");
+    var isLoad = loading && /در حال/.test(loading.textContent || "");
+    if (isLoad && !hasCards) {
+      if (!existing) {
+        var sk = document.createElement("div");
+        sk.className = "lb-list-skeleton";
+        sk.innerHTML =
+          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>' +
+          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>' +
+          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>';
+        main.appendChild(sk);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+
+  /* 6) نشان «جدید» — اگر ردیف سفارش تازه در DOM آمد */
+  function markNewRows() {
+    document.querySelectorAll("main .rounded-2xl.bg-surface").forEach(function (card) {
+      if (card.dataset.lbSeen) return;
+      card.dataset.lbSeen = "1";
+      // فقط چند مورد اول بعد از mount
+      if (!window.__lbMarkNew) return;
+      if (card.querySelector(".lb-new-badge")) return;
+      var b = document.createElement("span");
+      b.className = "lb-new-badge";
+      b.textContent = "جدید";
+      card.style.position = "relative";
+      card.appendChild(b);
+    });
+  }
+  window.__lbMarkNew = true;
+  setTimeout(function () { window.__lbMarkNew = false; }, 8000);
+
+  /* 10) انیمیشن تعویض نقش */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("header button.rounded-full");
+    if (!btn) return;
+    var main = document.querySelector("main");
+    if (main) {
+      main.classList.remove("lb-role-swap");
+      void main.offsetWidth;
+      main.classList.add("lb-role-swap");
+    }
+  }, true);
+
+  var prevTick = tickUi;
+  tickUi = function () {
+    if (typeof prevTick === "function") prevTick();
+    try {
+      ensureOfflineBar();
+      wireSearch();
+      syncFab();
+      listSkeleton();
+      markNewRows();
+    } catch (e) {}
+  };
+
 })();

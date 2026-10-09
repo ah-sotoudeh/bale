@@ -1893,3 +1893,225 @@ main .lb-chips,
 main .flex:has(> button.lb-chip) {
   mask-image: linear-gradient(90deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
 }
+
+
+/* ========== ۱۰ قابلیت دور بعد ========== */
+
+/* پایه فونت دسترسی */
+html {
+  font-size: var(--lb-font-base, 16px);
+}
+
+/* 1) اسکلت لیست */
+.lb-list-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 12px;
+}
+.lb-skel-card {
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 2) Pull to refresh */
+.lb-ptr {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  color: var(--lb-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--lb-shadow);
+  pointer-events: none;
+}
+.lb-ptr.ready {
+  color: var(--lb-primary);
+  border-color: var(--lb-primary);
+}
+
+/* 3) شیت تأیید */
+.lb-confirm-root {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.lb-confirm-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--lb-scrim);
+  backdrop-filter: blur(2px);
+}
+.lb-confirm-sheet {
+  position: relative;
+  background: var(--lb-surface);
+  border-radius: 16px 16px 0 0;
+  padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 28px rgba(0,0,0,0.12);
+  animation: lb-sheet-up 0.25s ease;
+}
+@keyframes lb-sheet-up {
+  from { transform: translateY(40%); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.lb-confirm-msg {
+  margin: 0 0 16px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--lb-text);
+  font-weight: 600;
+}
+.lb-confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.lb-confirm-no,
+.lb-confirm-yes {
+  min-height: 42px;
+  border-radius: 10px;
+  border: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lb-confirm-no {
+  background: var(--lb-surface-2);
+  color: var(--lb-text);
+}
+.lb-confirm-yes {
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+}
+.lb-confirm-yes.danger {
+  background: var(--lb-danger);
+  color: #fff;
+}
+
+/* 4) راهنمای جستجو */
+.lb-search-hint {
+  margin: 4px 2px 0;
+  font-size: 11px;
+  color: var(--lb-text-3);
+  min-height: 14px;
+}
+
+/* 5) لایتبکس تصویر */
+.lb-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: rgba(0,0,0,0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: lb-fade-in 0.2s ease;
+}
+.lb-lightbox img {
+  max-width: 100%;
+  max-height: 85dvh;
+  border-radius: 12px;
+  object-fit: contain;
+}
+.lb-lightbox-close {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  left: 12px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* 6) نشان جدید */
+.lb-new-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  pointer-events: none;
+}
+
+/* 7) آفلاین */
+.lb-offline-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 140;
+  padding: 6px 12px;
+  padding-top: max(6px, env(safe-area-inset-top));
+  background: var(--lb-warning-bg);
+  color: var(--lb-warning);
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid color-mix(in srgb, var(--lb-warning) 30%, transparent);
+}
+html.lb-offline body {
+  padding-top: 0;
+}
+
+/* 8) FAB */
+.lb-fab {
+  position: fixed;
+  z-index: 40;
+  left: 16px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--lb-primary) 35%, transparent);
+  transition: transform 0.12s ease, opacity 0.15s ease;
+}
+.lb-fab:active {
+  transform: scale(0.96);
+}
+.lb-fab[hidden] {
+  display: none !important;
+}
+
+/* 9) مقیاس فونت */
+html[data-font="sm"] { --lb-font-base: 15px; }
+html[data-font="md"] { --lb-font-base: 16px; }
+html[data-font="lg"] { --lb-font-base: 18px; }
+
+/* 10) تعویض نقش */
+main.lb-role-swap {
+  animation: lb-role-in 0.28s ease;
+}
+@keyframes lb-role-in {
+  from { opacity: 0.35; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
