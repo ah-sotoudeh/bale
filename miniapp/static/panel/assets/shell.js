@@ -1805,4 +1805,223 @@
     } catch (e) {}
   };
 
+
+  /* —— ۲۰ بهبود بعدی —— */
+
+  /* 1) پین نوار فیلتر با سایه وقتی sticky فعال است */
+  function wireStickyFilterShadow() {
+    document.querySelectorAll("main .lb-chips").forEach(function (row) {
+      if (row.dataset.lbSticky) return;
+      row.dataset.lbSticky = "1";
+      var main = document.querySelector("main");
+      if (!main) return;
+      main.addEventListener("scroll", function () {
+        var top = row.getBoundingClientRect().top;
+        row.classList.toggle("lb-sticky-on", top <= 2);
+      }, { passive: true });
+    });
+  }
+
+  /* 2) میانبر: دابل‌تپ ناو خانه = اسکرول بالا */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("nav button");
+    if (!btn) return;
+    var label = (btn.textContent || "").trim();
+    if (label.indexOf("خانه") < 0) return;
+    var now = Date.now();
+    if (btn._lbLastTap && now - btn._lbLastTap < 350) {
+      var main = document.querySelector("main.overflow-y-auto") || document.querySelector("main");
+      if (main) main.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    btn._lbLastTap = now;
+  }, true);
+
+  /* 3) ذخیره عرض viewport برای CSS */
+  function syncVh() {
+    document.documentElement.style.setProperty("--lb-vh", window.innerHeight + "px");
+  }
+  window.addEventListener("resize", syncVh);
+  syncVh();
+
+  /* 4) کلاس «کیبورد باز روی iOS» از focus input */
+  document.addEventListener("focusin", function (e) {
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+      document.documentElement.classList.add("lb-field-focus");
+    }
+  });
+  document.addEventListener("focusout", function () {
+    setTimeout(function () {
+      var a = document.activeElement;
+      if (!a || !/INPUT|TEXTAREA|SELECT/.test(a.tagName)) {
+        document.documentElement.classList.remove("lb-field-focus");
+      }
+    }, 80);
+  });
+
+  /* 5) پیش‌نمایش طول متن فارسی بدون برش وسط کلمه در toast */
+  var _toast3 = window.lbToast;
+  if (typeof _toast3 === "function") {
+    window.lbToast = function (text) {
+      var t = String(text || "");
+      if (t.length > 120) t = t.slice(0, 117) + "…";
+      _toast3(t);
+    };
+  }
+
+  /* 6) نشان «به‌روز شد» لحظه‌ای بعد از refresh */
+  window.addEventListener("lb:refresh", function () {
+    if (window.lbToast) window.lbToast("در حال به‌روزرسانی…");
+    if (window.lbProgress) {
+      window.lbProgress(true);
+      setTimeout(function () { window.lbProgress(false); }, 1200);
+    }
+  });
+
+  /* 7) حافظه آخرین جستجو */
+  function wireSearchMemory() {
+    document.querySelectorAll("main input[placeholder*='جستجو']").forEach(function (inp) {
+      if (inp.dataset.lbMem) return;
+      inp.dataset.lbMem = "1";
+      try {
+        var s = sessionStorage.getItem("lb.search");
+        if (s && !inp.value) {
+          inp.value = s;
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      } catch (e) {}
+      inp.addEventListener("input", function () {
+        try { sessionStorage.setItem("lb.search", inp.value || ""); } catch (e) {}
+      });
+    });
+  }
+
+  /* 8) حذف پیش‌نویس بعد از موفقیت toast ثبت */
+  var _toast4 = window.lbToast;
+  if (typeof _toast4 === "function") {
+    window.lbToast = function (text) {
+      _toast4(text);
+      if (/ثبت|ذخیره|ارسال شد|انجام شد/.test(String(text || ""))) {
+        try {
+          var keys = [];
+          for (var i = 0; i < sessionStorage.length; i++) {
+            var k = sessionStorage.key(i);
+            if (k && k.indexOf("lb.draft.") === 0) keys.push(k);
+          }
+          keys.forEach(function (k) { sessionStorage.removeItem(k); });
+        } catch (e) {}
+      }
+    };
+  }
+
+  /* 9) هایلایت فیلد فوکوس‌شده parent */
+  document.addEventListener("focusin", function (e) {
+    document.querySelectorAll(".lb-field-active").forEach(function (x) {
+      x.classList.remove("lb-field-active");
+    });
+    var t = e.target;
+    if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) {
+      var p = t.closest(".lb-field, .lb-input-wrap, label, div");
+      if (p) p.classList.add("lb-field-active");
+    }
+  });
+
+  /* 10) لمس بیرون input = blur (بستن کیبورد) */
+  document.addEventListener("touchend", function (e) {
+    var a = document.activeElement;
+    if (!a || !/INPUT|TEXTAREA/.test(a.tagName)) return;
+    if (e.target === a || (a.contains && a.contains(e.target))) return;
+    if (e.target.closest && e.target.closest("button, a, label")) return;
+    a.blur();
+  }, { passive: true });
+
+  /* 11) نشانگر پر شدن فرم (درصد فیلدهای پر) */
+  window.lbFormProgress = function (form) {
+    if (!form) return 0;
+    var fields = form.querySelectorAll("input, textarea, select");
+    var n = 0, f = 0;
+    fields.forEach(function (el) {
+      if (el.type === "hidden" || el.disabled) return;
+      n++;
+      if ((el.value || "").trim()) f++;
+    });
+    return n ? Math.round((f / n) * 100) : 0;
+  };
+
+  /* 12) ارتعاش خطا روی lbShake */
+  var _shake = window.lbShake;
+  if (typeof _shake === "function") {
+    window.lbShake = function (el) {
+      _shake(el);
+      try { if (window.lbHaptic) window.lbHaptic("error"); } catch (e) {}
+    };
+  }
+
+  /* 13) تشخیص صفحه RTL اجباری */
+  document.documentElement.setAttribute("dir", "rtl");
+  document.documentElement.lang = document.documentElement.lang || "fa";
+
+  /* 14) کلاس وضعیت شبکه online/offline روی html */
+  function syncOnlineClass() {
+    document.documentElement.classList.toggle("lb-online", navigator.onLine !== false);
+    document.documentElement.classList.toggle("lb-offline", navigator.onLine === false);
+  }
+  window.addEventListener("online", syncOnlineClass);
+  window.addEventListener("offline", syncOnlineClass);
+  syncOnlineClass();
+
+  /* 15) جلوگیری از باز شدن چند لایتبکس */
+  var _lb2 = window.lbLightbox;
+  if (typeof _lb2 === "function") {
+    window.lbLightbox = function (src) {
+      var old = document.getElementById("lb-lightbox");
+      if (old) old.remove();
+      _lb2(src);
+    };
+  }
+
+  /* 16) انیمیشن عدد بج ناو */
+  function animateBadges() {
+    document.querySelectorAll("nav .lb-nav-badge, nav span.absolute").forEach(function (b) {
+      if (b.dataset.lbAnim === b.textContent) return;
+      b.dataset.lbAnim = b.textContent;
+      b.classList.remove("lb-badge-pop");
+      void b.offsetWidth;
+      b.classList.add("lb-badge-pop");
+    });
+  }
+
+  /* 17) long-press روی ناو = haptic + جلوگیری از context menu */
+  document.addEventListener("contextmenu", function (e) {
+    if (e.target.closest && e.target.closest("nav, header")) e.preventDefault();
+  });
+
+  /* 18) همگام safe-area CSS variables از env */
+  function syncSafe() {
+    /* env() در CSS هست؛ فقط کلاس کمکی */
+    document.documentElement.classList.add("lb-safe");
+  }
+  syncSafe();
+
+  /* 19) پاک کردن session search با دکمه clear */
+  document.addEventListener("click", function (e) {
+    if (!e.target.classList || !e.target.classList.contains("lb-clear-btn")) return;
+    try { sessionStorage.removeItem("lb.search"); } catch (err) {}
+  });
+
+  /* 20) گزارش آماده‌بودن UI */
+  window.lbUiReady = true;
+  try {
+    window.dispatchEvent(new CustomEvent("lb:ui-ready"));
+  } catch (e) {}
+
+  var _prevTick7 = tickUi;
+  tickUi = function () {
+    if (typeof _prevTick7 === "function") _prevTick7();
+    try {
+      wireStickyFilterShadow();
+      wireSearchMemory();
+      animateBadges();
+    } catch (e) {}
+  };
+
 })();

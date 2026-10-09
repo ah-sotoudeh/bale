@@ -2860,3 +2860,130 @@ main button.lb-chip.on::after,
 main button.rounded-full.bg-link::after {
   height: 2.5px !important;
 }
+
+
+/* ========== ۲۰ بهبود بعدی ========== */
+
+/* فیلتر sticky با سایه */
+main .lb-chips.lb-sticky-on {
+  box-shadow: 0 4px 12px rgba(15, 40, 60, 0.06);
+  border-bottom-color: var(--lb-primary) !important;
+}
+
+/* ارتفاع واقعی ویوپورت */
+main.overflow-y-auto {
+  max-height: var(--lb-vh, 100dvh);
+}
+
+/* فوکوس فیلد — والد */
+.lb-field-active {
+  border-radius: 10px;
+}
+
+/* بج pop */
+.lb-badge-pop {
+  animation: lb-badge-pop 0.35s ease;
+}
+@keyframes lb-badge-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* آفلاین: کم‌رنگ کردن اکشن‌های اصلی */
+html.lb-offline main button.bg-link {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* فوکوس فیلد: مخفی FAB */
+html.lb-field-focus .lb-fab,
+html.lb-field-focus .lb-scroll-top {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* safe area helper */
+html.lb-safe body {
+  min-height: 100dvh;
+}
+
+/* ناو: ناحیه لمس بزرگ‌تر بدون تغییر ظاهر */
+nav button {
+  touch-action: manipulation;
+}
+
+/* هدر نقش‌ها manipulation */
+header button {
+  touch-action: manipulation;
+}
+
+/* لیست: جداکننده نرم‌تر */
+main .rounded-2xl.bg-surface {
+  transition: background 0.15s ease, outline 0.15s ease;
+}
+
+/* اسکلت کوتاه‌تر در صفحات شلوغ */
+main.lb-compact .lb-list-skeleton .lb-skel-card {
+  padding: 10px;
+}
+
+/* عنوان صفحه وقتی scrolled */
+html.lb-scrolled .lb-brand-logo {
+  width: 22px !important;
+  height: 22px !important;
+}
+
+/* toast حداکثر عرض در تبلت */
+@media (min-width: 480px) {
+  .lb-toast {
+    max-width: 360px !important;
+  }
+}
+
+/* دکمه‌های pill در هدر: جلوگیری از select متن */
+header, nav {
+  -webkit-user-select: none;
+  user-select: none;
+}
+main input, main textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* وضعیت ok روی empty-note بعد از اقدام */
+.empty-note.lb-success-empty {
+  border-color: color-mix(in srgb, var(--lb-success) 40%, var(--lb-border)) !important;
+  background: var(--lb-success-bg) !important;
+  color: var(--lb-success) !important;
+}
+
+/* کاهش فاصله نقش‌ها در scrolled */
+html.lb-scrolled header > div.px-3 {
+  transform: scale(0.98);
+  transform-origin: top center;
+}
+
+/* فوکوس واضح‌تر select */
+main select:focus {
+  border-color: var(--lb-primary) !important;
+}
+
+/* کارت قیمت: اعداد کمی بزرگ‌تر */
+main .rounded-2xl .font-bold.text-link {
+  font-size: 0.95em;
+}
+
+/* خطای فیلد زیر clear button نیاید روی دکمه */
+.lb-input-wrap .lb-field-err {
+  padding-left: 4px;
+}
+
+/* اسکرول بار نازک در وب‌کیت */
+main.overflow-y-auto::-webkit-scrollbar {
+  width: 3px;
+}
+main.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--lb-text-3) 40%, transparent);
+  border-radius: 99px;
+}
