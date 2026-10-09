@@ -908,24 +908,33 @@ main .bg-link.rounded-2xl {
   background: var(--lb-primary) !important;
 }
 
-/* ========== بج عددی دایره‌ای (نوار پایین) ========== */
+/* ========== بج عددی: سمت چپ آیکون (نه روی مرکز) ========== */
+nav button {
+  position: relative !important;
+}
+
+nav button > span.relative,
+nav button span.relative {
+  position: relative !important;
+  display: inline-flex !important;
+}
+
 nav button span.absolute,
-nav button .rounded-full.bg-danger,
-nav span.absolute.grid.min-w-4 {
+nav button .rounded-full.bg-danger {
   position: absolute !important;
-  top: -2px !important;
-  inset-inline-end: -6px !important;
-  inset-inline-start: auto !important;
-  left: auto !important;
+  top: -4px !important;
+  /* سمت چپ فیزیکی آیکون */
+  left: -8px !important;
   right: auto !important;
+  inset-inline: auto !important;
   display: grid !important;
   place-items: center !important;
-  min-width: 16px !important;
-  width: auto !important;
+  width: 16px !important;
   height: 16px !important;
+  min-width: 16px !important;
   min-height: 16px !important;
-  padding: 0 4px !important;
-  border-radius: 999px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
   background: var(--lb-danger) !important;
   color: #fff !important;
   font-size: 9px !important;
@@ -933,13 +942,7 @@ nav span.absolute.grid.min-w-4 {
   line-height: 1 !important;
   box-shadow: 0 0 0 1.5px var(--lb-header);
   z-index: 2;
-}
-
-/* یک‌رقمی کاملاً دایره */
-nav button span.absolute:not(:empty) {
-  aspect-ratio: 1;
-  min-width: 16px;
-  padding-inline: 0 !important;
+  pointer-events: none;
 }
 
 /* ========== فیلترها مثل بله: متن کنار هم + خط زیر انتخاب ========== */
@@ -1058,4 +1061,153 @@ header button.rounded-full.bg-link {
 
 header button.rounded-full.bg-link::after {
   display: none !important;
+}
+
+
+/* ========== همه فیلترهای قرص‌شکل → تب خطی شبیه بله ========== */
+main button.min-h-9.rounded-full,
+main button.min-h-8.rounded-full,
+main button.min-h-11.rounded-full,
+main button.shrink-0.rounded-full.px-3,
+main .flex button.rounded-full.px-3,
+main .flex-wrap button.rounded-full {
+  flex: 0 0 auto !important;
+  position: relative !important;
+  min-height: 34px !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 6px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+}
+
+/* حالت انتخاب‌شده: رنگ فیروزه‌ای + خط زیر */
+main button.min-h-9.rounded-full.bg-link,
+main button.min-h-8.rounded-full.bg-link,
+main button.min-h-11.rounded-full.bg-link,
+main button.rounded-full.bg-link.text-on,
+main button.rounded-full.px-3.bg-link,
+main button.rounded-full.font-semibold.bg-link,
+main button.rounded-full.text-on {
+  background: transparent !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
+}
+
+main button.min-h-9.rounded-full.bg-link::after,
+main button.min-h-8.rounded-full.bg-link::after,
+main button.min-h-11.rounded-full.bg-link::after,
+main button.rounded-full.bg-link.text-on::after,
+main button.rounded-full.px-3.bg-link::after,
+main button.rounded-full.text-on::after {
+  content: "" !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  inset-inline: 8px !important;
+  height: 2.5px !important;
+  border-radius: 999px 999px 0 0 !important;
+  background: var(--lb-primary) !important;
+}
+
+/* ردیف فیلترها: افقی اسکرول، خط زیر کل ردیف */
+main .flex.flex-wrap:has(> button.rounded-full),
+main .flex:has(> button.min-h-9.rounded-full),
+main .flex.gap-1:has(> button.rounded-full),
+main .flex.gap-1\.5:has(> button.rounded-full),
+main .flex.gap-2:has(> button.rounded-full) {
+  flex-wrap: nowrap !important;
+  gap: 0 !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--lb-border);
+  margin-bottom: 8px;
+  padding-bottom: 0;
+}
+
+main .flex.flex-wrap:has(> button.rounded-full)::-webkit-scrollbar {
+  display: none;
+}
+
+/* نقش هدر را دست نزن */
+header button.rounded-full {
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+}
+header button.rounded-full.bg-link {
+  background: var(--lb-primary) !important;
+  color: var(--lb-on-primary) !important;
+}
+header button.rounded-full::after {
+  display: none !important;
+}
+
+/* ========== بهبود کلی UI از روی اسکرین‌ها ========== */
+
+/* کارت‌های لیست کانال/سفارش */
+main .rounded-2xl.bg-surface {
+  border-radius: 12px !important;
+  border: 1px solid var(--lb-border) !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+/* قیمت و اعداد لیست خواناتر */
+main .font-bold {
+  letter-spacing: -0.01em;
+}
+
+/* متن راهنما بالای فیلدها */
+main .text-\[10px\].text-muted,
+main p.text-\[10px\] {
+  font-size: 10px !important;
+  line-height: 1.5 !important;
+  opacity: 0.9;
+}
+
+/* دکمه تمام‌عرض اصلی کمی ظریف‌تر */
+main button.w-full.bg-link,
+main button.bg-link.w-full {
+  min-height: 40px !important;
+  border-radius: 10px !important;
+  font-size: 13px !important;
+}
+
+/* فاصله بین بخش‌ها */
+main > section,
+main > div.mb-3 {
+  margin-bottom: 0.65rem !important;
+}
+
+/* آواتار/آیکون کانال گرد منظم */
+main img.rounded-full,
+main .rounded-full.bg-header {
+  border-radius: 50% !important;
+}
+
+/* نوار پایین: آیکون‌ها با فاصله از بج */
+nav {
+  padding-top: 6px !important;
+}
+nav button {
+  padding-top: 4px !important;
+  overflow: visible !important;
+}
+nav button svg {
+  overflow: visible;
+}
+
+/* سرچ */
+main input[type="search"],
+main input[placeholder*="جستجو"],
+main input[placeholder*="شناسه"] {
+  min-height: 36px !important;
+  border-radius: 10px !important;
 }
