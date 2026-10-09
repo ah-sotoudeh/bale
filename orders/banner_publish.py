@@ -28,7 +28,8 @@ def linkbank_channel() -> str:
 
 
 def banner_fee_toman() -> int:
-    return int(os.environ.get('LINKBANK_BANNER_FEE_TOMAN', '140000'))
+    # ساخت بنر رایگان است
+    return 0
 
 
 def operator_chat_id() -> str:
@@ -46,9 +47,7 @@ def count_linkbank_banners(user: User) -> int:
 
 
 def fee_for_user(user: User) -> int:
-    if count_linkbank_banners(user) == 0:
-        return 0
-    return banner_fee_toman()
+    return 0
 
 
 def user_facing_error(code: str) -> str:
@@ -110,11 +109,6 @@ def _notify_operator(req: BannerPublishRequest) -> None:
     if not op:
         logger.warning('OPERATOR_BALE_ID not set; cannot notify for banner request #%s', req.id)
         return
-    try:
-        bc.forward_message(op, req.storage_chat_id, int(req.storage_message_id))
-    except Exception:
-        logger.exception('forward to operator failed')
-    fee_txt = 'رایگان (بنر اول)' if req.fee_toman == 0 else f'{req.fee_toman:,} تومان'
     ch = linkbank_channel()
     kb = bc.inline_keyboard([
         [
@@ -122,14 +116,48 @@ def _notify_operator(req: BannerPublishRequest) -> None:
             {'text': '❌ رد', 'callback_data': f'brej:{req.id}'},
         ]
     ])
-    bc.send_message(
-        op,
+    title = ''
+    if req.customer_banner_id:
+        try:
+            title = req.customer_banner.display_title()
+        except Exception:
+            title = ''
+    caption = (req.caption or '').strip()
+    preview = caption[:400] + ('…' if len(caption) > 400 else '')
+    text = (
         f'🆕 درخواست بنر\n'
         f'#{req.id} | مشتری {req.customer.bale_user_id}\n'
-        f'هزینه ثبت: {fee_txt}\n'
-        f'پس از تأیید در {ch} منتشر می‌شود (دائمی).',
-        reply_markup=kb,
+        f'عنوان: {title or "—"}\n'
+        f'رایگان — پس از تأیید در {ch} منتشر می‌شود.\n'
+        f'{preview}'
     )
+    sent_media = False
+    if req.customer_banner_id:
+        try:
+            from orders.banner_media import stored_banner_file
+            path = stored_banner_file(int(req.customer_banner_id))
+            if path is not None and path.is_file():
+                kind = (req.media_kind or '').lower()
+                if kind in ('video', 'animation'):
+                    r = bc.send_video(op, str(path), caption=text[:900])
+                elif kind == 'document':
+                    r = bc.send_document(op, str(path), caption=text[:900])
+                else:
+                    r = bc.send_photo(op, str(path), caption=text[:900])
+                sent_media = bool(r.get('ok'))
+        except Exception:
+            logger.exception('send banner media to operator failed')
+    if not sent_media:
+        try:
+            sid = str(req.storage_chat_id or '')
+            mid = str(req.storage_message_id or '')
+            if mid.isdigit() and (sid.lstrip('-').isdigit() or sid.startswith('@')):
+                bc.forward_message(op, sid, int(mid))
+        except Exception:
+            logger.exception('forward to operator failed')
+        bc.send_message(op, text, reply_markup=kb)
+    else:
+        bc.send_message(op, f'دکمه‌های بررسی بنر #{req.id}:', reply_markup=kb)
 
 
 @transaction.atomic
@@ -184,7 +212,6 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     try:
         from orders.banner_media import materialize_banner_file
         from integrations import linkyar_client as ly
-        from orders.models import CustomerBanner as CB
 
         bn0 = req.customer_banner
         path = None
@@ -195,7 +222,6 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
             except Exception:
                 logger.exception('materialize banner')
         if path is None:
-            # از storage بات دانلود
             try:
                 from orders.banner_media import _pull_stored_message
                 if bn0 is not None:
@@ -221,11 +247,35 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     except Exception:
         logger.exception('linkyar publish_to_linkbank')
 
-    # fallback: فوروارد بات (برای linkbank_message_id بات)
+    # fallback: فوروارد بات یا ارسال فایل محلی (بنر مینی‌اپ)
     if not linkyar_rid:
-        fwd = bc.forward_message(lb, req.storage_chat_id, int(req.storage_message_id))
+        fwd = {'ok': False}
+        sid = str(req.storage_chat_id or '')
+        mid = str(req.storage_message_id or '')
+        if mid.isdigit() and (sid.lstrip('-').isdigit() or sid.startswith('@')):
+            fwd = bc.forward_message(lb, sid, int(mid))
+            if not fwd.get('ok'):
+                fwd = bc.copy_message(lb, sid, int(mid))
         if not fwd.get('ok'):
-            fwd = bc.copy_message(lb, req.storage_chat_id, int(req.storage_message_id))
+            try:
+                from orders.banner_media import stored_banner_file, materialize_banner_file
+                path = None
+                if req.customer_banner_id:
+                    path = stored_banner_file(int(req.customer_banner_id))
+                    if path is None:
+                        path = materialize_banner_file(req.customer_banner)
+                if path is not None and path.is_file():
+                    kind = (req.media_kind or 'photo').lower()
+                    cap = req.caption or ''
+                    if kind in ('video', 'animation'):
+                        fwd = bc.send_video(lb, str(path), caption=cap[:900])
+                    elif kind == 'document':
+                        fwd = bc.send_document(lb, str(path), caption=cap[:900])
+                    else:
+                        fwd = bc.send_photo(lb, str(path), caption=cap[:900])
+            except Exception:
+                logger.exception('publish local banner file to linkbank')
+                fwd = {'ok': False}
         if not fwd.get('ok'):
             logger.error('publish to %s failed', lb)
             return {
