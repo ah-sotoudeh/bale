@@ -735,21 +735,12 @@ var reset = document.getElementById("lb-theme-reset");
 
   /* 6) نشان «جدید» — اگر ردیف سفارش تازه در DOM آمد */
   function markNewRows() {
-    document.querySelectorAll("main .rounded-2xl.bg-surface").forEach(function (card) {
-      if (card.dataset.lbSeen) return;
-      card.dataset.lbSeen = "1";
-      // فقط چند مورد اول بعد از mount
-      if (!window.__lbMarkNew) return;
-      if (card.querySelector(".lb-new-badge")) return;
-      var b = document.createElement("span");
-      b.className = "lb-new-badge";
-      b.textContent = "جدید";
-      card.style.position = "relative";
-      card.appendChild(b);
+    /* نشان «جدید» فقط از دادهٔ API روی فهرست مشتری (is_new) — نه تزریق عمومی */
+    document.querySelectorAll(".lb-new-badge:not(.lb-new-real)").forEach(function (b) {
+      b.remove();
     });
   }
-  window.__lbMarkNew = true;
-  setTimeout(function () { window.__lbMarkNew = false; }, 8000);
+  window.__lbMarkNew = false;
 
   /* 10) انیمیشن تعویض نقش */
   document.addEventListener("click", function (e) {

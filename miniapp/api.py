@@ -120,6 +120,11 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'description': (getattr(ch, 'description', '') or '')[:500],
         'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
         'avatar_url': f'/miniapp/api/channels/{ch.id}/avatar',
+        'created_at': ch.created_at.isoformat() if getattr(ch, 'created_at', None) else '',
+        'is_new': bool(
+            getattr(ch, 'created_at', None)
+            and (timezone.now() - ch.created_at).total_seconds() < 86400
+        ),
         'history': history or [],
     }
 

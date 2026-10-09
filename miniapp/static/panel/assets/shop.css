@@ -3482,3 +3482,25 @@ header > div:first-child > span.grid {
 .lb-input-wrap > .lb-clear-btn[hidden] {
   display: none !important;
 }
+
+
+/* نشان جدید — فقط فهرست مشتری (کنار نام) */
+.lb-new-badge.lb-new-real {
+  position: static !important;
+  display: inline-block !important;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+  top: auto !important;
+  left: auto !important;
+  padding: 1px 6px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  border-radius: 999px !important;
+  background: var(--lb-primary) !important;
+  color: var(--lb-on-primary) !important;
+  line-height: 1.3 !important;
+}
+/* هر بج تزریقی قدیمی را پنهان کن */
+.lb-new-badge:not(.lb-new-real) {
+  display: none !important;
+}
