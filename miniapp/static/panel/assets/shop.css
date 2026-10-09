@@ -3504,3 +3504,125 @@ header > div:first-child > span.grid {
 .lb-new-badge:not(.lb-new-real) {
   display: none !important;
 }
+
+
+/* ========== جزئیات کانال مدیر ========== */
+.lb-ch-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lb-ch-d1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lb-ch-d1-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lb-ch-d-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--lb-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-ch-d-id {
+  font-size: 11px;
+  color: var(--lb-text-3);
+  direction: ltr;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-ch-edit-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--lb-border);
+  border-radius: 10px;
+  background: var(--lb-surface-2);
+  color: var(--lb-text-2);
+  font-size: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.lb-ch-d2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-inline-start: 46px; /* هم‌تراز زیر نام، کنار آواتار */
+  margin-top: -2px;
+}
+.lb-ch-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--lb-surface-2);
+  color: var(--lb-text-2);
+  white-space: nowrap;
+}
+.lb-ch-chip.ok {
+  background: var(--lb-success-bg);
+  color: var(--lb-success);
+}
+.lb-ch-refresh {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--lb-border);
+  border-radius: 50%;
+  background: var(--lb-surface);
+  color: var(--lb-primary);
+  font-size: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin-inline-start: auto;
+}
+.lb-ch-edit-panel {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--lb-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb-ch-edit-input {
+  margin: 0 !important;
+}
+.lb-ch-edit-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+}
+.lb-ch-act {
+  flex: 1 1 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface-2);
+  color: var(--lb-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.lb-ch-act.primary {
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  border-color: var(--lb-primary);
+}
+.lb-ch-act.danger {
+  background: var(--lb-danger-bg);
+  color: var(--lb-danger);
+  border-color: color-mix(in srgb, var(--lb-danger) 30%, var(--lb-border));
+}
