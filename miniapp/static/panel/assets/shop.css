@@ -3774,3 +3774,96 @@ header .lb-react-back-hidden {
 }
 .lb-gt-msg.ok { color: var(--lb-success); }
 .lb-gt-msg.err { color: var(--lb-danger); }
+
+
+/* ========== ساخت مجموعه ========== */
+.lb-group-panel {
+  margin: 12px 0 24px;
+  padding: 0;
+}
+.lb-gp-toggle {
+  width: 100%;
+  min-height: 44px;
+  border: 1.5px dashed color-mix(in srgb, var(--lb-primary) 45%, var(--lb-border));
+  border-radius: 12px;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.lb-gp-form {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface);
+}
+.lb-gp-lead {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--lb-text-3);
+  line-height: 1.5;
+}
+.lb-gp-chans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.lb-gp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lb-text-2);
+  cursor: pointer;
+}
+.lb-gp-chip:has(input:checked) {
+  border-color: var(--lb-primary);
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+}
+.lb-gp-chip input { accent-color: var(--lb-primary); }
+.lb-gp-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-bg);
+  color: var(--lb-text);
+  font-size: 13px;
+}
+.lb-gp-avatar-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lb-text-2);
+  margin-bottom: 4px;
+}
+.lb-gp-save {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.lb-gp-msg { margin: 8px 0 0; font-size: 12px; font-weight: 600; }
+.lb-gp-msg.ok { color: var(--lb-success); }
+.lb-gp-msg.err { color: var(--lb-danger); }
+
+/* hide old broken panel if present */
+#lb-group-tariff { display: none !important; }

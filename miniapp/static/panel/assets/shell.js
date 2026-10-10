@@ -2439,177 +2439,177 @@ var reset = document.getElementById("lb-theme-reset");
   document.documentElement.classList.remove("lb-booting");
   document.documentElement.classList.add("lb-hydrated");
 
-  var _prevTick8 = tickUi;
+
+  var _prevTick8 = typeof tickUi === "function" ? tickUi : function () {};
   tickUi = function () {
     if (typeof _prevTick8 === "function") _prevTick8();
     try {
-      wireOverscroll();
-      restoreFilterScrol
-  /* تعرفه گروهی روی برگه کانال‌ها */
-  function syncGroupTariffPanel() {
+      if (typeof wireOverscroll === "function") wireOverscroll();
+      if (typeof restoreFilterScroll === "function") restoreFilterScroll();
+      if (typeof syncHeaderBack === "function") syncHeaderBack();
+      if (typeof syncGroupPanel === "function") syncGroupPanel();
+    } catch (e) {}
+  };
+
+  /* —— ساخت مجموعه کانال (وقتی بیش از ۱ کانال) —— */
+  function lbApiHeaders() {
+    var headers = { "Content-Type": "application/json" };
+    try {
+      var init = (window.Bale && Bale.WebApp && Bale.WebApp.initData) || "";
+      if (init) headers["X-Bale-Init-Data"] = init;
+    } catch (e) {}
+    return headers;
+  }
+  function lbApiBase() {
+    return window.__LIVE_API || "/miniapp/api";
+  }
+
+  function syncGroupPanel() {
     var h1 = document.querySelector("header h1");
     var title = h1 ? (h1.textContent || "").trim() : "";
     var main = document.querySelector("main");
     if (!main) return;
-    var panel = document.getElementById("lb-group-tariff");
-    var onChannels = title === "کانال‌ها" || title.indexOf("کانال") === 0;
-    /* فقط لیست کانال‌ها نه جزئیات */
-    var isDetail = title === "کانال" || title === "جزئیات";
-    if (!onChannels || isDetail) {
+
+    var panel = document.getElementById("lb-group-panel");
+    /* فقط صفحه فهرست کانال‌ها (نه جزئیات تک‌کانال) */
+    var onList = title === "کانال‌ها";
+    if (!onList) {
       if (panel) panel.hidden = true;
       return;
     }
+
+    /* شمار کانال‌های لیست */
+    var chBtns = main.querySelectorAll("button.lb-ch-row, .lb-ch-row");
+    var count = chBtns.length;
+    if (count < 2) {
+      if (panel) panel.hidden = true;
+      return;
+    }
+
     if (!panel) {
       panel = document.createElement("div");
-      panel.id = "lb-group-tariff";
-      panel.className = "lb-group-tariff rounded-2xl bg-surface";
+      panel.id = "lb-group-panel";
+      panel.className = "lb-group-panel";
       panel.innerHTML =
-        '<h2 class="lb-gt-title">تعرفه مجموعه‌ای</h2>' +
-        '<p class="lb-gt-lead">چند کانال را انتخاب کنید و یک قیمت مشترک بگذارید.</p>' +
-        '<div class="lb-gt-chans" id="lb-gt-chans"></div>' +
-        '<input class="lb-gt-input" id="lb-gt-name" placeholder="نام طرح (مثلاً پکیج ۳ کانال)" />' +
-        '<div class="lb-gt-row">' +
-        '<input class="lb-gt-input" id="lb-gt-hours" inputmode="numeric" placeholder="مدت (ساعت)" />' +
-        '<input class="lb-gt-input" id="lb-gt-price" inputmode="numeric" placeholder="قیمت تومان" />' +
-        '</div>' +
-        '<button type="button" class="lb-gt-save" id="lb-gt-save">ثبت تعرفه مجموعه‌ای</button>' +
-        '<p class="lb-gt-msg" id="lb-gt-msg" hidden></p>';
+        '<button type="button" class="lb-gp-toggle" id="lb-gp-toggle">＋ ساخت مجموعه</button>' +
+        '<div class="lb-gp-form" id="lb-gp-form" hidden>' +
+        '<p class="lb-gp-lead">چند کانال را انتخاب کنید و یک نام برای مجموعه بگذارید. پروفایل پیش‌فرض: کانال با بیشترین عضو.</p>' +
+        '<div class="lb-gp-chans" id="lb-gp-chans"></div>' +
+        '<input class="lb-gp-input" id="lb-gp-name" placeholder="نام مجموعه" />' +
+        '<label class="lb-gp-avatar-label">پروفایل مجموعه (اختیاری)</label>' +
+        '<select class="lb-gp-input" id="lb-gp-avatar"><option value="">خودکار — بیشترین عضو</option></select>' +
+        '<button type="button" class="lb-gp-save" id="lb-gp-save">ثبت مجموعه</button>' +
+        '<p class="lb-gp-msg" id="lb-gp-msg" hidden></p>' +
+        "</div>";
       main.appendChild(panel);
-      panel.querySelector("#lb-gt-save").addEventListener("click", submitGroupTariff);
+      panel.querySelector("#lb-gp-toggle").addEventListener("click", function () {
+        var f = document.getElementById("lb-gp-form");
+        if (!f) return;
+        f.hidden = !f.hidden;
+        if (!f.hidden) loadGroupChannelOptions();
+      });
+      panel.querySelector("#lb-gp-save").addEventListener("click", submitGroupCreate);
     }
     panel.hidden = false;
-    fillGroupChannels(panel);
+    /* اگر فرم باز است، گزینه‌ها را تازه کن */
+    var form = document.getElementById("lb-gp-form");
+    if (form && !form.hidden) loadGroupChannelOptions();
   }
 
-  function fillGroupChannels(panel) {
-    var box = panel.querySelector("#lb-gt-chans");
+  function loadGroupChannelOptions() {
+    var box = document.getElementById("lb-gp-chans");
+    var av = document.getElementById("lb-gp-avatar");
     if (!box) return;
-    var rows = document.querySelectorAll("main .lb-ch-row, main button.lb-ch-row");
-    /* از نام‌های نمایشی در لیست */
-    var items = [];
-    document.querySelectorAll("main ul li button.lb-ch-row, main button.lb-ch-row").forEach(function (btn) {
-      var name = (btn.querySelector(".lb-ch-name") || {}).textContent || "";
-      name = name.trim();
-      if (!name) return;
-      items.push(name);
+    var checked = {};
+    box.querySelectorAll("input:checked").forEach(function (inp) {
+      checked[inp.value] = true;
     });
-    if (!items.length) {
-      /* fallback: any channel name in list */
-      document.querySelectorAll("main ul li button .lb-ch-name").forEach(function (el) {
-        var name = (el.textContent || "").trim();
-        if (name) items.push(name);
-      });
-    }
-    var prev = {};
-    box.querySelectorAll("label input").forEach(function (inp) {
-      if (inp.checked) prev[inp.value] = true;
-    });
-    box.innerHTML = "";
-    /* نیاز به id کانال — از data یا store */
-    try {
-      var st = null;
-      /* Zustand store sometimes on window */
-    } catch (e) {}
-    items.forEach(function (name, idx) {
-      var id = "lb-gt-c-" + idx;
-      var lab = document.createElement("label");
-      lab.className = "lb-gt-chip";
-      var inp = document.createElement("input");
-      inp.type = "checkbox";
-      inp.value = name;
-      inp.dataset.name = name;
-      if (prev[name]) inp.checked = true;
-      lab.appendChild(inp);
-      lab.appendChild(document.createTextNode(" " + name));
-      box.appendChild(lab);
-    });
+    var prevAv = av ? av.value : "";
+    fetch(lbApiBase() + "/channels", { headers: lbApiHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var chans = (data && data.channels) || [];
+        box.innerHTML = "";
+        if (av) {
+          av.innerHTML = '<option value="">خودکار — بیشترین عضو</option>';
+        }
+        chans.forEach(function (c) {
+          var id = String(c.id);
+          var lab = document.createElement("label");
+          lab.className = "lb-gp-chip";
+          var inp = document.createElement("input");
+          inp.type = "checkbox";
+          inp.value = id;
+          inp.dataset.name = c.name || "";
+          inp.dataset.members = String(c.members_count || 0);
+          if (checked[id]) inp.checked = true;
+          lab.appendChild(inp);
+          var mem = Number(c.members_count) || 0;
+          var memLabel = mem >= 1000 ? (mem / 1000).toFixed(1).replace(/\\.0$/, "") + "k" : String(mem);
+          lab.appendChild(document.createTextNode(" " + (c.name || id) + " (" + memLabel + ")"));
+          box.appendChild(lab);
+          if (av) {
+            var opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = (c.name || id) + " — پروفایل";
+            if (prevAv === id) opt.selected = true;
+            av.appendChild(opt);
+          }
+        });
+      })
+      .catch(function () {});
   }
 
-  function submitGroupTariff() {
-    var msg = document.getElementById("lb-gt-msg");
+  function submitGroupCreate() {
+    var msg = document.getElementById("lb-gp-msg");
     function show(t, ok) {
       if (!msg) return;
       msg.hidden = false;
       msg.textContent = t;
-      msg.className = "lb-gt-msg " + (ok ? "ok" : "err");
+      msg.className = "lb-gp-msg " + (ok ? "ok" : "err");
     }
-    var checked = Array.prototype.slice.call(document.querySelectorAll("#lb-gt-chans input:checked"));
-    if (checked.length < 2) {
+    var ids = [];
+    document.querySelectorAll("#lb-gp-chans input:checked").forEach(function (inp) {
+      ids.push(parseInt(inp.value, 10));
+    });
+    if (ids.length < 2) {
       show("حداقل ۲ کانال انتخاب کنید");
       return;
     }
-    var name = (document.getElementById("lb-gt-name") || {}).value || "";
-    name = name.trim();
-    var hours = parseInt(String((document.getElementById("lb-gt-hours") || {}).value || "").replace(/[^\d]/g, ""), 10);
-    var price = parseInt(String((document.getElementById("lb-gt-price") || {}).value || "").replace(/[^\d]/g, ""), 10);
-    if (!name || !hours || hours <= 0 || isNaN(price) || price < 0) {
-      show("نام، مدت و قیمت را کامل کنید");
+    var name = ((document.getElementById("lb-gp-name") || {}).value || "").trim();
+    if (!name) {
+      show("نام مجموعه را بنویسید");
       return;
     }
-    /* resolve channel ids from live API list via names */
-    var api = window.__LIVE_API || "/miniapp/api";
-    var init = "";
-    try {
-      init = (window.Bale && Bale.WebApp && Bale.WebApp.initData) || "";
-    } catch (e) {}
-    var headers = { "Content-Type": "application/json" };
-    if (init) headers["X-Bale-Init-Data"] = init;
+    var avatarId = ((document.getElementById("lb-gp-avatar") || {}).value || "").trim();
+    var body = { name: name, channel_ids: ids };
+    if (avatarId) body.avatar_channel_id = parseInt(avatarId, 10);
 
-    fetch(api + "/channels", { headers: headers })
+    fetch(lbApiBase() + "/groups/add", {
+      method: "POST",
+      headers: lbApiHeaders(),
+      body: JSON.stringify(body),
+    })
       .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var chans = (data && data.channels) || [];
-        var ids = [];
-        checked.forEach(function (inp) {
-          var nm = inp.dataset.name || inp.value;
-          var found = chans.find(function (c) {
-            return (c.name || "").trim() === nm.trim();
-          });
-          if (found) ids.push(found.id);
-        });
-        if (ids.length < 2) {
-          show("شناسه کانال‌ها پیدا نشد؛ صفحه را تازه کنید");
-          return null;
-        }
-        return fetch(api + "/groups/add", {
-          method: "POST",
-          headers: headers,
-          body: JSON.stringify({ name: name, channel_ids: ids }),
-        }).then(function (r) { return r.json(); }).then(function (g) {
-          if (!g || !g.ok) throw new Error((g && g.message) || "خطا در ساخت مجموعه");
-          var gid = g.group && g.group.id;
-          return fetch(api + "/tariffs/add", {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify({
-              group_id: gid,
-              name: name,
-              duration_hours: hours,
-              price: price,
-              start_hour: 12,
-            }),
-          }).then(function (r) { return r.json(); });
-        });
-      })
-      .then(function (t) {
-        if (!t) return;
-        if (!t.ok) throw new Error(t.message || "خطا در تعرفه");
-        show("تعرفه مجموعه‌ای ثبت شد", true);
-        if (window.lbToast) window.lbToast("تعرفه مجموعه‌ای ثبت شد");
+      .then(function (g) {
+        if (!g || !g.ok) throw new Error((g && (g.message || g.error)) || "خطا در ساخت مجموعه");
+        show("مجموعه ثبت شد", true);
+        if (window.lbToast) window.lbToast("مجموعه «" + name + "» ساخته شد");
+        var form = document.getElementById("lb-gp-form");
+        if (form) form.hidden = true;
+        var nameInp = document.getElementById("lb-gp-name");
+        if (nameInp) nameInp.value = "";
+        /* رفرش داده */
         window.dispatchEvent(new CustomEvent("lb:refresh"));
-        try {
-          if (window.location && window.location.reload) {
-            /* soft: hydrate if possible */
-          }
-        } catch (e) {}
+        setTimeout(function () {
+          try {
+            if (window.location) window.location.reload();
+          } catch (e) {}
+        }, 600);
       })
       .catch(function (err) {
-        show(String(err.message || err || "خطا"));
+        show(String((err && err.message) || err || "خطا"));
       });
   }
-
-l();
-    } catch (e) {}
-  };
 
 })();
