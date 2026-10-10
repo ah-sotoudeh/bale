@@ -572,14 +572,16 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
     g = ChannelGroup.objects.create(name=name, manager=user)
     g.channels.set(chans)
     av = body.get('avatar_channel_id')
-    if av:
-        try:
-            av = int(av)
-            if any(c.id == av for c in chans) and hasattr(g, 'avatar_channel_id'):
-                g.avatar_channel_id = av
-                g.save(update_fields=['avatar_channel_id'])
-        except (TypeError, ValueError):
-            pass
+    try:
+        av = int(av) if av not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        av = None
+    if av is None and chans:
+        top = max(chans, key=lambda c: (getattr(c, 'members_count', 0) or 0, c.id))
+        av = top.id
+    if av and any(c.id == av for c in chans):
+        g.avatar_channel_id = av
+        g.save(update_fields=['avatar_channel_id'])
     return JsonResponse({'ok': True, 'group': _group_payload(g)})
 
 
@@ -605,6 +607,18 @@ def api_group_update(request: HttpRequest) -> JsonResponse:
         if len(chans) != len(set(int(x) for x in raw_ids)):
             return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
         g.channels.set(chans)
+    if 'avatar_channel_id' in body:
+        av = body.get('avatar_channel_id')
+        try:
+            av = int(av) if av not in (None, '', 0, '0') else None
+        except (TypeError, ValueError):
+            av = None
+        if av is None:
+            g.avatar_channel_id = None
+            g.save(update_fields=['avatar_channel_id'])
+        elif g.channels.filter(id=av).exists():
+            g.avatar_channel_id = av
+            g.save(update_fields=['avatar_channel_id'])
     return JsonResponse({'ok': True, 'group': _group_payload(g)})
 
 

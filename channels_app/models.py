@@ -91,6 +91,7 @@ class ChannelGroup(models.Model):
         related_name='channel_groups',
     )
     channels = models.ManyToManyField(Channel, related_name='groups', blank=True)
+    avatar_channel_id = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

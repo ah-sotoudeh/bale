@@ -2452,15 +2452,17 @@ var reset = document.getElementById("lb-theme-reset");
   };
 
 
-  /* —— ساخت مجموعه کانال (انتخاب پایدار + UI شبیه بله) —— */
+
+  /* —— ساخت مجموعه: انتخاب روی همان لیست کانال‌ها —— */
   window.__lbGroupSel = window.__lbGroupSel || {};
   window.__lbGroupState = window.__lbGroupState || {
     open: false,
-    channels: null, /* cached list */
+    channels: null,
     avatarChannelId: null,
     avatarFile: null,
     avatarPreview: null,
   };
+
 
   function lbApiHeaders() {
     var headers = { "Content-Type": "application/json" };
@@ -2485,11 +2487,23 @@ var reset = document.getElementById("lb-theme-reset");
     if (!onList) {
       if (panel) panel.hidden = true;
       document.documentElement.classList.remove("lb-group-picking");
+      clearRowPickBindings();
       return;
     }
 
-    var chBtns = main.querySelectorAll("button.lb-ch-row, .lb-ch-row");
-    if (chBtns.length < 2) {
+    var chBtns = main.querySelectorAll("button.lb-ch-row");
+    /* فقط کانال‌های تکی — ردیف مجموعه را نادیده بگیر */
+    var channelRows = [];
+    chBtns.forEach(function (btn) {
+      var mode = btn.querySelector(".lb-ch-mode");
+      var modeTxt = mode ? (mode.textContent || "") : "";
+      /* ردیف مجموعه معمولاً «N کانال» دارد نه حالت انتشار */
+      if (modeTxt.indexOf("کانال") >= 0 && modeTxt.indexOf("تعرفه") < 0) {
+        /* could be group - skip if has «کانال» as unit without publish mode */
+      }
+      channelRows.push(btn);
+    });
+    if (channelRows.length < 2) {
       if (panel) panel.hidden = true;
       document.documentElement.classList.remove("lb-group-picking");
       return;
@@ -2500,12 +2514,16 @@ var reset = document.getElementById("lb-theme-reset");
       panel.id = "lb-group-panel";
       panel.className = "lb-group-panel";
       panel.innerHTML =
-        '<button type="button" class="lb-gp-toggle" id="lb-gp-toggle">＋ ساخت مجموعه</button>' +
+        '<button type="button" class="lb-gp-toggle" id="lb-gp-toggle">' +
+        '<svg class="lb-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>' +
+        ' ساخت مجموعه</button>' +
         '<div class="lb-gp-body" id="lb-gp-body" hidden>' +
-        '  <div class="lb-gp-list" id="lb-gp-list"></div>' +
+        '  <p class="lb-gp-hint">کانال‌های بالا را انتخاب کنید، بعد نام مجموعه را بنویسید.</p>' +
         '  <div class="lb-gp-footer">' +
-        '    <button type="button" class="lb-gp-ava-btn" id="lb-gp-ava-btn" title="پروفایل مجموعه" aria-label="پروفایل مجموعه">' +
-        '      <span class="lb-gp-ava-ph" id="lb-gp-ava-ph">📷</span>' +
+        '    <button type="button" class="lb-gp-ava-btn" id="lb-gp-ava-btn" title="پروفایل مجموعه" aria-label="پروفایل">' +
+        '      <span class="lb-gp-ava-ph" id="lb-gp-ava-ph">' +
+        '        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/><path d="M19 8v0"/></svg>' +
+        '      </span>' +
         '      <img class="lb-gp-ava-img" id="lb-gp-ava-img" alt="" hidden />' +
         '    </button>' +
         '    <input class="lb-gp-name" id="lb-gp-name" placeholder="نام مجموعه" />' +
@@ -2520,8 +2538,15 @@ var reset = document.getElementById("lb-theme-reset");
       panel.querySelector("#lb-gp-toggle").addEventListener("click", function () {
         var st = window.__lbGroupState;
         st.open = !st.open;
-        applyGroupOpenState();
-        if (st.open) ensureGroupChannelsLoaded(true);
+        if (st.open) {
+          ensureGroupChannelsLoaded(function () {
+            applyGroupOpenState();
+            bindRowPickMode();
+          });
+        } else {
+          applyGroupOpenState();
+          clearRowPickBindings();
+        }
       });
       panel.querySelector("#lb-gp-save").addEventListener("click", submitGroupCreate);
       panel.querySelector("#lb-gp-ava-btn").addEventListener("click", function (e) {
@@ -2548,7 +2573,12 @@ var reset = document.getElementById("lb-theme-reset");
       }, true);
     }
     panel.hidden = false;
-    applyGroupOpenState();
+    if (window.__lbGroupState.open) {
+      bindRowPickMode();
+      applyGroupOpenState();
+    } else {
+      applyGroupOpenState();
+    }
   }
 
   function applyGroupOpenState() {
@@ -2557,19 +2587,22 @@ var reset = document.getElementById("lb-theme-reset");
     var toggle = document.getElementById("lb-gp-toggle");
     if (!body || !toggle) return;
     body.hidden = !st.open;
-    toggle.textContent = st.open ? "بستن ساخت مجموعه" : "＋ ساخت مجموعه";
     toggle.classList.toggle("lb-gp-toggle-open", !!st.open);
+    var label = st.open ? "انصراف" : "ساخت مجموعه";
+    toggle.innerHTML =
+      (st.open
+        ? '<svg class="lb-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg> '
+        : '<svg class="lb-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> ') +
+      label;
     document.documentElement.classList.toggle("lb-group-picking", !!st.open);
   }
 
-  function ensureGroupChannelsLoaded(force) {
+  function ensureGroupChannelsLoaded(cb) {
     var st = window.__lbGroupState;
-    if (st.channels && !force) {
-      renderGroupList();
+    if (st.channels) {
+      if (cb) cb();
       return;
     }
-    var list = document.getElementById("lb-gp-list");
-    if (list) list.innerHTML = '<p class="lb-gp-loading">در حال بارگذاری کانال‌ها…</p>';
     fetch(lbApiBase() + "/channels", { headers: lbApiHeaders() })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -2578,11 +2611,9 @@ var reset = document.getElementById("lb-theme-reset");
           return (Number(b.members_count) || 0) - (Number(a.members_count) || 0);
         });
         st.channels = chans;
-        renderGroupList();
+        if (cb) cb();
       })
-      .catch(function () {
-        if (list) list.innerHTML = '<p class="lb-gp-msg err">بارگذاری کانال‌ها ناموفق بود</p>';
-      });
+      .catch(function () { if (cb) cb(); });
   }
 
   function memLabel(n) {
@@ -2594,64 +2625,75 @@ var reset = document.getElementById("lb-theme-reset");
     return String(n);
   }
 
-  function renderGroupList() {
+  function matchRowToChannel(btn) {
     var st = window.__lbGroupState;
-    var list = document.getElementById("lb-gp-list");
-    if (!list || !st.channels) return;
-    var sel = window.__lbGroupSel;
-    list.innerHTML = "";
-    st.channels.forEach(function (c) {
-      var id = String(c.id);
-      var row = document.createElement("button");
-      row.type = "button";
-      row.className = "lb-gp-row" + (sel[id] ? " lb-gp-on" : "");
-      row.dataset.id = id;
+    if (!st.channels) return null;
+    var nameEl = btn.querySelector(".lb-ch-name");
+    var name = nameEl ? (nameEl.textContent || "").trim() : (btn.textContent || "").trim();
+    /* skip group rows: meta has «N کانال» without publish mode labels */
+    var mode = btn.querySelector(".lb-ch-mode");
+    var modeTxt = mode ? (mode.textContent || "") : "";
+    if (/^\d+\s*کانال$/.test(modeTxt.trim()) || modeTxt.indexOf("کانال") >= 0 && modeTxt.indexOf("دستی") < 0 && modeTxt.indexOf("لینک") < 0 && modeTxt.indexOf("بازو") < 0 && modeTxt.indexOf("تعرفه") >= 0) {
+      /* group row often ends with تعرفه count - still a channel can have تعرفه */
+    }
+    /* groups are pushed with name group - they also use lb-ch-row. Detect: mode contains only «N تعرفه» and meta has «N کانال» */
+    var metas = btn.querySelectorAll(".lb-ch-meta");
+    var metaJoined = "";
+    metas.forEach(function (m) { metaJoined += " " + (m.textContent || ""); });
+    if (metaJoined.indexOf("کانال") >= 0 && modeTxt.indexOf("تعرفه") >= 0 && modeTxt.indexOf("دستی") < 0 && modeTxt.indexOf("لینک") < 0 && modeTxt.indexOf("بازو") < 0) {
+      return null; /* group row */
+    }
+    for (var i = 0; i < st.channels.length; i++) {
+      var c = st.channels[i];
+      if ((c.name || "").trim() === name) return c;
+    }
+    return null;
+  }
 
-      var ava = document.createElement("span");
-      ava.className = "lb-gp-row-ava";
-      if (c.avatar_url) {
-        var img = document.createElement("img");
-        img.src = c.avatar_url;
-        img.alt = "";
-        img.onerror = function () { img.style.display = "none"; };
-        ava.appendChild(img);
+  function clearRowPickBindings() {
+    document.querySelectorAll("button.lb-ch-row.lb-gp-bound").forEach(function (btn) {
+      btn.classList.remove("lb-gp-bound", "lb-gp-on");
+      var chk = btn.querySelector(".lb-gp-check");
+      if (chk) chk.remove();
+      if (btn._lbGpHandler) {
+        btn.removeEventListener("click", btn._lbGpHandler, true);
+        btn._lbGpHandler = null;
       }
-      var letter = document.createElement("span");
-      letter.textContent = (c.name || "?").slice(0, 1);
-      ava.appendChild(letter);
+    });
+  }
 
-      var meta = document.createElement("span");
-      meta.className = "lb-gp-row-meta";
-      var name = document.createElement("span");
-      name.className = "lb-gp-row-name";
-      name.textContent = c.name || id;
-      var sub = document.createElement("span");
-      sub.className = "lb-gp-row-sub";
-      sub.textContent = memLabel(c.members_count) + " عضو";
-      meta.appendChild(name);
-      meta.appendChild(sub);
-
-      var check = document.createElement("span");
-      check.className = "lb-gp-check";
-      check.setAttribute("aria-hidden", "true");
-
-      row.appendChild(ava);
-      row.appendChild(meta);
-      row.appendChild(check);
-
-      row.addEventListener("click", function (e) {
+  function bindRowPickMode() {
+    var st = window.__lbGroupState;
+    if (!st.open) return;
+    var sel = window.__lbGroupSel;
+    document.querySelectorAll("main button.lb-ch-row").forEach(function (btn) {
+      var ch = matchRowToChannel(btn);
+      if (!ch) return;
+      var id = String(ch.id);
+      btn.classList.add("lb-gp-bound");
+      btn.classList.toggle("lb-gp-on", !!sel[id]);
+      var chk = btn.querySelector(".lb-gp-check");
+      if (!chk) {
+        chk = document.createElement("span");
+        chk.className = "lb-gp-check";
+        chk.setAttribute("aria-hidden", "true");
+        btn.appendChild(chk);
+      }
+      if (btn._lbGpHandler) return;
+      btn._lbGpHandler = function (e) {
+        if (!window.__lbGroupState.open) return;
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         if (sel[id]) delete sel[id];
         else sel[id] = true;
-        row.classList.toggle("lb-gp-on", !!sel[id]);
-        /* اگر آواتار روی کانال حذف‌شده بود، پاک کن */
-        if (!sel[id] && st.avatarChannelId === parseInt(id, 10)) {
+        btn.classList.toggle("lb-gp-on", !!sel[id]);
+        if (!sel[id] && st.avatarChannelId === ch.id) {
           st.avatarChannelId = null;
           updateAvatarButton();
         }
-      });
-      list.appendChild(row);
+      };
+      btn.addEventListener("click", btn._lbGpHandler, true);
     });
   }
 
@@ -2674,7 +2716,7 @@ var reset = document.getElementById("lb-theme-reset");
     var upload = document.createElement("button");
     upload.type = "button";
     upload.className = "lb-gp-menu-item";
-    upload.textContent = "بارگذاری از گالری";
+    upload.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> بارگذاری از گالری';
     upload.addEventListener("click", function (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -2682,12 +2724,11 @@ var reset = document.getElementById("lb-theme-reset");
       if (file) file.click();
     });
     menu.appendChild(upload);
-
     selected.forEach(function (c) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "lb-gp-menu-item";
-      btn.textContent = (c.name || c.id) + " · " + memLabel(c.members_count);
+      btn.textContent = (c.name || c.id) + " · " + memLabel(c.members_count) + " عضو";
       btn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -2706,7 +2747,7 @@ var reset = document.getElementById("lb-theme-reset");
     if (!selected.length) {
       var hint = document.createElement("p");
       hint.className = "lb-gp-menu-hint";
-      hint.textContent = "اول کانال‌ها را انتخاب کنید";
+      hint.textContent = "اول از لیست بالا کانال انتخاب کنید";
       menu.appendChild(hint);
     }
     menu.hidden = false;
@@ -2723,9 +2764,8 @@ var reset = document.getElementById("lb-theme-reset");
     var ph = document.getElementById("lb-gp-ava-ph");
     if (!img || !ph) return;
     var url = st.avatarPreview;
-    if (!url && st.avatarChannelId && st.channels) {
-      var ch = st.channels.find(function (c) { return c.id === st.avatarChannelId; });
-      if (ch && ch.avatar_url) url = ch.avatar_url;
+    if (!url && st.avatarChannelId) {
+      url = "/miniapp/api/channels/" + st.avatarChannelId + "/avatar";
     }
     if (url) {
       img.src = url;
@@ -2735,7 +2775,6 @@ var reset = document.getElementById("lb-theme-reset");
       img.hidden = true;
       img.removeAttribute("src");
       ph.hidden = false;
-      ph.textContent = "＋";
     }
   }
 
@@ -2749,7 +2788,7 @@ var reset = document.getElementById("lb-theme-reset");
     }
     var ids = Object.keys(window.__lbGroupSel || {}).map(function (x) { return parseInt(x, 10); }).filter(Boolean);
     if (ids.length < 2) {
-      show("حداقل ۲ کانال انتخاب کنید");
+      show("حداقل ۲ کانال از لیست بالا انتخاب کنید");
       return;
     }
     var name = ((document.getElementById("lb-gp-name") || {}).value || "").trim();
@@ -2760,7 +2799,6 @@ var reset = document.getElementById("lb-theme-reset");
     var st = window.__lbGroupState;
     var body = { name: name, channel_ids: ids };
     if (st.avatarChannelId) body.avatar_channel_id = st.avatarChannelId;
-    /* آپلود فایل فعلاً به صورت کانال مرجع ذخیره می‌شود تا بک‌اند جدا نیاز نباشد */
 
     fetch(lbApiBase() + "/groups/add", {
       method: "POST",
@@ -2780,6 +2818,7 @@ var reset = document.getElementById("lb-theme-reset");
           URL.revokeObjectURL(st.avatarPreview);
           st.avatarPreview = null;
         }
+        clearRowPickBindings();
         applyGroupOpenState();
         var nameInp = document.getElementById("lb-gp-name");
         if (nameInp) nameInp.value = "";
