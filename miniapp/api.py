@@ -34,7 +34,7 @@ def _json_body(request: HttpRequest) -> Dict[str, Any]:
 
 
 def _init_from_request(request: HttpRequest) -> str:
-    body = _json_body(request) if request.method == 'POST' else {}
+    body = _json_body(request)
     return (
         request.headers.get('X-Bale-Init-Data')
         or request.META.get('HTTP_X_BALE_INIT_DATA')
@@ -131,31 +131,47 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
 
 def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonResponse]]:
     init_data = _init_from_request(request)
-    ok, payload = validate_init_data(init_data)
-    if not ok:
-        from miniapp.auth import allow_debug_auth
+    body = _json_body(request) if request.method in ('POST', 'PUT', 'PATCH') else {}
+    soft_user = body.get('soft_user') if isinstance(body.get('soft_user'), dict) else {}
+    hdr_uid = str(
+        request.headers.get('X-Bale-User-Id')
+        or request.META.get('HTTP_X_BALE_USER_ID')
+        or body.get('bale_user_id')
+        or ''
+    ).strip()
 
+    ok, payload = validate_init_data(init_data)
+    uid = ''
+    meta: Dict[str, Any] = {}
+    if ok:
+        meta = payload.get('user') or {}
+        uid = str(meta.get('id') or '')
+    if not uid and soft_user.get('id') is not None:
+        uid = str(soft_user['id'])
+        meta = soft_user
+    if not uid and hdr_uid:
+        uid = hdr_uid
+        meta = soft_user or meta
+
+    if not uid:
+        from miniapp.auth import allow_debug_auth
         if allow_debug_auth():
-            debug_id = request.GET.get('debug_bale_id') or _json_body(request).get('debug_bale_id')
+            debug_id = request.GET.get('debug_bale_id') or body.get('debug_bale_id')
             if debug_id:
                 user, _ = User.objects.get_or_create(
                     bale_user_id=str(debug_id),
                     defaults={'username': f'mini_{debug_id}'[:30]},
                 )
                 return user, None
-        code = payload.get('error') or 'unauthorized'
+        code = (payload or {}).get('error') or 'unauthorized'
         return None, _fail(code, 401)
-
-    uid = str((payload.get('user') or {}).get('id') or '')
-    if not uid:
-        return None, _fail('no_user', 401)
 
     user = User.objects.filter(bale_user_id=uid).first()
     if not user:
-        uname = (payload.get('user') or {}).get('username') or f'bale_{uid}'
+        uname = meta.get('username') or f'bale_{uid}'
         user = User(username=str(uname)[:30], bale_user_id=uid)
         user.set_unusable_password()
-        user.bale_username = (payload.get('user') or {}).get('username')
+        user.bale_username = meta.get('username')
         user.save()
     return user, None
 
