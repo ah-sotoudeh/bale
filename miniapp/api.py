@@ -165,7 +165,35 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
 
     ok, payload = validate_init_data(init_data)
     if not ok:
-        from miniapp.auth import allow_debug_auth
+        from miniapp.auth import allow_debug_auth, parse_user_from_init
+
+        # نشست قبلی موفق (بعد از /me) — اگر هدر این‌بار نرسید
+        try:
+            sess_uid = request.session.get('lb_bale_uid')
+            if sess_uid:
+                user = User.objects.filter(bale_user_id=str(sess_uid)).first()
+                if user:
+                    return user, None
+        except Exception:
+            pass
+
+        # soft: اگر فقط user JSON قابل خواندن باشد
+        soft_user = parse_user_from_init(init_data) if init_data else {}
+        if soft_user.get('id') is not None:
+            uid = str(soft_user['id'])
+            user = User.objects.filter(bale_user_id=uid).first()
+            if not user:
+                uname = soft_user.get('username') or f'bale_{uid}'
+                user = User(username=str(uname)[:30], bale_user_id=uid)
+                user.set_unusable_password()
+                user.bale_username = soft_user.get('username')
+                user.save()
+            try:
+                request.session['lb_bale_uid'] = uid
+                request.session.modified = True
+            except Exception:
+                pass
+            return user, None
 
         if allow_debug_auth():
             debug_id = request.GET.get('debug_bale_id') or _json_body(request).get('debug_bale_id')
@@ -189,6 +217,11 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
         user.set_unusable_password()
         user.bale_username = (payload.get('user') or {}).get('username')
         user.save()
+    try:
+        request.session['lb_bale_uid'] = uid
+        request.session.modified = True
+    except Exception:
+        pass
     return user, None
 
 
@@ -206,6 +239,9 @@ def api_me(request: HttpRequest) -> JsonResponse:
     ch_count = Channel.objects.filter(manager=user).count()
     is_op = ws.is_operator(user.bale_user_id or '')
     debug_user = is_debug_user(user.bale_user_id or '')
+    # دیباگ‌ها هم پنل پشتیبانی ببینند (مثل بازو)
+    if debug_user:
+        is_op = True
     can_switch = _can_switch_roles(user.bale_user_id or '')
     demo_role = getattr(request, '_lb_demo_role', None)
     if demo_role == 'operator':
@@ -720,7 +756,7 @@ def api_tariffs(request: HttpRequest) -> JsonResponse:
 
     qs = Tariff.objects.filter(Q(channel__manager=user) | Q(group__manager=user)).select_related(
         'channel', 'group'
-    ).order_by('-id')[:50]
+    ).order_by('-id')[:200]
     items = []
     for t in qs:
         items.append({
