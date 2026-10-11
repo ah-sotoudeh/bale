@@ -1,5 +1,199 @@
 /* پوستهٔ تم، برگهٔ حساب و ترجیح‌های کاربر. منطق سفارش این‌جا نیست. */
 (function () {
+
+  /* —— حالت دمو بدون بله —— */
+  (function lbDemoBoot() {
+    try {
+      var q = new URLSearchParams(location.search || "");
+      var demo = q.get("demo") === "1" || localStorage.getItem("lb.demo") === "1";
+      var role = q.get("role") || localStorage.getItem("lb.demoRole") || "customer";
+      if (q.get("demo") === "1") {
+        localStorage.setItem("lb.demo", "1");
+        if (q.get("role")) localStorage.setItem("lb.demoRole", role);
+      }
+      if (!demo) return;
+      window.__LB_DEMO = true;
+      window.__LB_DEMO_ROLE = role;
+      var _fetch = window.fetch;
+      window.fetch = function (input, init) {
+        init = init || {};
+        var headers = new Headers(init.headers || {});
+        headers.set("X-Demo-Mode", "1");
+        headers.set("X-Demo-Role", window.__LB_DEMO_ROLE || "customer");
+        init.headers = headers;
+        var url = typeof input === "string" ? input : (input && input.url) || "";
+        if (url && url.indexOf("/miniapp/api") >= 0 && url.indexOf("demo=") < 0) {
+          var sep = url.indexOf("?") >= 0 ? "&" : "?";
+          url = url + sep + "demo=1&role=" + encodeURIComponent(window.__LB_DEMO_ROLE || "customer");
+          if (typeof input === "string") input = url;
+        }
+        return _fetch.call(this, input, init);
+      };
+      /* نقش را بعد از لود به store بزن */
+      function applyDemoRole() {
+        try {
+          var map = { manager: "manager", customer: "customer", operator: "operator" };
+          var r = map[window.__LB_DEMO_ROLE] || "customer";
+          if (window.Z && Z.getState && Z.getState().setRole) Z.getState().setRole(r);
+          /* کلیک روی دکمه نقش اگر هست */
+          document.querySelectorAll("header button, .lb-acc-role").forEach(function (b) {
+            var t = (b.textContent || "").trim();
+            if (r === "manager" && /کانال|مدیر/.test(t)) b.click();
+            if (r === "customer" && /مشتری/.test(t)) b.click();
+            if (r === "operator" && /پشتیبانی|اپراتور/.test(t)) b.click();
+          });
+        } catch (e) {}
+      }
+      setTimeout(applyDemoRole, 800);
+      setTimeout(applyDemoRole, 2000);
+      /* نوار دمو */
+      function banner() {
+        if (document.getElementById("lb-demo-banner")) return;
+        var el = document.createElement("div");
+        el.id = "lb-demo-banner";
+        el.className = "lb-demo-banner";
+        el.innerHTML =
+          '<span>حالت دمو</span>' +
+          '<select id="lb-demo-role-sel">' +
+          '<option value="customer">مشتری</option>' +
+          '<option value="manager">مدیر کانال</option>' +
+          '<option value="operator">پشتیبان</option>' +
+          "</select>";
+        document.body.appendChild(el);
+        var sel = el.querySelector("select");
+        sel.value = window.__LB_DEMO_ROLE || "customer";
+        sel.addEventListener("change", function () {
+          window.__LB_DEMO_ROLE = sel.value;
+          localStorage.setItem("lb.demoRole", sel.value);
+          location.search = "?demo=1&role=" + encodeURIComponent(sel.value);
+        });
+      }
+      if (document.body) banner();
+      else document.addEventListener("DOMContentLoaded", banner);
+    } catch (e) {}
+  })();
+
+  /* —— تایم‌لاین وضعیت سفارش (الگوی ad-marketplace) —— */
+  var ORDER_STEPS = [
+    { key: "waiting_banner", label: "بنر" },
+    { key: "waiting_managers", label: "مدیر" },
+    { key: "waiting_customer_confirm", label: "تأیید" },
+    { key: "waiting_payment", label: "پرداخت" },
+    { key: "paid", label: "انتشار" },
+    { key: "completed", label: "پایان" },
+  ];
+  function orderStepIndex(status) {
+    for (var i = 0; i < ORDER_STEPS.length; i++) if (ORDER_STEPS[i].key === status) return i;
+    if (status === "rejected" || status === "cancelled") return -1;
+    return 0;
+  }
+  function injectOrderTimelines() {
+    try {
+      document.querySelectorAll("[data-order-status], .lb-order-card, main li").forEach(function (card) {
+        if (card.querySelector(".lb-timeline")) return;
+        var st =
+          card.getAttribute("data-order-status") ||
+          card.getAttribute("data-status") ||
+          "";
+        if (!st) {
+          var txt = card.textContent || "";
+          if (/منتظر پرداخت/.test(txt)) st = "waiting_payment";
+          else if (/منتظر پاسخ مدیر/.test(txt)) st = "waiting_managers";
+          else if (/منتظر تأیید بنر/.test(txt)) st = "waiting_banner";
+          else if (/پرداخت شد|در حال انتشار/.test(txt)) st = "paid";
+          else if (/تمام شد|تکمیل/.test(txt)) st = "completed";
+          else return;
+        }
+        var idx = orderStepIndex(st);
+        var tl = document.createElement("div");
+        tl.className = "lb-timeline";
+        ORDER_STEPS.forEach(function (s, i) {
+          var step = document.createElement("div");
+          step.className =
+            "lb-tl-step" + (idx < 0 ? "" : i < idx ? " done" : i === idx ? " current" : "");
+          step.innerHTML = '<span class="lb-tl-dot"></span><span class="lb-tl-lab">' + s.label + "</span>";
+          tl.appendChild(step);
+        });
+        card.appendChild(tl);
+      });
+    } catch (e) {}
+  }
+
+  /* —— فیلتر کاتالوگ مشتری —— */
+  function ensureCatalogFilters() {
+    try {
+      var h1 = document.querySelector("header h1");
+      var title = h1 ? (h1.textContent || "").trim() : "";
+      var main = document.querySelector("main");
+      if (!main) return;
+      var isCatalog =
+        title === "لینک‌بان" ||
+        title === "خانه" ||
+        title.indexOf("کانال") >= 0 && document.body.innerText.indexOf("تعرفه") >= 0;
+      /* فقط نقش مشتری */
+      var roleBtn = document.querySelector("header button.rounded-full.bg-link, .lb-acc-role.on");
+      var roleTxt = roleBtn ? (roleBtn.textContent || "") : "";
+      var customer =
+        /مشتری/.test(roleTxt) ||
+        (window.__LB_DEMO_ROLE === "customer") ||
+        (!roleTxt && !(window.__LB_DEMO_ROLE === "manager" || window.__LB_DEMO_ROLE === "operator"));
+      var bar = document.getElementById("lb-cat-filters");
+      if (!customer) {
+        if (bar) bar.hidden = true;
+        return;
+      }
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "lb-cat-filters";
+        bar.className = "lb-cat-filters";
+        bar.innerHTML =
+          '<button type="button" class="lb-cat-chip on" data-f="all">همه</button>' +
+          '<button type="button" class="lb-cat-chip" data-f="m10">بالای ۱۰هزار عضو</button>' +
+          '<button type="button" class="lb-cat-chip" data-f="m40">بالای ۴۰هزار</button>' +
+          '<button type="button" class="lb-cat-chip" data-f="p100">زیر ۱۰۰ هزار تومان</button>' +
+          '<button type="button" class="lb-cat-chip" data-f="p200">زیر ۲۰۰ هزار</button>';
+        main.insertBefore(bar, main.firstChild);
+        bar.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-f]");
+          if (!b) return;
+          bar.querySelectorAll(".lb-cat-chip").forEach(function (x) {
+            x.classList.toggle("on", x === b);
+          });
+          applyCatalogFilter(b.getAttribute("data-f"));
+        });
+      }
+      bar.hidden = false;
+    } catch (e) {}
+  }
+  function applyCatalogFilter(f) {
+    document.querySelectorAll("main button.lb-ch-row, main li").forEach(function (row) {
+      var t = row.textContent || "";
+      var show = true;
+      var mem = 0;
+      var mk = t.match(/([\\d٫,\\.]+)\\s*k?\\s*عضو/);
+      if (mk) {
+        var raw = mk[1].replace(/[٫,]/g, ".");
+        mem = parseFloat(raw) || 0;
+        if (/k/i.test(mk[0])) mem *= 1000;
+      }
+      /* اعداد فارسی */
+      var fa = "۰۱۲۳۴۵۶۷۸۹";
+      var eng = t.replace(/[۰-۹]/g, function (d) {
+        return String(fa.indexOf(d));
+      });
+      var priceM = eng.match(/([\\d,]+)\\s*تومان/);
+      var price = priceM ? parseInt(priceM[1].replace(/,/g, ""), 10) : 0;
+      if (f === "m10") show = mem >= 10000;
+      if (f === "m40") show = mem >= 40000;
+      if (f === "p100") show = price > 0 && price < 100000;
+      if (f === "p200") show = price > 0 && price < 200000;
+      row.style.display = show ? "" : "none";
+    });
+  }
+
+  /* tick: timeline + filters */
+  var _tickUi = typeof tickUi === "function" ? tickUi : null;
+
   var root = document.documentElement;
 
   function headerColor() {

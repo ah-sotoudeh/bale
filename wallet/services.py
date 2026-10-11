@@ -389,5 +389,9 @@ def mark_batch_paid(batch_id: int) -> Dict[str, Any]:
 
 
 def is_operator(bale_user_id: str) -> bool:
+    if str(bale_user_id) in ('demo_operator_1', 'demo_manager_1'):
+        # دمو: اپراتور همیشه؛ مدیر دمو فقط برای سوییچ نقش در UI
+        if str(bale_user_id) == 'demo_operator_1':
+            return True
     op = (os.environ.get('OPERATOR_BALE_ID') or OPERATOR_BALE_ID or '').strip()
     return bool(op) and str(bale_user_id) == str(op)

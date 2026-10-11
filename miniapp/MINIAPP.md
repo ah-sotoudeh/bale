@@ -11,3 +11,21 @@
 - پنل مدیر: کانال، نحوه ارسال، تعرفه، تقویم شمسی ۱۴ روزه، نوبت دستی، سفارش، کیف پول
 - پنل مشتری: بنر، فهرست، روز خالی، سبد، تسویه
 - پنل پشتیبانی: تأیید بنر، فایل تسویه ریالی بانک، ثبت پایا
+
+## حالت دمو (بدون بله)
+
+```
+/miniapp/?demo=1&role=customer
+/miniapp/?demo=1&role=manager
+/miniapp/?demo=1&role=operator
+```
+
+- برای مدیر دمو کانال و تعرفه نمونه ساخته می‌شود.
+- در پروداکشن می‌توانید `DEMO_MINIAPP=0` بگذارید و دسترسی دمو را محدود کنید (فعلاً با `?demo=1` فعال است).
+- نوار پایین صفحه نقش دمو را عوض می‌کند.
+
+### Pipeline سفارش
+`waiting_banner → waiting_managers → waiting_customer_confirm → waiting_payment → paid → completed`
+
+### تأیید ماندن پست
+`bot_flow/post_verify.py` — `flag_item_if_missing(order_item_id)`

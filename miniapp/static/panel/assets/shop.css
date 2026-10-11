@@ -4261,3 +4261,123 @@ button.lb-ch-row.lb-gp-on .lb-gp-check {
 }
 .lb-edit-pen:active { background: var(--lb-primary-soft); color: var(--lb-primary); }
 .lb-ico { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+
+
+/* —— دمو —— */
+.lb-demo-banner {
+  position: fixed;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lb-text-2);
+}
+.lb-demo-banner select {
+  border: 0;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* —— تایم‌لاین سفارش —— */
+.lb-timeline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 8px 4px 4px;
+  border-top: 1px solid var(--lb-border);
+}
+.lb-tl-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.35;
+}
+.lb-tl-step.done,
+.lb-tl-step.current { opacity: 1; }
+.lb-tl-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--lb-border);
+  border: 2px solid var(--lb-surface);
+}
+.lb-tl-step.done .lb-tl-dot { background: var(--lb-primary); }
+.lb-tl-step.current .lb-tl-dot {
+  background: var(--lb-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lb-primary) 25%, transparent);
+}
+.lb-tl-lab {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--lb-text-3);
+  text-align: center;
+}
+.lb-tl-step.current .lb-tl-lab { color: var(--lb-primary); }
+
+/* —— فیلتر کاتالوگ —— */
+.lb-cat-filters {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  margin-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.lb-cat-filters::-webkit-scrollbar { display: none; }
+.lb-cat-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--lb-border);
+  background: var(--lb-surface);
+  color: var(--lb-text-2);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lb-cat-chip.on {
+  border-color: var(--lb-primary);
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+}
+
+/* —— کارت کانال غنی‌تر (مشتری) —— */
+main button.lb-ch-row {
+  min-height: 56px;
+}
+main button.lb-ch-row .lb-ch-ava {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+}
+/* قیمت روی کارت */
+.lb-price-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  font-size: 11px;
+  font-weight: 700;
+}

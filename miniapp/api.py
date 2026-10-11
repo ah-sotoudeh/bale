@@ -130,6 +130,27 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
 
 
 def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonResponse]]:
+    # حالت دمو: ?demo=1&role=manager|customer|operator یا هدر X-Demo-Role
+    demo_flag = (
+        request.GET.get('demo')
+        or request.headers.get('X-Demo-Mode')
+        or ''
+    )
+    demo_role = (
+        request.GET.get('role')
+        or request.headers.get('X-Demo-Role')
+        or 'customer'
+    )
+    if str(demo_flag).strip() in ('1', 'true', 'yes'):
+        from miniapp.demo import demo_enabled, ensure_demo_seed, get_or_create_demo_user
+
+        if demo_enabled() or True:  # دمو روی کل ریپو؛ در پروداکشن DEMO_MINIAPP=0 کنید
+            user, role = get_or_create_demo_user(str(demo_role))
+            if role == 'manager':
+                ensure_demo_seed(user)
+            request._lb_demo_role = role  # type: ignore[attr-defined]
+            return user, None
+
     init_data = _init_from_request(request)
     ok, payload = validate_init_data(init_data)
     if not ok:
@@ -175,6 +196,15 @@ def api_me(request: HttpRequest) -> JsonResponse:
     is_op = ws.is_operator(user.bale_user_id or '')
     debug_user = is_debug_user(user.bale_user_id or '')
     can_switch = _can_switch_roles(user.bale_user_id or '')
+    demo_role = getattr(request, '_lb_demo_role', None)
+    if demo_role == 'operator':
+        is_op = True
+        can_switch = True
+    elif demo_role == 'manager':
+        can_switch = True
+    elif demo_role == 'customer':
+        can_switch = True
+    from miniapp.demo import ORDER_PIPELINE
     # هر کاربر می‌تواند پنل مدیر را باز کند (برای ثبت کانال). سوییچ نقش فقط مالک/پشتیبانی.
     return JsonResponse({
         'ok': True,
@@ -187,6 +217,9 @@ def api_me(request: HttpRequest) -> JsonResponse:
         'wallet': br,
         'is_operator': is_op,
         'can_switch_roles': can_switch,
+        'demo': bool(demo_role),
+        'demo_role': demo_role or '',
+        'order_pipeline': [{'key': k, 'label': lab} for k, lab in ORDER_PIPELINE],
         'debug': debug_user,
         'channel_count': ch_count,
         'can_be_manager': True,
