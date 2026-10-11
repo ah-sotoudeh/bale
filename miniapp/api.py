@@ -139,28 +139,30 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
 
 
 def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonResponse]]:
-    # حالت دمو: ?demo=1&role=manager|customer|operator یا هدر X-Demo-Role
+    init_data = _init_from_request(request)
+
+    # دمو فقط وقتی: صریحاً ?demo=1 و initData واقعی بله نباشد و DEMO_MINIAPP/DEBUG روشن باشد
     demo_flag = (
         request.GET.get('demo')
         or request.headers.get('X-Demo-Mode')
         or ''
     )
-    demo_role = (
-        request.GET.get('role')
-        or request.headers.get('X-Demo-Role')
-        or 'customer'
-    )
-    if str(demo_flag).strip() in ('1', 'true', 'yes'):
+    if str(demo_flag).strip() in ('1', 'true', 'yes') and not init_data:
         from miniapp.demo import demo_enabled, ensure_demo_seed, get_or_create_demo_user
+        from miniapp.auth import allow_debug_auth
 
-        if demo_enabled() or True:  # دمو روی کل ریپو؛ در پروداکشن DEMO_MINIAPP=0 کنید
+        if demo_enabled() or allow_debug_auth():
+            demo_role = (
+                request.GET.get('role')
+                or request.headers.get('X-Demo-Role')
+                or 'customer'
+            )
             user, role = get_or_create_demo_user(str(demo_role))
             if role == 'manager':
                 ensure_demo_seed(user)
             request._lb_demo_role = role  # type: ignore[attr-defined]
             return user, None
 
-    init_data = _init_from_request(request)
     ok, payload = validate_init_data(init_data)
     if not ok:
         from miniapp.auth import allow_debug_auth

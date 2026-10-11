@@ -13,17 +13,34 @@
   } catch (e) {}
 
 
-  /* —— حالت دمو بدون بله —— */
+  /* —— حالت دمو بدون بله —— فقط با ?demo=1 و بدون نشست بله —— */
   (function lbDemoBoot() {
     try {
       var q = new URLSearchParams(location.search || "");
-      var demo = q.get("demo") === "1" || localStorage.getItem("lb.demo") === "1";
-      var role = q.get("role") || localStorage.getItem("lb.demoRole") || "customer";
-      if (q.get("demo") === "1") {
-        localStorage.setItem("lb.demo", "1");
-        if (q.get("role")) localStorage.setItem("lb.demoRole", role);
+      var hasBale =
+        !!(window.Bale && Bale.WebApp && Bale.WebApp.initData) ||
+        !!(window.Telegram && Telegram.WebApp && Telegram.WebApp.initData);
+
+      /* اگر داخل بله هستیم، هر پرچم دموی قدیمی را پاک کن تا داده واقعی بیاید */
+      if (hasBale) {
+        try {
+          localStorage.removeItem("lb.demo");
+          localStorage.removeItem("lb.demoRole");
+        } catch (e) {}
+        window.__LB_DEMO = false;
+        return;
       }
-      if (!demo) return;
+
+      var demo = q.get("demo") === "1";
+      if (!demo) {
+        /* localStorage دمو را دیگر به‌تنهایی فعال نکن */
+        try {
+          localStorage.removeItem("lb.demo");
+        } catch (e) {}
+        return;
+      }
+
+      var role = q.get("role") || "customer";
       window.__LB_DEMO = true;
       window.__LB_DEMO_ROLE = role;
       var _fetch = window.fetch;
@@ -41,13 +58,10 @@
         }
         return _fetch.call(this, input, init);
       };
-      /* نقش را بعد از لود به store بزن */
       function applyDemoRole() {
         try {
           var map = { manager: "manager", customer: "customer", operator: "operator" };
           var r = map[window.__LB_DEMO_ROLE] || "customer";
-          if (window.Z && Z.getState && Z.getState().setRole) Z.getState().setRole(r);
-          /* کلیک روی دکمه نقش اگر هست */
           document.querySelectorAll("header button, .lb-acc-role").forEach(function (b) {
             var t = (b.textContent || "").trim();
             if (r === "manager" && /کانال|مدیر/.test(t)) b.click();
@@ -58,14 +72,13 @@
       }
       setTimeout(applyDemoRole, 800);
       setTimeout(applyDemoRole, 2000);
-      /* نوار دمو */
       function banner() {
         if (document.getElementById("lb-demo-banner")) return;
         var el = document.createElement("div");
         el.id = "lb-demo-banner";
         el.className = "lb-demo-banner";
         el.innerHTML =
-          '<span>حالت دمو</span>' +
+          '<span>حالت دمو (بدون بله)</span>' +
           '<select id="lb-demo-role-sel">' +
           '<option value="customer">مشتری</option>' +
           '<option value="manager">مدیر کانال</option>' +
@@ -76,7 +89,6 @@
         sel.value = window.__LB_DEMO_ROLE || "customer";
         sel.addEventListener("change", function () {
           window.__LB_DEMO_ROLE = sel.value;
-          localStorage.setItem("lb.demoRole", sel.value);
           location.search = "?demo=1&role=" + encodeURIComponent(sel.value);
         });
       }

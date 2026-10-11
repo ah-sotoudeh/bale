@@ -25,9 +25,10 @@ ORDER_PIPELINE = [
 
 
 def demo_enabled() -> bool:
+    """دمو فقط با env صریح — در پروداکشن خاموش بماند مگر DEBUG."""
     return os.environ.get("DEMO_MINIAPP", "").strip().lower() in ("1", "true", "yes") or os.environ.get(
         "ALLOW_MINIAPP_DEBUG", ""
-    ).strip().lower() in ("1", "true", "yes", "true")
+    ).strip().lower() in ("1", "true", "yes")
 
 
 def normalize_role(role: str) -> str:
