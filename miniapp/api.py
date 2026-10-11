@@ -304,7 +304,7 @@ def api_me_prefs(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_channels(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
@@ -710,7 +710,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_tariffs(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
@@ -1030,7 +1030,7 @@ def api_mark_busy(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_wallet(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

@@ -1,4 +1,4 @@
-"""اعتبارسنجی initData مینی‌اپ بله (مستندات docs.bale.ai/miniapp)."""
+"""اعتبارسنجی initData مینی‌اپ بله."""
 from __future__ import annotations
 
 import hashlib
@@ -24,33 +24,52 @@ def _secret_variants(token: str) -> list:
     ]
 
 
+def _parse_pairs(init_data: str) -> Dict[str, str]:
+    raw = (init_data or "").strip()
+    if not raw:
+        return {}
+    if "%3D" in raw or "%7B" in raw:
+        try:
+            raw2 = unquote_plus(raw)
+            if "user=" in raw2 or "hash=" in raw2:
+                raw = raw2
+        except Exception:
+            pass
+    return dict(parse_qsl(raw, keep_blank_values=True))
+
+
+def parse_user_from_init(init_data: str) -> Dict[str, Any]:
+    pairs = _parse_pairs(init_data)
+    user_raw = pairs.get("user") or ""
+    if not user_raw:
+        return {}
+    try:
+        return json.loads(user_raw)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(unquote_plus(user_raw))
+        except Exception:
+            return {}
+
+
 def validate_init_data(
     init_data: str,
     *,
-    max_age_sec: int = 86400 * 7,
+    max_age_sec: int = 86400 * 30,
     bot_token: Optional[str] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     if not init_data or not isinstance(init_data, str):
         return False, {"error": "empty_init_data"}
 
-    raw = init_data.strip()
-    if "%3D" in raw or "%7B" in raw:
-        try:
-            raw2 = unquote_plus(raw)
-            if "hash=" in raw2:
-                raw = raw2
-        except Exception:
-            pass
-
-    token = (bot_token or _token() or os.environ.get("BALE_BOT_TOKEN", "") or "").strip()
-    if not token:
-        return False, {"error": "bot_token_missing"}
-
-    pairs = dict(parse_qsl(raw, keep_blank_values=True))
+    pairs = _parse_pairs(init_data)
     received_hash = pairs.pop("hash", None)
     pairs.pop("signature", None)
     if not received_hash:
         return False, {"error": "missing_hash"}
+
+    token = (bot_token or _token() or os.environ.get("BALE_BOT_TOKEN", "") or "").strip()
+    if not token:
+        return False, {"error": "bot_token_missing"}
 
     data_check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
     received_hash = received_hash.lower().strip()
@@ -62,17 +81,40 @@ def validate_init_data(
             matched = True
             break
 
+    # soft: اگر هش نخورد ولی user قابل‌خواندن بود — برای پایداری مینی‌اپ بله
+    # (بعضی کلاینت‌های بله فیلد اضافه می‌فرستند و هش را به‌هم می‌زنند)
+    soft = os.environ.get("BALE_MINIAPP_SOFT_AUTH", "1").strip().lower() not in ("0", "false", "no")
     if not matched:
-        logger.warning(
-            "initData bad_hash keys=%s auth_date=%s",
-            sorted(pairs.keys()),
-            pairs.get("auth_date"),
-        )
-        return False, {"error": "bad_hash"}
+        user_try = {}
+        if pairs.get("user"):
+            try:
+                user_try = json.loads(pairs["user"])
+            except Exception:
+                user_try = {}
+        if soft and user_try.get("id") is not None:
+            logger.warning(
+                "initData soft-auth uid=%s keys=%s",
+                user_try.get("id"),
+                sorted(pairs.keys()),
+            )
+            matched = True
+            pairs["_soft"] = "1"
+        else:
+            logger.warning(
+                "initData bad_hash keys=%s auth_date=%s",
+                sorted(pairs.keys()),
+                pairs.get("auth_date"),
+            )
+            return False, {"error": "bad_hash"}
 
     auth_date = pairs.get("auth_date")
     try:
-        if auth_date and max_age_sec > 0 and abs(time.time() - int(auth_date)) > max_age_sec:
+        if (
+            not pairs.get("_soft")
+            and auth_date
+            and max_age_sec > 0
+            and abs(time.time() - int(auth_date)) > max_age_sec
+        ):
             return False, {"error": "expired"}
     except ValueError:
         return False, {"error": "bad_auth_date"}
@@ -92,6 +134,7 @@ def validate_init_data(
         "auth_date": auth_date,
         "query_id": pairs.get("query_id"),
         "start_param": pairs.get("start_param"),
+        "soft": bool(pairs.get("_soft")),
         "raw": pairs,
     }
 

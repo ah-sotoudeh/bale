@@ -70,7 +70,7 @@ def _weekly_member_changes(channel_ids):
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_catalog(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

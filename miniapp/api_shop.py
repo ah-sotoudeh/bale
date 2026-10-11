@@ -352,7 +352,7 @@ def api_tariff_delete(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_banners(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
@@ -530,7 +530,7 @@ def api_banner_resubmit(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_cart(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
@@ -722,7 +722,7 @@ def api_answer_time(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_my_orders(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
