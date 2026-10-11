@@ -27,9 +27,30 @@ def _safe(root: Path, name: str) -> Path:
     return file
 
 
+
 @xframe_options_exempt
-def mini_app(_request: HttpRequest) -> HttpResponse:
-    html = (PANEL / 'index.html').read_text(encoding='utf-8')
+def demos_hub(_request: HttpRequest) -> HttpResponse:
+    """دموی UI پروژه‌های متن‌باز (بدون بک‌اند)."""
+    html = (PANEL / 'demos' / 'index.html').read_text(encoding='utf-8')
+    return _framed(HttpResponse(html, content_type='text/html; charset=utf-8'))
+
+
+@xframe_options_exempt
+def demo_page(_request: HttpRequest, name: str) -> HttpResponse:
+    allowed = {'baboon', 'marketplace'}
+    if name not in allowed:
+        raise Http404
+    html = (PANEL / 'demos' / name / 'index.html').read_text(encoding='utf-8')
+    return _framed(HttpResponse(html, content_type='text/html; charset=utf-8'))
+
+
+@xframe_options_exempt
+def mini_app(request: HttpRequest) -> HttpResponse:
+    # موقتاً: بدون پارامتر → هاب دمو؛ ?app=1 → مینی‌اپ خودتان
+    if request.GET.get('app') == '1':
+        html = (PANEL / 'index.html').read_text(encoding='utf-8')
+    else:
+        html = (PANEL / 'demos' / 'index.html').read_text(encoding='utf-8')
     resp = HttpResponse(html, content_type='text/html; charset=utf-8')
     return _framed(resp)
 

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
+<title>Ad Marketplace — UI Demo</title>
+<style>
+:root{--bg:#0a0a0c;--card:#121218;--line:#22222c;--text:#f4f4f5;--muted:#a1a1aa;--primary:#6366f1;--violet:#a78bfa;--ok:#34d399}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);padding-bottom:72px}
+header{position:sticky;top:0;z-index:10;background:rgba(10,10,12,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:1rem}
+header a{color:var(--muted);font-size:.8rem;text-decoration:none}
+.filters{display:flex;gap:6px;padding:10px 12px;overflow-x:auto}
+.chip{flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:.72rem;font-weight:600}
+.chip.on{border-color:var(--primary);color:#c7d2fe;background:rgba(99,102,241,.12)}
+.list{padding:0 12px 16px;display:grid;gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+.top{display:flex;gap:12px}
+.ava{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(20,184,166,.2));border:1px solid rgba(255,255,255,.08);display:grid;place-items:center;font-size:1.2rem;flex-shrink:0}
+.title{font-weight:700;font-size:.95rem}
+.user{font-size:.75rem;color:var(--muted);margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.stat{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:10px 6px;text-align:center}
+.stat b{display:block;font-size:.85rem}
+.stat span{font-size:.65rem;color:var(--muted)}
+.prices{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.p{font-size:.7rem;padding:5px 9px;border-radius:8px;border:1px solid transparent;font-weight:600}
+.p.post{background:rgba(99,102,241,.12);color:#c7d2fe;border-color:rgba(99,102,241,.25)}
+.p.story{background:rgba(167,139,250,.12);color:#ddd6fe;border-color:rgba(167,139,250,.25)}
+.p.fwd{background:rgba(52,211,153,.1);color:#6ee7b7;border-color:rgba(52,211,153,.25)}
+.actions{margin-top:12px;display:flex;gap:8px}
+.btn{flex:1;border:0;border-radius:12px;padding:10px;font-weight:700;font-size:.8rem}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+.nav{position:fixed;bottom:0;left:0;right:0;height:60px;background:#0e0e12;border-top:1px solid var(--line);display:flex}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-decoration:none;color:var(--muted);font-size:.65rem;font-weight:600}
+.nav a.on{color:var(--primary)}
+.panel{display:none}.panel.on{display:block}
+.timeline{display:flex;justify-content:space-between;margin:14px 0 6px;gap:4px}
+.step{flex:1;text-align:center;font-size:.6rem;color:var(--muted)}
+.step .dot{width:10px;height:10px;border-radius:50%;background:var(--line);margin:0 auto 4px}
+.step.on .dot{background:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.25)}
+.step.done .dot{background:var(--ok)}
+.hint{padding:8px 12px;font-size:.72rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Ad Marketplace</h1>
+  <a href="/miniapp/demos/">← demos</a>
+</header>
+<p class="hint">UI demo · fake data · based on xMiHiR13/ad-marketplace</p>
+
+<div class="filters">
+  <button class="chip on" data-f="all">All</button>
+  <button class="chip" data-f="post">Post</button>
+  <button class="chip" data-f="story">Story</button>
+  <button class="chip" data-f="fwd">Post+Forward</button>
+  <button class="chip" data-f="big">> 50k subs</button>
+</div>
+
+<section id="market" class="panel on">
+  <div class="list" id="cards"></div>
+</section>
+
+<section id="deals" class="panel">
+  <div class="list">
+    <article class="card">
+      <div class="title">Deal with @tech_daily</div>
+      <div class="user">status: ad_under_review</div>
+      <div class="timeline">
+        <div class="step done"><div class="dot"></div>Negotiate</div>
+        <div class="step done"><div class="dot"></div>Submit</div>
+        <div class="step on"><div class="dot"></div>Review</div>
+        <div class="step"><div class="dot"></div>Pay</div>
+        <div class="step"><div class="dot"></div>Post</div>
+        <div class="step"><div class="dot"></div>Verify</div>
+      </div>
+    </article>
+    <article class="card">
+      <div class="title">Deal with @crypto_pulse</div>
+      <div class="user">status: scheduled</div>
+      <div class="timeline">
+        <div class="step done"><div class="dot"></div>Negotiate</div>
+        <div class="step done"><div class="dot"></div>Submit</div>
+        <div class="step done"><div class="dot"></div>Review</div>
+        <div class="step done"><div class="dot"></div>Pay</div>
+        <div class="step on"><div class="dot"></div>Post</div>
+        <div class="step"><div class="dot"></div>Verify</div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="profile" class="panel">
+  <div class="list">
+    <article class="card">
+      <div class="top"><div class="ava">👤</div><div><div class="title">Publisher / Advertiser</div><div class="user">wallet connected · demo</div></div></div>
+      <div class="stats">
+        <div class="stat"><b>3</b><span>Channels</span></div>
+        <div class="stat"><b>2</b><span>Campaigns</span></div>
+        <div class="stat"><b>5</b><span>Deals</span></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<nav class="nav">
+  <a href="#" class="on" data-p="market">Market</a>
+  <a href="#" data-p="deals">Deals</a>
+  <a href="#" data-p="profile">Profile</a>
+</nav>
+<script>
+const data=[
+  {title:'Tech Daily',user:'tech_daily',subs:'86.2k',views:'12.4k',post:120,story:80,fwd:160,subsN:86200},
+  {title:'Crypto Pulse',user:'crypto_pulse',subs:'210k',views:'45k',post:280,story:null,fwd:320,subsN:210000},
+  {title:'Food Iran',user:'food_ir',subs:'33.5k',views:'6.1k',post:55,story:40,fwd:null,subsN:33500},
+  {title:'Startup Hub',user:'startup_hub',subs:'54k',views:'9.8k',post:90,story:70,fwd:110,subsN:54000},
+];
+let filter='all';
+function render(){
+  const el=document.getElementById('cards');
+  el.innerHTML=data.filter(c=>{
+    if(filter==='post')return c.post;
+    if(filter==='story')return c.story;
+    if(filter==='fwd')return c.fwd;
+    if(filter==='big')return c.subsN>50000;
+    return true;
+  }).map(c=>`<article class="card">
+    <div class="top"><div class="ava">📢</div><div><div class="title">${c.title}</div><div class="user">@${c.user}</div></div></div>
+    <div class="stats">
+      <div class="stat"><b>${c.subs}</b><span>Subscribers</span></div>
+      <div class="stat"><b>${c.views}</b><span>Avg. Views</span></div>
+      <div class="stat"><b>${c.post||'—'}</b><span>Post $</span></div>
+    </div>
+    <div class="prices">
+      ${c.post?`<span class="p post">Post $${c.post}</span>`:''}
+      ${c.story?`<span class="p story">Story $${c.story}</span>`:''}
+      ${c.fwd?`<span class="p fwd">Post+Fwd $${c.fwd}</span>`:''}
+    </div>
+    <div class="actions"><button class="btn ghost">Details</button><button class="btn primary">Start deal</button></div>
+  </article>`).join('');
+}
+render();
+document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{
+  filter=b.dataset.f;document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b));render();
+}));
+function go(p){
+  document.querySelectorAll('.panel').forEach(el=>el.classList.toggle('on',el.id===p));
+  document.querySelectorAll('.nav a').forEach(el=>el.classList.toggle('on',el.dataset.p===p));
+}
+document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();go(a.dataset.p)}));
+</script>
+</body>
+</html>

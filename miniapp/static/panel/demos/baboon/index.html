@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
+<title>Baboon Market — UI Demo</title>
+<style>
+:root{--bg:#0b0f14;--card:#151b24;--line:#243041;--text:#eef3f9;--muted:#8a9bb0;--primary:#3b82f6;--ok:#22c55e}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);padding-bottom:72px}
+header{position:sticky;top:0;z-index:10;background:rgba(11,15,20,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:1rem;margin:0}
+header a{color:var(--muted);font-size:.8rem;text-decoration:none}
+.tabs{display:flex;gap:6px;padding:10px 12px;overflow-x:auto}
+.tab{flex:0 0 auto;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:.75rem;font-weight:600}
+.tab.on{background:rgba(59,130,246,.15);border-color:var(--primary);color:var(--primary)}
+.list{padding:0 12px 16px;display:grid;gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;cursor:pointer}
+.row{display:flex;gap:10px;align-items:flex-start}
+.ava{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#1e3a5f,#0f766e);display:grid;place-items:center;font-weight:700;flex-shrink:0}
+.meta h3{margin:0;font-size:.95rem}
+.meta p{margin:2px 0 0;font-size:.75rem;color:var(--muted)}
+.prices{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.badge{font-size:.7rem;padding:4px 8px;border-radius:8px;background:rgba(59,130,246,.12);color:#93c5fd}
+.badge.g{background:rgba(34,197,94,.12);color:#86efac}
+.foot{margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:.72rem;color:var(--muted)}
+.btn{border:0;background:var(--primary);color:#fff;border-radius:10px;padding:8px 12px;font-size:.75rem;font-weight:700}
+.nav{position:fixed;bottom:0;left:0;right:0;height:60px;background:var(--card);border-top:1px solid var(--line);display:flex}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-decoration:none;color:var(--muted);font-size:.65rem;font-weight:600}
+.nav a.on{color:var(--primary)}
+.panel{display:none}.panel.on{display:block}
+.deal{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--line)}
+.tl{display:flex;gap:4px;margin-top:8px}
+.tl span{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.tl span.d{background:var(--ok)}.tl span.c{background:var(--primary)}
+.hint{padding:8px 12px;font-size:.72rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Ads Market (Baboon)</h1>
+  <a href="/miniapp/demos/">← demos</a>
+</header>
+<p class="hint">UI demo · data is fake · based on TheRealMal/telegram-ads-market</p>
+<div class="tabs">
+  <button class="tab on" data-p="market">Market</button>
+  <button class="tab" data-p="mylist">My listings</button>
+  <button class="tab" data-p="deals">Deals</button>
+  <button class="tab" data-p="profile">Profile</button>
+</div>
+
+<section id="market" class="panel on">
+  <div class="list">
+    <article class="card">
+      <div class="row">
+        <div class="ava">TC</div>
+        <div class="meta">
+          <h3>Tech Channel</h3>
+          <p>@tech_demo · 42.3k followers</p>
+        </div>
+      </div>
+      <div class="prices">
+        <span class="badge">12h · 2.5 TON</span>
+        <span class="badge">24h · 4.0 TON</span>
+        <span class="badge g">active</span>
+      </div>
+      <div class="foot"><span>Lessor listing</span><button class="btn">Apply deal</button></div>
+    </article>
+    <article class="card">
+      <div class="row">
+        <div class="ava">CR</div>
+        <div class="meta">
+          <h3>Crypto News</h3>
+          <p>@crypto_demo · 118k followers</p>
+        </div>
+      </div>
+      <div class="prices">
+        <span class="badge">24h · 9 TON</span>
+        <span class="badge">48h · 15 TON</span>
+      </div>
+      <div class="foot"><span>Lessor listing</span><button class="btn">Apply deal</button></div>
+    </article>
+    <article class="card">
+      <div class="row">
+        <div class="ava">LS</div>
+        <div class="meta">
+          <h3>Lifestyle Hub</h3>
+          <p>@life_demo · 28.1k followers</p>
+        </div>
+      </div>
+      <div class="prices"><span class="badge">24h · 3.2 TON</span></div>
+      <div class="foot"><span>Lessor listing</span><button class="btn">Apply deal</button></div>
+    </article>
+  </div>
+</section>
+
+<section id="mylist" class="panel">
+  <div class="list">
+    <article class="card">
+      <div class="row"><div class="ava">MY</div><div class="meta"><h3>My channel listing</h3><p>status: active</p></div></div>
+      <div class="prices"><span class="badge">24h · 5 TON</span><span class="badge">72h · 12 TON</span></div>
+      <div class="foot"><span>You are lessor</span><button class="btn">Edit</button></div>
+    </article>
+  </div>
+</section>
+
+<section id="deals" class="panel">
+  <div class="list">
+    <article class="card">
+      <div class="deal"><div><b>Deal #1042</b><div style="font-size:.75rem;color:var(--muted)">24h · 4.0 TON</div></div><span class="badge g">in progress</span></div>
+      <div class="tl"><span class="d"></span><span class="d"></span><span class="c"></span><span></span><span></span><span></span></div>
+      <div class="foot"><span>draft → approved → escrow → post → done</span></div>
+    </article>
+    <article class="card">
+      <div class="deal"><div><b>Deal #1038</b><div style="font-size:.75rem;color:var(--muted)">12h · 2.5 TON</div></div><span class="badge">waiting deposit</span></div>
+      <div class="tl"><span class="d"></span><span class="d"></span><span class="c"></span><span></span><span></span><span></span></div>
+    </article>
+  </div>
+</section>
+
+<section id="profile" class="panel">
+  <div class="list">
+    <article class="card">
+      <div class="row"><div class="ava">U</div><div class="meta"><h3>Demo User</h3><p>lessee + lessor</p></div></div>
+      <div class="prices"><span class="badge">2 listings</span><span class="badge">3 deals</span></div>
+    </article>
+  </div>
+</section>
+
+<nav class="nav">
+  <a href="#" class="on" data-p="market">Market</a>
+  <a href="#" data-p="mylist">Listings</a>
+  <a href="#" data-p="deals">Deals</a>
+  <a href="#" data-p="profile">Profile</a>
+</nav>
+<script>
+function go(p){
+  document.querySelectorAll('.panel').forEach(el=>el.classList.toggle('on', el.id===p));
+  document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('on', el.dataset.p===p));
+  document.querySelectorAll('.nav a').forEach(el=>el.classList.toggle('on', el.dataset.p===p));
+}
+document.querySelectorAll('.tab,.nav a').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();go(el.dataset.p)}));
+</script>
+</body>
+</html>

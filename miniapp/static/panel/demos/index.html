@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>دمو مینی‌اپ‌های متن‌باز</title>
+  <style>
+    :root { --bg:#0f1419; --card:#1a2332; --line:#2a3544; --text:#e8eef5; --muted:#8b9bb0; --primary:#3b82f6; --accent:#14b8a6; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:20px 16px 40px; }
+    h1 { font-size:1.25rem; margin:0 0 6px; }
+    .lead { color:var(--muted); font-size:.85rem; margin:0 0 20px; line-height:1.6; }
+    .card { display:block; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px; text-decoration:none; color:inherit; }
+    .card h2 { margin:0 0 6px; font-size:1.05rem; }
+    .card p { margin:0; color:var(--muted); font-size:.8rem; line-height:1.5; }
+    .tag { display:inline-block; font-size:.7rem; padding:3px 8px; border-radius:999px; background:rgba(59,130,246,.15); color:var(--primary); margin-top:10px; }
+    .note { margin-top:24px; font-size:.75rem; color:var(--muted); line-height:1.5; }
+  </style>
+</head>
+<body>
+  <h1>مقایسه UI مینی‌اپ</h1>
+  <p class="lead">دموی استاتیک از دو پروژه متن‌باز مشابه لینک‌بان — بدون بک‌اند، فقط ظاهر و جریان صفحات.</p>
+  <a class="card" href="/miniapp/demos/baboon/">
+    <h2>۱) Baboon / telegram-ads-market</h2>
+    <p>مارکت تبلیغ کانال با listing، قیمت چندپله، deal و escrow. الگوی کارت کانال و bottom nav.</p>
+    <span class="tag">github.com/TheRealMal/telegram-ads-market</span>
+  </a>
+  <a class="card" href="/miniapp/demos/marketplace/">
+    <h2>۲) Ad Marketplace</h2>
+    <p>مارکت آگهی با فیلتر کانال، قیمت post/story، timeline معامله و پروفایل.</p>
+    <span class="tag">github.com/xMiHiR13/ad-marketplace</span>
+  </a>
+  <p class="note">منبع: کپی ساختار UI از ریپوهای بالا + دادهٔ ساختگی. مینی‌اپ خودتان: <a href="/miniapp/?app=1" style="color:#3b82f6">/miniapp/?app=1</a> — این هاب دمو است.</p>
+</body>
+</html>
