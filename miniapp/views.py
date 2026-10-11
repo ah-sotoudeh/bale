@@ -37,11 +37,37 @@ def demos_hub(_request: HttpRequest) -> HttpResponse:
 
 @xframe_options_exempt
 def demo_page(_request: HttpRequest, name: str) -> HttpResponse:
-    allowed = {'baboon', 'marketplace'}
+    allowed = {'baboon', 'marketplace', 'nova-store'}
     if name not in allowed:
         raise Http404
     html = (PANEL / 'demos' / name / 'index.html').read_text(encoding='utf-8')
     return _framed(HttpResponse(html, content_type='text/html; charset=utf-8'))
+
+
+@xframe_options_exempt
+def demo_asset(_request: HttpRequest, name: str, path: str) -> HttpResponse:
+    """فایل‌های استاتیک دموهای چندصفحه‌ای (مثل Nova Store)."""
+    allowed = {'nova-store', 'baboon', 'marketplace'}
+    if name not in allowed:
+        raise Http404
+    root = (PANEL / 'demos' / name).resolve()
+    file = (root / path).resolve()
+    if root not in file.parents and file != root:
+        raise Http404
+    if not file.is_file():
+        raise Http404
+    content_type = guess_type(file.name)[0] or 'application/octet-stream'
+    if file.suffix == '.js':
+        content_type = 'text/javascript; charset=utf-8'
+    elif file.suffix == '.css':
+        content_type = 'text/css; charset=utf-8'
+    elif file.suffix == '.html':
+        content_type = 'text/html; charset=utf-8'
+        resp = _framed(HttpResponse(file.read_text(encoding='utf-8'), content_type=content_type))
+        return resp
+    resp = FileResponse(file.open('rb'), content_type=content_type)
+    resp['Cache-Control'] = 'no-cache'
+    return _framed(resp)
 
 
 @xframe_options_exempt
