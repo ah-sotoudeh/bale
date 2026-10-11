@@ -183,10 +183,17 @@ def api_me(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    claim_pending_channels(user)
+    try:
+        claim_pending_channels(user)
+    except Exception:
+        logger.exception('claim_pending_channels')
     from bot_flow.access import is_debug_user
 
-    br = ws.balance_breakdown(user)
+    try:
+        br = ws.balance_breakdown(user)
+    except Exception:
+        logger.exception('balance_breakdown')
+        br = {'available': 0, 'pending': 0, 'total': 0}
     ch_count = Channel.objects.filter(manager=user).count()
     is_op = ws.is_operator(user.bale_user_id or '')
     debug_user = is_debug_user(user.bale_user_id or '')

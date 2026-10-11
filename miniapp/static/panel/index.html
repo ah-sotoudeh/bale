@@ -10,6 +10,35 @@
     </script>
     <script src="https://tapi.bale.ai/miniapp.js?3"></script>
     <script>
+      /* صبر تا SDK بله initData / user بدهد */
+      window.__LB_BALE = null;
+      window.__LB_USER = null;
+      window.__LB_WAIT_BALE = new Promise(function (resolve) {
+        var n = 0;
+        function tick() {
+          var w = window.Bale && Bale.WebApp;
+          if (w) {
+            try { if (typeof w.ready === "function") w.ready(); } catch (e) {}
+            try { if (typeof w.expand === "function") w.expand(); } catch (e) {}
+            window.__LB_BALE = w;
+            if (w.initDataUnsafe && w.initDataUnsafe.user) {
+              window.__LB_USER = w.initDataUnsafe.user;
+            }
+            if (w.initData || window.__LB_USER) {
+              resolve(w);
+              return;
+            }
+          }
+          if (++n > 60) {
+            resolve(w || null);
+            return;
+          }
+          setTimeout(tick, 100);
+        }
+        tick();
+      });
+    </script>
+    <script>
       (function () {
         var r = document.documentElement, s = null;
         try { s = localStorage.getItem("lb.theme"); } catch (e) {}
