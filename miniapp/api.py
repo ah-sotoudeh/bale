@@ -34,14 +34,23 @@ def _json_body(request: HttpRequest) -> Dict[str, Any]:
 
 
 def _init_from_request(request: HttpRequest) -> str:
-    body = _json_body(request) if request.method == 'POST' else {}
-    return (
-        request.headers.get('X-Bale-Init-Data')
-        or request.META.get('HTTP_X_BALE_INIT_DATA')
-        or body.get('initData')
-        or request.GET.get('initData')
-        or ''
-    )
+    body = _json_body(request) if request.method in ('POST', 'PUT', 'PATCH') else {}
+    # بعضی پراکسی‌ها هدر را lower-case یا با زیرخط می‌فرستند
+    candidates = [
+        request.headers.get('X-Bale-Init-Data'),
+        request.headers.get('x-bale-init-data'),
+        request.META.get('HTTP_X_BALE_INIT_DATA'),
+        request.META.get('HTTP_X_BALE_INITDATA'),
+        body.get('initData'),
+        body.get('init_data'),
+        request.GET.get('initData'),
+        request.GET.get('init_data'),
+    ]
+    for c in candidates:
+        if c and str(c).strip():
+            return str(c).strip()
+    return ''
+
 
 
 
