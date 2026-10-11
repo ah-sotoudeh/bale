@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>لینک‌بان</title>
+  <script>
+    window.__MEDIA_BASE = "/miniapp/media";
+    window.__LIVE_API = "/miniapp/api";
+  </script>
+  <script src="https://tapi.bale.ai/miniapp.js?3"></script>
+  <script>
+    window.__LB_BALE = null;
+    window.__LB_USER = null;
+    window.__LB_WAIT_BALE = new Promise(function (resolve) {
+      var n = 0;
+      function tick() {
+        var w = window.Bale && Bale.WebApp;
+        if (w) {
+          try { if (typeof w.ready === "function") w.ready(); } catch (e) {}
+          try { if (typeof w.expand === "function") w.expand(); } catch (e) {}
+          window.__LB_BALE = w;
+          if (w.initDataUnsafe && w.initDataUnsafe.user) window.__LB_USER = w.initDataUnsafe.user;
+          if (w.initData || window.__LB_USER) { resolve(w); return; }
+        }
+        if (++n > 60) { resolve(w || null); return; }
+        setTimeout(tick, 100);
+      }
+      tick();
+    });
+  </script>
+  <script>
+    (function () {
+      var r = document.documentElement, s = null;
+      try { s = localStorage.getItem("lb.theme"); } catch (e) {}
+      var w = window.Bale && Bale.WebApp, b = (w && w.colorScheme) || "light";
+      var bg = w && w.themeParams && w.themeParams.bg_color;
+      if (bg && /^#([0-9a-f]{6})$/i.test(bg)) {
+        var n = parseInt(bg.slice(1), 16);
+        var l = (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+        b = l < 0.4 ? "dark" : "light";
+      }
+      var t = s === "light" || s === "dark" ? s : b;
+      r.dataset.theme = t;
+      r.style.colorScheme = t;
+    })();
+  </script>
+  <link rel="stylesheet" href="/miniapp/assets/v2/app.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="header brand" id="headerEl">
+      <button type="button" class="icon-btn" id="btnBack" style="display:none" aria-label="بازگشت">
+        <svg viewBox="0 0 24 24"><path d="m14 18-6-6 6-6" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" class="avatar" id="btnProfile" title="حساب">ل</button>
+      <h1 id="pageTitle">بازار تبلیغات</h1>
+      <button type="button" class="icon-btn" id="btnTheme" aria-label="تم">
+        <svg viewBox="0 0 24 24"><path d="M20 15.2A8 8 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z" stroke="currentColor" fill="none" stroke-width="2"/></svg>
+      </button>
+    </header>
+    <main class="main">
+      <div id="pageContent" class="page on"></div>
+    </main>
+    <nav class="nav" id="bottomNav"></nav>
+  </div>
+  <div class="sheet" id="sheet"><div class="sheet-panel"><div id="sheetBody"></div></div></div>
+  <div class="toast" id="toast"></div>
+  <script src="/miniapp/assets/v2/app.js"></script>
+</body>
+</html>

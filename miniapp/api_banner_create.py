@@ -1,4 +1,4 @@
-"""Customer banner create from mini-app upload."""
+"""Customer banner create from mini-app upload (image/video or text-only)."""
 from __future__ import annotations
 
 from django.http import HttpRequest, JsonResponse
@@ -12,7 +12,7 @@ from orders.models import CustomerBanner
 def _err(code: str, status: int = 400, message: str = '') -> JsonResponse:
     from bot_flow.messages import user_error
     ERR = {
-        'need_media': 'تصویر یا ویدیو را انتخاب کنید.',
+        'need_media': 'تصویر یا ویدیو را انتخاب کنید، یا حالت «فقط متن» را بزنید.',
         'caption_short': 'متن بنر کوتاه است. چند خط درباره کالا بنویسید.',
         'banned': 'متن شامل عبارت غیرمجاز است.',
         'file_too_large': 'حجم فایل زیاد است. حداکثر ۱۵ مگابایت.',
@@ -25,7 +25,7 @@ def _err(code: str, status: int = 400, message: str = '') -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_banner_create(request: HttpRequest) -> JsonResponse:
-    """ساخت بنر از مینی‌اپ — آپلود فایل (multipart یا base64). رایگان. اعلان به پشتیبان از بازو."""
+    """ساخت بنر از مینی‌اپ — آپلود فایل، base64، یا فقط متن. رایگان."""
     import base64
 
     user, err = _auth_user(request)
@@ -41,12 +41,16 @@ def api_banner_create(request: HttpRequest) -> JsonResponse:
     caption = ''
     media_kind = 'photo'
     raw: bytes = b''
+    text_only = False
 
     ctype = (request.content_type or '').lower()
     if 'multipart/form-data' in ctype:
         title = str(request.POST.get('title') or '').strip()[:120]
         caption = str(request.POST.get('caption') or '').strip()[:800]
         media_kind = str(request.POST.get('media_kind') or 'photo').strip().lower() or 'photo'
+        text_only = str(request.POST.get('text_only') or '').strip().lower() in (
+            '1', 'true', 'yes', 'text',
+        ) or media_kind == 'text'
         up = request.FILES.get('file') or request.FILES.get('media')
         if up is not None:
             raw = up.read()
@@ -60,6 +64,7 @@ def api_banner_create(request: HttpRequest) -> JsonResponse:
         title = str(body.get('title') or '').strip()[:120]
         caption = str(body.get('caption') or '').strip()[:800]
         media_kind = str(body.get('media_kind') or 'photo').strip().lower() or 'photo'
+        text_only = bool(body.get('text_only')) or media_kind == 'text'
         b64 = body.get('media_base64') or body.get('file_base64') or ''
         if isinstance(b64, str) and b64:
             if ',' in b64 and b64.strip().startswith('data:'):
@@ -78,18 +83,21 @@ def api_banner_create(request: HttpRequest) -> JsonResponse:
         ok, _hits = is_allowed(title)
         if not ok:
             return _err('banned')
-    if not raw:
-        return _err('need_media')
-    if len(raw) > 15 * 1024 * 1024:
-        return _err('file_too_large')
 
-    if media_kind not in ('photo', 'video', 'animation', 'document'):
-        media_kind = 'photo'
-    head = raw[:12]
-    if head.startswith(b'\xff\xd8\xff') or head[:8] == b'\x89PNG\r\n\x1a\n':
-        media_kind = 'photo'
-    elif b'ftyp' in raw[:32]:
-        media_kind = 'video'
+    if text_only and not raw:
+        media_kind = 'text'
+    elif not raw:
+        return _err('need_media')
+    elif len(raw) > 15 * 1024 * 1024:
+        return _err('file_too_large')
+    else:
+        if media_kind not in ('photo', 'video', 'animation', 'document'):
+            media_kind = 'photo'
+        head = raw[:12]
+        if head.startswith(b'\xff\xd8\xff') or head[:8] == b'\x89PNG\r\n\x1a\n':
+            media_kind = 'photo'
+        elif b'ftyp' in raw[:32]:
+            media_kind = 'video'
 
     if not title:
         title = caption.split('\n', 1)[0][:80]
@@ -106,11 +114,12 @@ def api_banner_create(request: HttpRequest) -> JsonResponse:
     banner.storage_message_id = str(banner.id)
     banner.save(update_fields=['storage_message_id'])
 
-    path = save_uploaded_bytes(banner.id, raw, media_kind)
-    if path is None:
-        banner.is_active = False
-        banner.save(update_fields=['is_active'])
-        return _err('bad_media')
+    if media_kind != 'text' and raw:
+        path = save_uploaded_bytes(banner.id, raw, media_kind)
+        if path is None:
+            banner.is_active = False
+            banner.save(update_fields=['is_active'])
+            return _err('bad_media')
 
     result = create_publish_request(
         user,
@@ -122,12 +131,14 @@ def api_banner_create(request: HttpRequest) -> JsonResponse:
     )
     stage = banner_stage(banner)
     req = result.get('request')
+    media_url = '' if media_kind == 'text' else public_media_url(banner)
     return JsonResponse({
         'ok': True,
         'banner_id': banner.id,
         'stage': stage,
         'title': banner.display_title(),
         'fee': 0,
-        'media_url': public_media_url(banner),
+        'media_kind': media_kind,
+        'media_url': media_url,
         'request_id': getattr(req, 'id', None),
     })

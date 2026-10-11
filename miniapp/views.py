@@ -72,14 +72,20 @@ def demo_asset(_request: HttpRequest, name: str, path: str) -> HttpResponse:
 
 @xframe_options_exempt
 def mini_app(request: HttpRequest) -> HttpResponse:
-    # موقتاً: بدون پارامتر → هاب دمو؛ ?app=1 → مینی‌اپ خودتان
-    if request.GET.get('app') == '1':
+    # پیش‌فرض: مینی‌اپ مشتری v2 (بازار، بنر متن/تصویر، تقویم، سفارش، کیف‌پول) — متصل به API
+    # ?legacy=1 → پنل قدیمی | ?demo=hub → هاب دمو | ?demo=linkban-pro → دموی طراحی
+    demo = (request.GET.get('demo') or '').strip()
+    if request.GET.get('legacy') == '1' or request.GET.get('app') == '1':
         html = (PANEL / 'index.html').read_text(encoding='utf-8')
-    elif request.GET.get('demo') == 'hub':
+    elif demo == 'hub':
         html = (PANEL / 'demos' / 'index.html').read_text(encoding='utf-8')
+    elif demo in ('linkban-pro', 'baboon', 'marketplace', 'nova-store'):
+        path = PANEL / 'demos' / demo / 'index.html'
+        if not path.is_file():
+            raise Http404
+        html = path.read_text(encoding='utf-8')
     else:
-        # پیش‌فرض: پیش‌نمایش طراحی جامع لینک‌بان
-        html = (PANEL / 'demos' / 'linkban-pro' / 'index.html').read_text(encoding='utf-8')
+        html = (PANEL / 'v2' / 'index.html').read_text(encoding='utf-8')
     resp = HttpResponse(html, content_type='text/html; charset=utf-8')
     return _framed(resp)
 
