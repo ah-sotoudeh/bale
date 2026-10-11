@@ -21,7 +21,7 @@
     draft: 'پیش‌نویس',
     waiting_banner: 'منتظر بنر',
     waiting_managers: 'منتظر پاسخ مدیر',
-    waiting_customer_confirm: 'منتظر تأیید شما',
+    waiting_customer_confirm: 'منتظر تأیید آگهی‌دهنده',
     waiting_payment: 'منتظر پرداخت',
     paid: 'پرداخت‌شده',
     completed: 'انجام‌شده',
@@ -40,7 +40,7 @@
 
   const ST = {
     page: 'market',
-    role: 'customer',
+    role: 'advertiser', // آگهی‌دهنده | manager | operator
     me: null,
     catalog: null,
     banners: [],
@@ -53,6 +53,16 @@
     selectedDay: null,
     orderTab: 'all',
     loading: false,
+    // manager
+    myChannels: [],
+    myGroups: [],
+    mgrOrders: [],
+    mgrTab: 'inbox', // inbox | channels | tariffs
+    selectedMgrChannel: null,
+    // operator
+    opBanners: [],
+    opPayouts: [],
+    opTab: 'banners', // banners | payouts | assign
   };
 
   function toast(msg) {
@@ -150,10 +160,49 @@
     if (!d.ok) throw new Error(d.message || d.error || 'auth');
     ST.me = d;
     ST.wallet = d.wallet || { available: 0, pending: 0 };
-    if (d.is_operator) {
-      /* keep role if already set */
-    }
+    // restore preferred role if valid
+    try {
+      const saved = localStorage.getItem('lb.role');
+      if (saved === 'manager' || saved === 'advertiser' || (saved === 'operator' && d.is_operator)) {
+        ST.role = saved;
+      } else if (d.channel_count > 0 && ST.role === 'advertiser') {
+        /* stay advertiser by default */
+      }
+    } catch (e) {}
     return d;
+  }
+
+  async function loadMyChannels() {
+    const d = await api('/channels');
+    if (!d.ok) { ST.myChannels = []; ST.myGroups = []; return; }
+    ST.myChannels = d.channels || [];
+    ST.myGroups = d.groups || [];
+  }
+
+  async function loadMgrOrders() {
+    const d = await api('/orders');
+    if (!d.ok) { ST.mgrOrders = []; return; }
+    ST.mgrOrders = (d.orders || []).filter((o) => o.inbox || o.manager_status);
+  }
+
+  async function loadOpBanners() {
+    const d = await api('/operator/banners');
+    if (!d.ok) { ST.opBanners = []; return; }
+    ST.opBanners = d.requests || d.banners || [];
+  }
+
+  async function loadOpPayouts() {
+    const d = await api('/operator/payouts');
+    if (!d.ok) { ST.opPayouts = []; return; }
+    ST.opPayouts = d.payouts || [];
+  }
+
+  function setRole(role) {
+    ST.role = role;
+    try { localStorage.setItem('lb.role', role); } catch (e) {}
+    if (role === 'manager') ST.page = 'mgr-home';
+    else if (role === 'operator') ST.page = 'op-home';
+    else ST.page = 'market';
   }
 
   async function loadCatalog() {
@@ -467,6 +516,21 @@
   }
 
   function renderOrders() {
+    // مدیر: لیست آیتم‌های سفارش از /api/orders
+    if (ST.role === 'manager') {
+      const list = ST.mgrOrders || [];
+      if (!list.length) return '<div class="empty">سفارشی نیست.</div>';
+      return list.map((it) => `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between">
+            <strong>${esc(it.owner || '')}</strong>
+            <span class="badge">${MGR_STATUS[it.manager_status] || it.manager_status || ''}</span>
+          </div>
+          <div class="ch-sub">${esc(it.tariff_name || '')} · ${esc(it.start_jalali || it.date || '')}</div>
+          <div class="price">${faNum(it.price)} تومان</div>
+          ${it.published_link ? `<a href="${esc(it.published_link)}" target="_blank" class="hint">لینک انتشار</a>` : ''}
+        </div>`).join('');
+    }
     let list = ST.orders || [];
     if (ST.orderTab === 'active') {
       list = list.filter((o) => !['completed','cancelled','rejected'].includes(o.status));
@@ -489,8 +553,14 @@
         <div class="ch-sub" style="margin-top:4px">${esc(o.channel_name || o.title || '')}</div>
         <div class="timeline">${tl}</div>
         <div class="price">${faNum(o.total || o.price || 0)} تومان</div>
-        ${o.status === 'waiting_payment' ? `<button class="btn btn-primary btn-block btn-sm" style="margin-top:10px" data-pay="${o.id||o.order_id}">پرداخت</button>` : ''}
-        ${o.status === 'waiting_customer_confirm' ? `<div class="actions"><button class="btn btn-primary btn-sm" data-confirm="${o.id}">قبول زمان</button></div>` : ''}
+        ${(o.items||[]).filter(it=>it.proposed_date).map(it=>`
+          <div class="hint" style="margin-top:6px">پیشنهاد زمان برای ${esc(it.owner)}: ${esc(it.proposed_date)}</div>
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" data-answer-item="${it.id}" data-accept="1">قبول</button>
+            <button class="btn btn-ghost btn-sm" data-answer-item="${it.id}" data-accept="0">رد</button>
+          </div>`).join('')}
+        ${o.status === 'waiting_payment' || o.can_pay ? `<button class="btn btn-primary btn-block btn-sm" style="margin-top:10px" data-pay="${o.id||o.order_id}">پرداخت</button>` : ''}
+        ${o.can_cancel ? `<button class="btn btn-danger btn-block btn-sm" style="margin-top:6px" data-cancel="${o.id}">لغو سفارش</button>` : ''}
       </div>`;
     }).join('') : '<div class="empty">سفارشی نیست.</div>';
 
@@ -517,19 +587,28 @@
 
   function renderSettings() {
     const u = ST.me?.user || {};
+    const pending = ST.me?.pending_orders || 0;
+    const queues = ST.me?.queues || ST.me || {};
     return `
       <div class="card card-row" style="align-items:center">
-        <div class="avatar" style="width:56px;height:56px">${(u.handle||u.username||'ل').charAt(0)}</div>
+        <div class="avatar" style="width:56px;height:56px">${esc((u.handle||u.username||'ل').charAt(0))}</div>
         <div>
           <div class="ch-title">${esc(u.handle || u.username || 'کاربر')}</div>
           <div class="ch-sub">شناسه ${fa(u.bale_user_id || '')}</div>
         </div>
       </div>
-      <div class="section">نقش</div>
+      <div class="section">نقش فعال</div>
       <div class="role-grid">
-        <div class="role-card ${ST.role==='customer'?'on':''}" data-r="customer"><b>مشتری</b><span>سفارش تبلیغ</span></div>
-        <div class="role-card ${ST.role==='manager'?'on':''}" data-r="manager"><b>مدیر کانال</b><span>تعرفه و انتشار</span></div>
-        ${ST.me?.is_operator ? `<div class="role-card ${ST.role==='operator'?'on':''}" data-r="operator"><b>پشتیبان</b><span>تأیید و تسویه</span></div>` : ''}
+        <div class="role-card ${ST.role==='advertiser'?'on':''}" data-r="advertiser">
+          <b>آگهی‌دهنده</b><span>خرید جایگاه تبلیغ</span>
+        </div>
+        <div class="role-card ${ST.role==='manager'?'on':''}" data-r="manager">
+          <b>مدیر کانال</b><span>تعرفه، سفارش، انتشار${pending ? ' · ' + fa(pending) + ' درخواست' : ''}</span>
+        </div>
+        ${ST.me?.is_operator || ST.me?.roles?.operator ? `
+        <div class="role-card ${ST.role==='operator'?'on':''}" data-r="operator">
+          <b>پشتیبان</b><span>تأیید بنر و تسویه</span>
+        </div>` : ''}
       </div>
       <div class="section">تنظیمات</div>
       <div class="card">
@@ -538,13 +617,175 @@
       </div>`;
   }
 
-  function renderManager() {
+  const MGR_STATUS = {
+    pending: 'در انتظار تأیید',
+    approved: 'تأییدشده',
+    rejected: 'رد شده',
+    edited: 'زمان پیشنهادی',
+    cart: 'سبد',
+    published: 'منتشر شده',
+  };
+
+  function renderMgrHome() {
+    const inbox = (ST.mgrOrders || []).filter((o) => o.inbox && ['pending', 'edited'].includes(o.manager_status));
+    const chs = ST.myChannels || [];
+    return `
+      <div class="kpi">
+        <div class="card"><div class="n">${fa(inbox.length)}</div><div class="l">درخواست باز</div></div>
+        <div class="card"><div class="n">${fa(chs.length)}</div><div class="l">کانال من</div></div>
+      </div>
+      <div class="tabs-line" id="mgrTabs">
+        <button class="${ST.mgrTab==='inbox'?'on':''}" data-t="inbox">صندوق${inbox.length ? ' (' + fa(inbox.length) + ')' : ''}</button>
+        <button class="${ST.mgrTab==='channels'?'on':''}" data-t="channels">کانال‌ها</button>
+        <button class="${ST.mgrTab==='tariffs'?'on':''}" data-t="tariffs">تعرفه‌ها</button>
+      </div>
+      ${ST.mgrTab === 'inbox' ? renderMgrInbox(inbox) : ''}
+      ${ST.mgrTab === 'channels' ? renderMgrChannels() : ''}
+      ${ST.mgrTab === 'tariffs' ? renderMgrTariffs() : ''}
+    `;
+  }
+
+  function renderMgrInbox(inbox) {
+    if (!inbox.length) {
+      return `<div class="empty"><div class="illu">📭</div><p>درخواستی در صف نیست.</p>
+        <button class="btn btn-soft btn-sm" id="btnMgrRefresh">بروزرسانی</button></div>`;
+    }
+    return inbox.map((it) => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+          <div>
+            <strong>${esc(it.owner || 'کانال')}</strong>
+            <div class="ch-sub">${esc(it.tariff_name || '')} · ${esc(it.start_jalali || it.date || '')}</div>
+          </div>
+          <span class="badge ${it.manager_status==='pending'?'warn':''}">${MGR_STATUS[it.manager_status] || it.manager_status}</span>
+        </div>
+        <div class="price" style="margin-top:8px">${faNum(it.price)} تومان</div>
+        ${it.proposed_date ? `<div class="hint">زمان پیشنهادی شما: ${esc(it.proposed_date)}</div>` : ''}
+        <div class="actions">
+          ${it.manager_status === 'pending' ? `
+            <button class="btn btn-primary btn-sm" data-mgr-approve="${it.id}">تأیید</button>
+            <button class="btn btn-ghost btn-sm" data-mgr-suggest="${it.id}">پیشنهاد زمان</button>
+            <button class="btn btn-danger btn-sm" data-mgr-reject="${it.id}">رد</button>
+          ` : ''}
+          ${it.manager_status === 'approved' && it.publish_due ? `
+            <button class="btn btn-primary btn-sm" data-mgr-published="${it.id}">منتشر شد</button>
+          ` : ''}
+        </div>
+      </div>`).join('') + `<button class="btn btn-ghost btn-block btn-sm" id="btnMgrRefresh" style="margin-top:8px">بروزرسانی</button>`;
+  }
+
+  function renderMgrChannels() {
+    const chs = ST.myChannels || [];
+    if (!chs.length) {
+      return `<div class="empty">
+        <div class="illu">📢</div>
+        <p>کانالی ثبت نشده. از بازوی لینک‌بان کانال را اضافه کنید (ربات باید ادمین کانال باشد).</p>
+        <button class="btn btn-primary btn-sm" id="btnMgrRefresh">بروزرسانی</button>
+      </div>`;
+    }
+    return chs.map((c) => `
+      <div class="card">
+        <div class="card-row">
+          <div class="ch-ava">${esc((c.name||'?').charAt(0))}</div>
+          <div class="grow">
+            <div class="ch-title">${esc(c.name)}</div>
+            <div class="ch-sub">${c.link ? '@' + esc(String(c.link).replace(/^@/,'')) : ''}</div>
+            <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+              <span class="badge muted">${faK(c.members_count)} عضو</span>
+              <span class="badge muted">${faK(c.avg_views)} بازدید</span>
+              <span class="badge">${modeLabel(c.publish_mode)}</span>
+              ${c.is_listed === false ? '<span class="badge warn">آرشیو</span>' : ''}
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-soft btn-sm" data-mgr-ch="${c.id}">مدیریت</button>
+          <button class="btn btn-ghost btn-sm" data-mgr-mode="${c.id}">روش انتشار</button>
+        </div>
+      </div>`).join('') + `
+      <button class="btn btn-ghost btn-block btn-sm" id="btnMgrRefresh" style="margin-top:8px">بروزرسانی آمار</button>`;
+  }
+
+  function renderMgrTariffs() {
     return `<div class="empty">
-      <div class="illu">📢</div>
-      <p>پنل مدیر از API کانال‌ها و درخواست‌ها تغذیه می‌شود.</p>
-      <button class="btn btn-primary" id="btnMgrRefresh">بارگذاری کانال‌های من</button>
-      <div id="mgrBody" style="margin-top:16px;text-align:right"></div>
+      <p class="hint">برای افزودن تعرفه، کانال را از تب «کانال‌ها» باز کنید یا از فرم زیر استفاده کنید.</p>
+      <button class="btn btn-primary" id="btnAddTariff">+ تعرفه جدید</button>
+      <div id="tariffList" style="margin-top:12px;text-align:right"></div>
     </div>`;
+  }
+
+  function renderMgrChannelDetail() {
+    const c = (ST.myChannels || []).find((x) => x.id === ST.selectedMgrChannel);
+    if (!c) return '<div class="empty">کانال پیدا نشد</div>';
+    return `
+      <div class="card" style="text-align:center">
+        <div class="ch-ava" style="width:72px;height:72px;margin:0 auto 10px;font-size:1.4rem">${esc((c.name||'?').charAt(0))}</div>
+        <div class="ch-title">${esc(c.name)}</div>
+        <div class="ch-sub">${c.link ? '@' + esc(String(c.link).replace(/^@/,'')) : ''}</div>
+        <div class="stats">
+          <div class="stat"><b>${faK(c.members_count)}</b><span>عضو</span></div>
+          <div class="stat"><b>${faK(c.avg_views)}</b><span>بازدید</span></div>
+          <div class="stat"><b>${fa(c.tariff_count || 0)}</b><span>تعرفه</span></div>
+        </div>
+        <div style="margin-top:10px"><span class="badge">${modeLabel(c.publish_mode)}</span></div>
+      </div>
+      <div class="section">عملیات</div>
+      <button class="btn btn-primary btn-block" id="btnAddTariffForCh">افزودن تعرفه</button>
+      <button class="btn btn-ghost btn-block" data-mgr-mode="${c.id}" style="margin-top:8px">تغییر روش انتشار</button>
+      <button class="btn btn-soft btn-block" id="btnRefreshOne" style="margin-top:8px">خواندن دوباره آمار</button>
+      <p class="hint" style="margin-top:12px">برای تقویم شلوغی و رزرو دستی از بازو یا API تقویم استفاده کنید.</p>`;
+  }
+
+  function renderOpHome() {
+    const banners = ST.opBanners || [];
+    const payouts = ST.opPayouts || [];
+    return `
+      <div class="kpi">
+        <div class="card"><div class="n">${fa(banners.length)}</div><div class="l">بنر در انتظار</div></div>
+        <div class="card"><div class="n">${fa(payouts.length)}</div><div class="l">درخواست تسویه</div></div>
+      </div>
+      <div class="tabs-line" id="opTabs">
+        <button class="${ST.opTab==='banners'?'on':''}" data-t="banners">بنرها</button>
+        <button class="${ST.opTab==='payouts'?'on':''}" data-t="payouts">تسویه‌ها</button>
+      </div>
+      ${ST.opTab === 'banners' ? renderOpBanners(banners) : renderOpPayouts(payouts)}
+    `;
+  }
+
+  function renderOpBanners(rows) {
+    if (!rows.length) {
+      return `<div class="empty"><div class="illu">✅</div><p>بنر معلقی نیست.</p>
+        <button class="btn btn-soft btn-sm" id="btnOpRefresh">بروزرسانی</button></div>`;
+    }
+    return rows.map((r) => `
+      <div class="card">
+        <div class="ch-title">درخواست #${fa(r.id)}</div>
+        <div class="ch-sub">کاربر ${esc(r.customer || '')}</div>
+        <p class="hint" style="margin:8px 0">${esc(r.caption || '—')}</p>
+        ${r.fee_toman ? `<div class="price">${faNum(r.fee_toman)} تومان</div>` : ''}
+        <div class="actions">
+          <button class="btn btn-primary btn-sm" data-op-approve="${r.id}">تأیید</button>
+          <button class="btn btn-danger btn-sm" data-op-reject="${r.id}">رد</button>
+        </div>
+      </div>`).join('') + `<button class="btn btn-ghost btn-block btn-sm" id="btnOpRefresh">بروزرسانی</button>`;
+  }
+
+  function renderOpPayouts(rows) {
+    if (!rows.length) {
+      return `<div class="empty"><p>درخواست تسویه‌ای نیست.</p>
+        <button class="btn btn-soft btn-sm" id="btnOpRefresh">بروزرسانی</button></div>`;
+    }
+    return rows.map((p) => `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between">
+          <strong>#${fa(p.id)}</strong>
+          <span class="badge warn">${esc(p.status || 'pending')}</span>
+        </div>
+        <div class="price" style="margin-top:6px">${faNum(p.amount_toman)} تومان</div>
+        <div class="ch-sub">${esc(p.holder_name || '')} · ${esc(p.iban || '')}</div>
+      </div>`).join('') + `
+      <button class="btn btn-primary btn-block" id="btnOpBatch" style="margin-top:10px">ساخت دسته واریز</button>
+      <button class="btn btn-ghost btn-block btn-sm" id="btnOpRefresh" style="margin-top:8px">بروزرسانی</button>`;
   }
 
   const TITLES = {
@@ -552,17 +793,18 @@
     channel: 'جزئیات کانال',
     calendar: 'انتخاب روز',
     banners: 'بنرهای من',
-    orders: 'سفارش‌ها',
+    orders: 'سفارش‌های من',
     wallet: 'کیف پول',
-    settings: 'حساب',
-    manager: 'پنل مدیر',
-    operator: 'پشتیبانی',
+    settings: 'حساب و نقش',
+    'mgr-home': 'پنل مدیر کانال',
+    'mgr-channel': 'مدیریت کانال',
+    'op-home': 'پنل پشتیبانی',
   };
 
   function navItems() {
     if (ST.role === 'manager') {
       return [
-        { id: 'manager', label: 'کانال‌ها', icon: 'megaphone' },
+        { id: 'mgr-home', label: 'خانه', icon: 'megaphone' },
         { id: 'orders', label: 'سفارش‌ها', icon: 'orders' },
         { id: 'wallet', label: 'کیف پول', icon: 'wallet' },
         { id: 'settings', label: 'حساب', icon: 'user' },
@@ -570,10 +812,11 @@
     }
     if (ST.role === 'operator') {
       return [
-        { id: 'operator', label: 'صف‌ها', icon: 'orders' },
+        { id: 'op-home', label: 'صف‌ها', icon: 'orders' },
         { id: 'settings', label: 'حساب', icon: 'user' },
       ];
     }
+    // آگهی‌دهنده
     return [
       { id: 'market', label: 'بازار', icon: 'home' },
       { id: 'orders', label: 'سفارش‌ها', icon: 'orders' },
@@ -592,10 +835,10 @@
 
   function render() {
     const root = $('#pageContent');
-    const back = !['market','orders','banners','wallet','settings','manager','operator'].includes(ST.page);
+    const back = !['market','orders','banners','wallet','settings','mgr-home','op-home'].includes(ST.page);
     $('#pageTitle').textContent = TITLES[ST.page] || 'لینک‌بان';
     $('#btnBack').style.display = back ? '' : 'none';
-    $('#headerEl').classList.toggle('brand', ST.page === 'market' && ST.role === 'customer');
+    $('#headerEl').classList.toggle('brand', ST.page === 'market' && ST.role === 'advertiser');
 
     let html = '';
     if (ST.loading) html = '<div class="loading">در حال بارگذاری…</div>';
@@ -606,9 +849,10 @@
     else if (ST.page === 'orders') html = renderOrders();
     else if (ST.page === 'wallet') html = renderWallet();
     else if (ST.page === 'settings') html = renderSettings();
-    else if (ST.page === 'manager') html = renderManager();
-    else if (ST.page === 'operator') html = '<div class="empty">صف تأیید بنر و برداشت از API اپراتور</div>';
-    else html = renderMarket();
+    else if (ST.page === 'mgr-home') html = renderMgrHome();
+    else if (ST.page === 'mgr-channel') html = renderMgrChannelDetail();
+    else if (ST.page === 'op-home') html = renderOpHome();
+    else html = ST.role === 'manager' ? renderMgrHome() : ST.role === 'operator' ? renderOpHome() : renderMarket();
 
     root.innerHTML = html;
     renderNav();
@@ -693,10 +937,30 @@
       ST.orderTab = b.dataset.t; render();
     });
     $$('[data-pay]').forEach((b) => b.onclick = () => payOrder(b.dataset.pay));
+    $$('[data-answer-item]').forEach((b) => b.onclick = async () => {
+      const d = await api('/orders/answer', {
+        method: 'POST',
+        body: { item_id: Number(b.dataset.answerItem), accept: b.dataset.accept === '1' },
+      });
+      toast(d.message || (d.ok ? 'ثبت شد' : (d.error || 'خطا')));
+      await loadOrders(); render();
+    });
+    $$('[data-cancel]').forEach((b) => b.onclick = async () => {
+      const d = await api('/orders/cancel', { method: 'POST', body: { order_id: Number(b.dataset.cancel) } });
+      toast(d.message || (d.ok ? 'لغو شد' : (d.error || 'خطا')));
+      await loadOrders(); render();
+    });
 
-    $$('[data-r]').forEach((el) => el.onclick = () => {
-      ST.role = el.dataset.r;
-      ST.page = el.dataset.r === 'manager' ? 'manager' : el.dataset.r === 'operator' ? 'operator' : 'market';
+    $$('[data-r]').forEach((el) => el.onclick = async () => {
+      const r = el.dataset.r;
+      setRole(r);
+      ST.loading = true; render();
+      try {
+        if (r === 'manager') { await loadMyChannels(); await loadMgrOrders(); }
+        if (r === 'operator') { await loadOpBanners(); await loadOpPayouts(); }
+        if (r === 'advertiser') { await loadCatalog(); }
+      } catch (e) { toast(e.message || 'خطا'); }
+      ST.loading = false;
       render();
     });
     const th2 = $('#btnTheme2');
@@ -711,16 +975,143 @@
       toast(d.message || (d.ok ? 'فاکتور ارسال شد' : (d.error || 'خطا')));
     };
 
-    const mgr = $('#btnMgrRefresh');
-    if (mgr) mgr.onclick = async () => {
-      const d = await api('/channels');
-      const el = $('#mgrBody');
-      if (!el) return;
-      if (!d.ok) { el.innerHTML = '<p class="hint">' + esc(d.message || d.error) + '</p>'; return; }
-      const chs = d.channels || d.items || [];
-      el.innerHTML = chs.length
-        ? chs.map((c) => `<div class="card"><strong>${esc(c.name)}</strong><div class="ch-sub">${faK(c.members_count)} عضو</div></div>`).join('')
-        : '<p class="hint">کانالی ثبت نشده. از بازو کانال اضافه کنید.</p>';
+    // —— Manager ——
+    $$('#mgrTabs button').forEach((b) => b.onclick = () => { ST.mgrTab = b.dataset.t; render(); });
+    const mgrRef = $('#btnMgrRefresh');
+    if (mgrRef) mgrRef.onclick = async () => {
+      ST.loading = true; render();
+      try { await loadMyChannels(); await loadMgrOrders(); await api('/channels/refresh', { method: 'POST', body: { force: true } }); }
+      catch (e) { toast(e.message || 'خطا'); }
+      ST.loading = false; render();
+    };
+    $$('[data-mgr-approve]').forEach((b) => b.onclick = async () => {
+      const d = await api('/orders/approve', { method: 'POST', body: { item_id: Number(b.dataset.mgrApprove) } });
+      toast(d.message || (d.ok ? 'تأیید شد' : (d.error || 'خطا')));
+      await loadMgrOrders(); render();
+    });
+    $$('[data-mgr-reject]').forEach((b) => b.onclick = async () => {
+      const d = await api('/orders/reject', { method: 'POST', body: { item_id: Number(b.dataset.mgrReject) } });
+      toast(d.message || (d.ok ? 'رد شد' : (d.error || 'خطا')));
+      await loadMgrOrders(); render();
+    });
+    $$('[data-mgr-suggest]').forEach((b) => b.onclick = () => {
+      const itemId = Number(b.dataset.mgrSuggest);
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <h3 style="margin:0 0 12px;text-align:center">پیشنهاد روز دیگر</h3>
+        <div class="field"><label>تاریخ (YYYY-MM-DD)</label>
+          <input id="suggestDate" type="date" /></div>
+        <button class="btn btn-primary btn-block" id="btnDoSuggest">ارسال پیشنهاد</button>`);
+      $('#btnDoSuggest').onclick = async () => {
+        const day = $('#suggestDate').value;
+        if (!day) { toast('تاریخ را وارد کنید'); return; }
+        const d = await api('/orders/suggest', { method: 'POST', body: { item_id: itemId, date: day } });
+        toast(d.message || (d.ok ? 'پیشنهاد ارسال شد' : (d.error || 'خطا')));
+        if (d.ok) { closeSheet(); await loadMgrOrders(); render(); }
+      };
+    });
+    $$('[data-mgr-published]').forEach((b) => b.onclick = async () => {
+      const d = await api('/orders/published', { method: 'POST', body: { item_id: Number(b.dataset.mgrPublished) } });
+      toast(d.message || (d.ok ? 'انتشار ثبت شد' : (d.error || 'خطا')));
+      await loadMgrOrders(); render();
+    });
+    $$('[data-mgr-ch]').forEach((b) => b.onclick = () => {
+      ST.selectedMgrChannel = Number(b.dataset.mgrCh);
+      navigate('mgr-channel');
+    });
+    $$('[data-mgr-mode]').forEach((b) => b.onclick = () => {
+      const chId = Number(b.dataset.mgrMode);
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <h3 style="margin:0 0 12px;text-align:center">روش انتشار</h3>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-m="bot" class="on">ربات</button>
+          <button type="button" data-m="linkyar">لینک‌یار</button>
+          <button type="button" data-m="manual">دستی</button>
+        </div>
+        <button class="btn btn-primary btn-block" id="btnSaveMode">ذخیره</button>`);
+      let mode = 'bot';
+      $$('#modeSeg button').forEach((x) => x.onclick = () => {
+        mode = x.dataset.m;
+        $$('#modeSeg button').forEach((y) => y.classList.toggle('on', y === x));
+      });
+      $('#btnSaveMode').onclick = async () => {
+        const d = await api('/publish-mode', { method: 'POST', body: { channel_id: chId, publish_mode: mode } });
+        toast(d.message || (d.ok ? 'ذخیره شد' : (d.error || 'خطا')));
+        if (d.ok) { closeSheet(); await loadMyChannels(); render(); }
+      };
+    });
+    const addTariff = $('#btnAddTariff') || $('#btnAddTariffForCh');
+    if (addTariff) addTariff.onclick = () => {
+      const chs = ST.myChannels || [];
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <h3 style="margin:0 0 12px;text-align:center">تعرفه جدید</h3>
+        <div class="field"><label>کانال</label>
+          <select id="tChannel">${chs.map((c)=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>نام تعرفه</label><input id="tName" placeholder="مثلاً ۲۴ ساعته" value="۲۴ ساعته"/></div>
+        <div class="field"><label>مدت (ساعت)</label><input id="tDur" type="number" value="24"/></div>
+        <div class="field"><label>قیمت (تومان)</label><input id="tPrice" type="number" placeholder="مثلاً 150000"/></div>
+        <button class="btn btn-primary btn-block" id="btnSaveTariff">ثبت تعرفه</button>`);
+      if (ST.selectedMgrChannel) {
+        const sel = $('#tChannel');
+        if (sel) sel.value = String(ST.selectedMgrChannel);
+      }
+      $('#btnSaveTariff').onclick = async () => {
+        const body = {
+          channel_id: Number($('#tChannel').value),
+          name: $('#tName').value.trim(),
+          duration_hours: Number($('#tDur').value) || 24,
+          price: Number($('#tPrice').value) || 0,
+        };
+        const d = await api('/tariffs/add', { method: 'POST', body });
+        toast(d.message || (d.ok ? 'تعرفه ثبت شد' : (d.error || 'خطا')));
+        if (d.ok) { closeSheet(); await loadMyChannels(); render(); }
+      };
+    };
+    const refOne = $('#btnRefreshOne');
+    if (refOne) refOne.onclick = async () => {
+      const d = await api('/channels/refresh', { method: 'POST', body: { channel_id: ST.selectedMgrChannel, force: true } });
+      toast(d.message || (d.ok ? 'آمار به‌روز شد' : (d.error || 'خطا')));
+      await loadMyChannels(); render();
+    };
+
+    // —— Operator ——
+    $$('#opTabs button').forEach((b) => b.onclick = () => { ST.opTab = b.dataset.t; render(); });
+    const opRef = $('#btnOpRefresh');
+    if (opRef) opRef.onclick = async () => {
+      ST.loading = true; render();
+      try { await loadOpBanners(); await loadOpPayouts(); } catch (e) { toast(e.message || 'خطا'); }
+      ST.loading = false; render();
+    };
+    $$('[data-op-approve]').forEach((b) => b.onclick = async () => {
+      const d = await api('/operator/banner-decide', { method: 'POST', body: { request_id: Number(b.dataset.opApprove), approve: true } });
+      toast(d.message || (d.ok ? 'تأیید شد' : (d.error || 'خطا')));
+      await loadOpBanners(); render();
+    });
+    $$('[data-op-reject]').forEach((b) => b.onclick = async () => {
+      const d = await api('/operator/banner-decide', { method: 'POST', body: { request_id: Number(b.dataset.opReject), approve: false } });
+      toast(d.message || (d.ok ? 'رد شد' : (d.error || 'خطا')));
+      await loadOpBanners(); render();
+    });
+    const batch = $('#btnOpBatch');
+    if (batch) batch.onclick = async () => {
+      const d = await api('/operator/mark-paid', { method: 'POST', body: {} });
+      if (d.ok && d.file_text) {
+        openSheet(`
+          <div class="sheet-handle"></div>
+          <h3 style="margin:0 0 12px;text-align:center">دسته واریز</h3>
+          <p class="hint">${fa(d.count || 0)} مورد</p>
+          <textarea readonly style="width:100%;min-height:120px;border-radius:12px;padding:10px;border:1px solid var(--line)">${esc(d.file_text)}</textarea>
+          <button class="btn btn-primary btn-block" id="btnConfirmPaid" style="margin-top:10px">تأیید واریز انجام شد</button>`);
+        $('#btnConfirmPaid').onclick = async () => {
+          const r = await api('/operator/mark-paid', { method: 'POST', body: { confirm: true, batch_id: d.batch_id } });
+          toast(r.message || (r.ok ? 'ثبت شد' : (r.error || 'خطا')));
+          if (r.ok) { closeSheet(); await loadOpPayouts(); render(); }
+        };
+      } else {
+        toast(d.message || d.error || 'درخواستی نیست');
+      }
     };
   }
 
@@ -828,6 +1219,9 @@
     $('#btnBack').onclick = () => {
       if (ST.page === 'calendar') navigate('channel');
       else if (ST.page === 'channel') navigate('market');
+      else if (ST.page === 'mgr-channel') navigate('mgr-home');
+      else if (ST.role === 'manager') navigate('mgr-home');
+      else if (ST.role === 'operator') navigate('op-home');
       else navigate('market');
     };
     $('#btnTheme').onclick = () => {
@@ -843,8 +1237,13 @@
       try {
         if (id === 'market') await ensureCatalog();
         if (id === 'banners') await loadBanners();
-        if (id === 'orders') await loadOrders();
+        if (id === 'orders') {
+          if (ST.role === 'manager') await loadMgrOrders();
+          else await loadOrders();
+        }
         if (id === 'wallet') await loadWallet();
+        if (id === 'mgr-home') { await loadMyChannels(); await loadMgrOrders(); }
+        if (id === 'op-home') { await loadOpBanners(); await loadOpPayouts(); }
       } catch (err) { toast(err.message || 'خطا'); }
       ST.loading = false;
       navigate(id);
