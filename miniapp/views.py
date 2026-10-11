@@ -37,7 +37,7 @@ def demos_hub(_request: HttpRequest) -> HttpResponse:
 
 @xframe_options_exempt
 def demo_page(_request: HttpRequest, name: str) -> HttpResponse:
-    allowed = {'baboon', 'marketplace', 'nova-store'}
+    allowed = {'baboon', 'marketplace', 'nova-store', 'linkban-pro'}
     if name not in allowed:
         raise Http404
     html = (PANEL / 'demos' / name / 'index.html').read_text(encoding='utf-8')
@@ -75,8 +75,11 @@ def mini_app(request: HttpRequest) -> HttpResponse:
     # موقتاً: بدون پارامتر → هاب دمو؛ ?app=1 → مینی‌اپ خودتان
     if request.GET.get('app') == '1':
         html = (PANEL / 'index.html').read_text(encoding='utf-8')
-    else:
+    elif request.GET.get('demo') == 'hub':
         html = (PANEL / 'demos' / 'index.html').read_text(encoding='utf-8')
+    else:
+        # پیش‌فرض: پیش‌نمایش طراحی جامع لینک‌بان
+        html = (PANEL / 'demos' / 'linkban-pro' / 'index.html').read_text(encoding='utf-8')
     resp = HttpResponse(html, content_type='text/html; charset=utf-8')
     return _framed(resp)
 
