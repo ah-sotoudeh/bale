@@ -138,91 +138,110 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
     }
 
 
+
 def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonResponse]]:
     init_data = _init_from_request(request)
-
-    # دمو فقط وقتی: صریحاً ?demo=1 و initData واقعی بله نباشد و DEMO_MINIAPP/DEBUG روشن باشد
-    demo_flag = (
-        request.GET.get('demo')
-        or request.headers.get('X-Demo-Mode')
+    body = _json_body(request) if request.method in ('POST', 'PUT', 'PATCH') else {}
+    soft_user = body.get('soft_user') if isinstance(body.get('soft_user'), dict) else {}
+    hdr_uid = (
+        request.headers.get('X-Bale-User-Id')
+        or request.META.get('HTTP_X_BALE_USER_ID')
+        or body.get('bale_user_id')
         or ''
     )
-    if str(demo_flag).strip() in ('1', 'true', 'yes') and not init_data:
+    hdr_uid = str(hdr_uid or '').strip()
+
+    # دمو فقط بدون نشست بله
+    demo_flag = request.GET.get('demo') or request.headers.get('X-Demo-Mode') or ''
+    if str(demo_flag).strip() in ('1', 'true', 'yes') and not init_data and not soft_user and not hdr_uid:
         from miniapp.demo import demo_enabled, ensure_demo_seed, get_or_create_demo_user
         from miniapp.auth import allow_debug_auth
 
         if demo_enabled() or allow_debug_auth():
-            demo_role = (
-                request.GET.get('role')
-                or request.headers.get('X-Demo-Role')
-                or 'customer'
-            )
+            demo_role = request.GET.get('role') or request.headers.get('X-Demo-Role') or 'customer'
             user, role = get_or_create_demo_user(str(demo_role))
             if role == 'manager':
                 ensure_demo_seed(user)
             request._lb_demo_role = role  # type: ignore[attr-defined]
             return user, None
 
-    ok, payload = validate_init_data(init_data)
-    if not ok:
-        from miniapp.auth import allow_debug_auth, parse_user_from_init
-
-        # نشست قبلی موفق (بعد از /me) — اگر هدر این‌بار نرسید
+    def _user_from_uid(uid: str, meta: Optional[dict] = None) -> User:
+        meta = meta or {}
+        user = User.objects.filter(bale_user_id=str(uid)).first()
+        if not user:
+            uname = meta.get('username') or f'bale_{uid}'
+            user = User(username=str(uname)[:30], bale_user_id=str(uid))
+            user.set_unusable_password()
+            user.bale_username = meta.get('username')
+            user.save()
         try:
-            sess_uid = request.session.get('lb_bale_uid')
-            if sess_uid:
-                user = User.objects.filter(bale_user_id=str(sess_uid)).first()
-                if user:
-                    return user, None
+            request.session['lb_bale_uid'] = str(uid)
+            request.session.modified = True
         except Exception:
             pass
+        return user
 
-        # soft: اگر فقط user JSON قابل خواندن باشد
-        soft_user = parse_user_from_init(init_data) if init_data else {}
-        if soft_user.get('id') is not None:
-            uid = str(soft_user['id'])
-            user = User.objects.filter(bale_user_id=uid).first()
-            if not user:
-                uname = soft_user.get('username') or f'bale_{uid}'
-                user = User(username=str(uname)[:30], bale_user_id=uid)
-                user.set_unusable_password()
-                user.bale_username = soft_user.get('username')
-                user.save()
-            try:
-                request.session['lb_bale_uid'] = uid
-                request.session.modified = True
-            except Exception:
-                pass
-            return user, None
-
-        if allow_debug_auth():
-            debug_id = request.GET.get('debug_bale_id') or _json_body(request).get('debug_bale_id')
-            if debug_id:
-                user, _ = User.objects.get_or_create(
-                    bale_user_id=str(debug_id),
-                    defaults={'username': f'mini_{debug_id}'[:30]},
-                )
-                return user, None
-        code = payload.get('error') or 'unauthorized'
-        return None, _fail(code, 401)
-
-    uid = str((payload.get('user') or {}).get('id') or '')
-    if not uid:
+    ok, payload = validate_init_data(init_data)
+    if ok:
+        uid = str((payload.get('user') or {}).get('id') or '')
+        if uid:
+            return _user_from_uid(uid, payload.get('user') or {}), None
         return None, _fail('no_user', 401)
 
-    user = User.objects.filter(bale_user_id=uid).first()
-    if not user:
-        uname = (payload.get('user') or {}).get('username') or f'bale_{uid}'
-        user = User(username=str(uname)[:30], bale_user_id=uid)
-        user.set_unusable_password()
-        user.bale_username = (payload.get('user') or {}).get('username')
-        user.save()
+    # --- مسیرهای پشتیبان وقتی hash/initData کامل نیست ---
+    from miniapp.auth import allow_debug_auth, parse_user_from_init
+
     try:
-        request.session['lb_bale_uid'] = uid
-        request.session.modified = True
+        sess_uid = request.session.get('lb_bale_uid')
+        if sess_uid:
+            user = User.objects.filter(bale_user_id=str(sess_uid)).first()
+            if user:
+                return user, None
     except Exception:
         pass
-    return user, None
+
+    soft_user2 = parse_user_from_init(init_data) if init_data else {}
+    if soft_user.get('id') is not None:
+        return _user_from_uid(str(soft_user['id']), soft_user), None
+    if soft_user2.get('id') is not None:
+        return _user_from_uid(str(soft_user2['id']), soft_user2), None
+    if hdr_uid:
+        return _user_from_uid(hdr_uid, soft_user or soft_user2), None
+
+    if allow_debug_auth():
+        debug_id = request.GET.get('debug_bale_id') or body.get('debug_bale_id')
+        if debug_id:
+            return _user_from_uid(str(debug_id)), None
+
+    code = (payload or {}).get('error') or 'unauthorized'
+    return None, _fail(code, 401)
+
+
+@csrf_exempt
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def api_auth_probe(request: HttpRequest) -> JsonResponse:
+    """تشخیص مشکل نشست — بدون افشای توکن."""
+    init_data = _init_from_request(request)
+    body = _json_body(request) if request.method == 'POST' else {}
+    soft = body.get('soft_user') if isinstance(body.get('soft_user'), dict) else {}
+    hdr_uid = request.headers.get('X-Bale-User-Id') or ''
+    from miniapp.auth import parse_user_from_init, validate_init_data
+    from integrations.bale_client import _token
+    ok, payload = validate_init_data(init_data) if init_data else (False, {'error': 'empty_init_data'})
+    parsed = parse_user_from_init(init_data) if init_data else {}
+    return JsonResponse({
+        'ok': True,
+        'has_init': bool(init_data),
+        'init_len': len(init_data or ''),
+        'validate_ok': ok,
+        'validate_error': None if ok else (payload or {}).get('error'),
+        'parsed_user_id': str((parsed or {}).get('id') or '') or None,
+        'soft_user_id': str(soft.get('id') or '') or None,
+        'header_user_id': str(hdr_uid or '') or None,
+        'has_bot_token': bool((_token() or '').strip()),
+        'session_uid': str(request.session.get('lb_bale_uid') or '') or None,
+    })
 
 
 @csrf_exempt

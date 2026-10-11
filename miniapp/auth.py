@@ -81,22 +81,16 @@ def validate_init_data(
             matched = True
             break
 
-    # soft: اگر هش نخورد ولی user قابل‌خواندن بود — برای پایداری مینی‌اپ بله
-    # (بعضی کلاینت‌های بله فیلد اضافه می‌فرستند و هش را به‌هم می‌زنند)
     soft = os.environ.get("BALE_MINIAPP_SOFT_AUTH", "1").strip().lower() not in ("0", "false", "no")
     if not matched:
-        user_try = {}
+        user_try: Dict[str, Any] = {}
         if pairs.get("user"):
             try:
                 user_try = json.loads(pairs["user"])
             except Exception:
                 user_try = {}
         if soft and user_try.get("id") is not None:
-            logger.warning(
-                "initData soft-auth uid=%s keys=%s",
-                user_try.get("id"),
-                sorted(pairs.keys()),
-            )
+            logger.warning("initData soft-auth uid=%s keys=%s", user_try.get("id"), sorted(pairs.keys()))
             matched = True
             pairs["_soft"] = "1"
         else:
