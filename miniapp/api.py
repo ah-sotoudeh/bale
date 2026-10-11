@@ -37,7 +37,11 @@ def _init_from_request(request: HttpRequest) -> str:
     body = _json_body(request) if request.method == 'POST' else {}
     return (
         request.headers.get('X-Bale-Init-Data')
-
+        or request.META.get('HTTP_X_BALE_INIT_DATA')
+        or body.get('initData')
+        or request.GET.get('initData')
+        or ''
+    )
 
 
 def _norm_username(raw: str) -> str:
