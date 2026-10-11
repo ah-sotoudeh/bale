@@ -884,9 +884,6 @@ def _item_in_manager_inbox(it: OrderItem, user: User) -> bool:
     return bool(group and group.manager_id == user.id)
 
 
-@csrf_exempt
-@require_http_methods(['GET'])
-
 def _item_publish_due(it: OrderItem) -> bool:
     """نوبت انتشار دستی نزدیک یا رسیده است."""
     if not it.channel_id:
@@ -909,6 +906,8 @@ def _item_publish_due(it: OrderItem) -> bool:
     return start - timedelta(hours=hours) <= now <= start + timedelta(hours=6)
 
 
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
 def api_orders(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
