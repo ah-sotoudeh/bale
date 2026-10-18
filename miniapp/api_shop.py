@@ -146,10 +146,16 @@ def _order_deadline_hint(order: Order) -> str:
 
 
 def _own_tariff(user, tariff_id):
-    t = Tariff.objects.select_related('channel', 'group').filter(id=tariff_id).first()
+    try:
+        tid = int(tariff_id)
+    except (TypeError, ValueError):
+        return None
+    t = Tariff.objects.select_related('channel', 'group').filter(id=tid).first()
     if not t:
         return None
-    ok = (t.channel and t.channel.manager_id == user.id) or (t.group and t.group.manager_id == user.id)
+    ok = (t.channel_id and t.channel and t.channel.manager_id == user.id) or (
+        t.group_id and t.group and t.group.manager_id == user.id
+    )
     return t if ok else False
 
 
@@ -249,32 +255,72 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_busy_day(request: HttpRequest) -> JsonResponse:
+    """علامت روز پر برای مدیر — مستقیم AvailabilitySlot می‌سازد."""
     user, err = _auth_user(request)
     if err:
         return err
     assert user is not None
+    body = _json_body(request)
     try:
-        body = _json_body(request)
-        t = _own_tariff(user, body.get('tariff_id'))
-        if t is None:
-            return _err('not_found', 404)
-        if t is False:
-            return _err('forbidden', 403, _NOT_YOUR_TARIFF)
-        day = _parse_day(body)
-        if not day:
-            return _err('bad_date')
+        tid = int(body.get('tariff_id'))
+    except (TypeError, ValueError):
+        return _err('bad_fields', 400, 'شناسه تعرفه نامعتبر است.')
+    t = _own_tariff(user, tid)
+    if t is None:
+        return _err('not_found', 404, 'تعرفه پیدا نشد.')
+    if t is False:
+        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
+    day = _parse_day(body)
+    if not day:
+        return _err('bad_date', 400, 'تاریخ نامعتبر است.')
+    try:
+        from channels_app.models import AvailabilitySlot
+        from datetime import time as dtime, timedelta
+        from orders.availability import MANUAL_BUSY_NOTE
+
+        hour = int(t.start_hour) if t.start_hour is not None else 0
+        hour = max(0, min(23, hour))
+        duration = max(1, int(t.duration_hours or 1))
+        naive_start = datetime.combine(day, dtime(hour=hour, minute=0, second=0))
+        if timezone.is_aware(timezone.now()):
+            start = timezone.make_aware(naive_start, timezone.get_current_timezone())
+        else:
+            start = naive_start
+        end = start + timedelta(hours=duration)
+        # اگر از قبل برای همین تعرفه و روز اسلات دستی هست همان را برگردان
+        existing = (
+            AvailabilitySlot.objects.filter(
+                tariff=t,
+                is_available=False,
+                note__icontains='خارج از سیستم',
+                start__date=day,
+            )
+            .order_by('-id')
+            .first()
+        )
+        if existing:
+            return JsonResponse({'ok': True, 'slot_id': existing.id, 'jalali': format_jalali(day)})
+        slot = AvailabilitySlot.objects.create(
+            channel=t.channel if not t.group_id else None,
+            group=t.group if t.group_id else None,
+            tariff=t,
+            start=start,
+            end=end,
+            is_available=False,
+            note=MANUAL_BUSY_NOTE,
+        )
         try:
-            slot = mark_tariff_day_busy(t, day)
-        except Exception as exc:
-            from orders.slots import SlotConflict
-            if isinstance(exc, SlotConflict):
-                return _err('slot_conflict', 409)
-            logger.exception('mark_tariff_day_busy')
-            return _err('server', 500, 'ثبت روز پر نشد. دوباره تلاش کنید.')
+            from orders.slots import hold_manual_day
+            hold_manual_day(t, day, slot)
+        except Exception:
+            logger.exception('hold_manual_day optional')
         return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
-    except Exception:
+    except Exception as exc:
         logger.exception('api_busy_day')
-        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت روز پر نشد.'}, status=500)
+        return JsonResponse(
+            {'ok': False, 'error': 'server', 'message': f'ثبت روز پر نشد: {type(exc).__name__}'},
+            status=500,
+        )
 
 
 @csrf_exempt
@@ -285,15 +331,34 @@ def api_clear_busy(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    t = _own_tariff(user, body.get('tariff_id'))
+    try:
+        tid = int(body.get('tariff_id'))
+    except (TypeError, ValueError):
+        return _err('bad_fields', 400, 'شناسه تعرفه نامعتبر است.')
+    t = _own_tariff(user, tid)
     if t is None:
         return _err('not_found', 404)
     if t is False:
         return _err('forbidden', 403, _NOT_YOUR_TARIFF)
-    ok = clear_manual_busy_slot(int(body.get('slot_id') or 0), t)
+    slot_id = 0
+    try:
+        slot_id = int(body.get('slot_id') or 0)
+    except (TypeError, ValueError):
+        slot_id = 0
+    ok = clear_manual_busy_slot(slot_id, t) if slot_id else False
     if not ok:
-        return _err('not_found', 404)
-    return JsonResponse({'ok': True})
+        # fallback: delete manual slots for date
+        day = _parse_day(body)
+        if day:
+            from channels_app.models import AvailabilitySlot
+            deleted, _ = AvailabilitySlot.objects.filter(
+                tariff=t, is_available=False, start__date=day, note__icontains='خارج از سیستم'
+            ).delete()
+            ok = deleted > 0
+    if not ok:
+        return JsonResponse({'ok': True, 'cleared': False})  # idempotent
+    return JsonResponse({'ok': True, 'cleared': True})
+
 
 
 @csrf_exempt

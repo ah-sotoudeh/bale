@@ -4424,3 +4424,18 @@ main button.lb-ch-row .lb-ch-ava {
   outline: 2px solid var(--lb-primary, #0d9488);
   background: rgba(13, 148, 136, 0.12) !important;
 }
+
+/* day cell polish */
+.lb-cal-month .grid.grid-cols-7 > button.lb-day,
+.lb-cal-month .grid.grid-cols-7 > div.lb-day {
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.lb-cal-month .lb-day:active {
+  transform: scale(0.96);
+}
+.lb-cal-month .lb-full span.mt-1 {
+  color: var(--lb-text-2, #64748b) !important;
+}
+.lb-cal-month .lb-free span.mt-1 {
+  color: var(--lb-primary, #0d9488) !important;
+}
