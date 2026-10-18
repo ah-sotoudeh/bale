@@ -175,20 +175,42 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
         code = (payload or {}).get('error') or 'unauthorized'
         return None, _fail(code, 401)
 
-    user = User.objects.filter(bale_user_id=uid).first()
+    # یکسان‌سازی شناسه (فقط رقم) تا با رکوردهای قدیمی یکی شود
+    uid = str(uid).strip()
+    if uid.endswith('.0') and uid.replace('.', '', 1).replace('-', '', 1).isdigit():
+        uid = uid[:-2]
+    # جستجو با چند شکل ذخیره‌شده
+    user = (
+        User.objects.filter(bale_user_id=uid).first()
+        or User.objects.filter(bale_user_id=str(int(uid)) if uid.lstrip('-').isdigit() else uid).first()
+    )
     if not user:
-        uname = meta.get('username') or f'bale_{uid}'
-        user = User(username=str(uname)[:30], bale_user_id=uid)
+        uname_meta = str(meta.get('username') or '').strip().lstrip('@')
+        # username جنگو باید یکتا باشد — از شناسه بله استفاده کن تا collision ندهد
+        login_name = f'bale_{uid}'[:30]
+        user = User(username=login_name, bale_user_id=uid)
         user.set_unusable_password()
-        user.bale_username = meta.get('username')
-        user.save()
+        user.bale_username = uname_meta or None
+        try:
+            user.save()
+        except Exception:
+            # ممکن است race یا username تکراری باشد
+            user = User.objects.filter(bale_user_id=uid).first()
+            if not user:
+                raise
     else:
-        # همگام‌سازی نام کاربری بله برای claim انتساب‌های پشتیبان
-        uname = meta.get('username')
-        if uname and str(user.bale_username or '') != str(uname):
+        uname = str(meta.get('username') or '').strip().lstrip('@')
+        if uname and str(user.bale_username or '') != uname:
             user.bale_username = uname
             try:
                 user.save(update_fields=['bale_username'])
+            except Exception:
+                pass
+        # اگر bale_user_id با صفر/فرمت عجیب ذخیره شده، یکدست کن
+        if str(user.bale_user_id or '') != uid:
+            try:
+                user.bale_user_id = uid
+                user.save(update_fields=['bale_user_id'])
             except Exception:
                 pass
     return user, None
@@ -347,14 +369,54 @@ def api_channels(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    claim_pending_channels(user)
-    rows = list(Channel.objects.filter(manager=user).order_by('id'))
-    from integrations.channel_stats import recent_snapshots
+    try:
+        claim_pending_channels(user)
+    except Exception:
+        logger.exception('claim_pending_channels in api_channels')
 
-    history = recent_snapshots([ch.id for ch in rows])
-    channels = [_channel_payload(ch, history.get(ch.id) or []) for ch in rows]
-    groups = [_group_payload(g) for g in ChannelGroup.objects.filter(manager=user).order_by('id')]
-    return JsonResponse({'ok': True, 'channels': channels, 'groups': groups})
+    try:
+        rows = list(Channel.objects.filter(manager=user).order_by('id'))
+    except Exception:
+        logger.exception('list channels')
+        rows = []
+
+    history: dict = {}
+    try:
+        from integrations.channel_stats import recent_snapshots
+        history = recent_snapshots([ch.id for ch in rows]) or {}
+    except Exception:
+        logger.exception('recent_snapshots')
+
+    channels = []
+    for ch in rows:
+        try:
+            channels.append(_channel_payload(ch, history.get(ch.id) or []))
+        except Exception:
+            logger.exception('channel payload %s', getattr(ch, 'id', '?'))
+            channels.append({
+                'id': ch.id,
+                'name': ch.name or ch.link or f'#{ch.id}',
+                'link': ch.link or '',
+                'publish_mode': ch.publish_mode or 'manual',
+            })
+
+    groups = []
+    try:
+        for g in ChannelGroup.objects.filter(manager=user).order_by('id'):
+            try:
+                groups.append(_group_payload(g))
+            except Exception:
+                logger.exception('group payload %s', getattr(g, 'id', '?'))
+    except Exception:
+        logger.exception('list groups')
+
+    return JsonResponse({
+        'ok': True,
+        'channels': channels,
+        'groups': groups,
+        'manager_id': user.id,
+        'bale_user_id': str(user.bale_user_id or ''),
+    })
 
 
 @csrf_exempt
