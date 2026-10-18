@@ -501,19 +501,58 @@ var reset = document.getElementById("lb-theme-reset");
   }
 
   function ensureAvatar() {
+    /* پروفایل خارج از درخت React تا removeChild ندهد */
+    var host = document.getElementById("lb-shell-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "lb-shell-host";
+      document.body.insertBefore(host, document.body.firstChild);
+    }
     var header = document.querySelector("header");
-    if (!header) return;
-    header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
-      row.classList.add("lb-roles-hidden");
-    });
-    header.querySelectorAll("div").forEach(function (row) {
-      var btns = row.querySelectorAll("button.rounded-full");
-      if (btns.length >= 2 && btns.length <= 4) {
-        var txt = row.textContent || "";
-        if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
+    if (header) {
+      header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
+        row.classList.add("lb-roles-hidden");
+      });
+      header.querySelectorAll("div").forEach(function (row) {
+        var btns = row.querySelectorAll("button.rounded-full");
+        if (btns.length >= 2 && btns.length <= 4) {
+          var txt = row.textContent || "";
+          if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
+        }
+      });
+    }
+    var btn = document.getElementById("lb-user-avatar-btn");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "lb-user-avatar-btn";
+      btn.className = "lb-user-avatar lb-user-avatar-fixed";
+      btn.setAttribute("aria-label", "حساب و تنظیمات");
+      btn.addEventListener("click", function () {
+        if (window.lbOpenAccount) window.lbOpenAccount();
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+      });
+      host.appendChild(btn);
+    }
+    var u = getBaleUser();
+    var photo = u && (u.photo_url || u.photoUrl);
+    var cur = btn.getAttribute("data-photo") || "";
+    var next = photo || "";
+    if (cur !== next || !btn.childNodes.length) {
+      btn.setAttribute("data-photo", next);
+      btn.innerHTML = "";
+      if (photo) {
+        var img = document.createElement("img");
+        img.src = photo;
+        img.alt = "";
+        btn.appendChild(img);
+      } else {
+        var span = document.createElement("span");
+        span.className = "lb-user-avatar-initials";
+        span.textContent = userInitials(u);
+        btn.appendChild(span);
       }
-    });
-    /* دیگر دکمه آواتار به هدر React تزریق نمی‌شود — علت removeChild و UI تکراری */
+    }
   }
 
   function ensureLogo() {
@@ -2485,10 +2524,20 @@ var reset = document.getElementById("lb-theme-reset");
     var main = document.querySelector("main");
     if (!main) return;
 
+    var host = document.getElementById("lb-shell-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "lb-shell-host";
+      document.body.insertBefore(host, document.body.firstChild);
+    }
+
     var panel = document.getElementById("lb-group-panel");
     var onList = title === "کانال‌ها";
     if (!onList) {
-      if (panel) panel.hidden = true;
+      if (panel) {
+        panel.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+      }
       document.documentElement.classList.remove("lb-group-picking");
       clearRowPickBindings();
       return;
@@ -2507,9 +2556,17 @@ var reset = document.getElementById("lb-theme-reset");
       channelRows.push(btn);
     });
     if (channelRows.length < 2) {
-      if (panel) panel.hidden = true;
+      if (panel) {
+        panel.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+      }
       document.documentElement.classList.remove("lb-group-picking");
       return;
+    }
+    if (panel) {
+      panel.hidden = false;
+      panel.setAttribute("aria-hidden", "false");
+      if (panel.parentNode !== host) host.appendChild(panel);
     }
 
     if (!panel) {
@@ -2536,7 +2593,8 @@ var reset = document.getElementById("lb-theme-reset");
         '  <button type="button" class="lb-gp-save" id="lb-gp-save">ثبت مجموعه</button>' +
         '  <p class="lb-gp-msg" id="lb-gp-msg" hidden></p>' +
         '</div>';
-      main.appendChild(panel);
+      panel.hidden = false;
+      host.appendChild(panel);
 
       panel.querySelector("#lb-gp-toggle").addEventListener("click", function () {
         var st = window.__lbGroupState;

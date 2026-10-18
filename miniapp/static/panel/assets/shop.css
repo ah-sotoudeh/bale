@@ -4381,3 +4381,59 @@ main button.lb-ch-row .lb-ch-ava {
   font-size: 11px;
   font-weight: 700;
 }
+
+/* —— shell host: خارج از React —— */
+#lb-shell-host {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 55;
+}
+#lb-shell-host > * {
+  pointer-events: auto;
+}
+.lb-user-avatar-fixed,
+#lb-user-avatar-btn.lb-user-avatar {
+  position: fixed !important;
+  top: max(10px, env(safe-area-inset-top, 0px)) !important;
+  left: 12px !important;
+  right: auto !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 50% !important;
+  border: 1px solid var(--line, #e2e8f0) !important;
+  background: var(--surface, #fff) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: grid !important;
+  place-items: center !important;
+  z-index: 70 !important;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+}
+.lb-user-avatar-fixed img,
+#lb-user-avatar-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lb-user-avatar-initials {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #0b1220);
+}
+/* ساخت مجموعه: پایین لیست، فقط صفحه کانال‌ها، بدون پرش داخل main */
+#lb-shell-host .lb-group-panel {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  top: auto !important;
+  margin: 0 !important;
+  z-index: 45 !important;
+  max-width: 480px;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+#lb-shell-host .lb-group-panel[hidden] {
+  display: none !important;
+}
