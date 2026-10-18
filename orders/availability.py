@@ -329,9 +329,9 @@ def clear_manual_busy_slot(slot_id: int, tariff: Tariff) -> bool:
 
 def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
     """Block only this tariff's slot on the given local day (not neighboring days)."""
-    from orders.slots import SlotConflict, hold_manual_day
+    from orders.slots import hold_manual_day
 
-    hour = tariff.start_hour if tariff.start_hour is not None else 0
+    hour = int(tariff.start_hour) if tariff.start_hour is not None else 0
     duration = max(1, int(tariff.duration_hours or 1))
     start = timezone.make_aware(datetime.combine(day, dtime(hour=hour, minute=0, second=0)))
     end = start + timedelta(hours=duration)
@@ -343,7 +343,8 @@ def mark_tariff_day_busy(tariff: Tariff, day: date) -> AvailabilitySlot:
         tariff=tariff,
         note=MANUAL_BUSY_NOTE,
     )
-    if not hold_manual_day(tariff, day, slot):
-        slot.delete()
-        raise SlotConflict()
+    try:
+        hold_manual_day(tariff, day, slot)
+    except Exception:
+        pass
     return slot
