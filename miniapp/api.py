@@ -994,6 +994,18 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         'tariff_id': t.id,
         'channel_id': t.channel_id,
         'group_id': t.group_id,
+        'tariff': {
+            'id': t.id,
+            'name': t.name,
+            'price': t.price,
+            'duration_hours': t.duration_hours,
+            'start_hour': t.start_hour,
+            'is_active': True,
+            'channel_id': t.channel_id,
+            'group_id': t.group_id,
+            'is_package': bool(t.group_id),
+            'owner': (ch.name if ch else (group.name if group else '')),
+        },
     })
 
 

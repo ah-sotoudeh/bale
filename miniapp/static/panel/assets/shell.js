@@ -332,24 +332,28 @@
     var initials = (typeof userInitials === "function") ? userInitials(u) : "؟";
     var photo = u && (u.photo_url || u.photoUrl);
 
-    /* نقش‌های فعلی از هدر (حتی اگر مخفی) */
-    var roleBtns = [];
-    document.querySelectorAll("header button.rounded-full").forEach(function (b) {
-      var t = (b.textContent || "").trim();
-      if (/پشتیبانی|کانال|مشتری/.test(t)) roleBtns.push({ el: b, label: t, on: b.classList.contains("bg-link") });
-    });
-
-    var rolesHtml = "";
-    if (roleBtns.length) {
-      rolesHtml = '<p class="lb-acc-label">نقش فعال</p><div class="lb-acc-roles">';
-      roleBtns.forEach(function (r, i) {
-        rolesHtml +=
-          '<button type="button" class="lb-acc-role' + (r.on ? " on" : "") + '" data-role-i="' + i + '">' +
-          r.label +
-          "</button>";
-      });
-      rolesHtml += "</div>";
+    /* نقش‌ها از store/me — هدر نقش‌ها را مخفی کردیم */
+    var me = window.__lbMe || {};
+    var curRole = me.role || "customer";
+    try {
+      curRole = localStorage.getItem("lb_role") || curRole;
+    } catch (e) {}
+    var roleDefs = [
+      { id: "customer", label: "مشتری" },
+      { id: "manager", label: "کانال‌دار" },
+    ];
+    if (me.isOperator || me.debug) {
+      roleDefs.push({ id: "operator", label: "پشتیبانی" });
     }
+    var rolesHtml = '<p class="lb-acc-label">نقش فعال</p><div class="lb-acc-roles">';
+    roleDefs.forEach(function (r) {
+      rolesHtml +=
+        '<button type="button" class="lb-acc-role' + (r.id === curRole ? " on" : "") + '" data-role-id="' + r.id + '">' +
+        r.label +
+        "</button>";
+    });
+    rolesHtml += "</div>";
+    var roleBtns = roleDefs; /* for click handler length check */
 
     back.innerHTML =
       '<div class="lb-sheet" role="dialog" aria-label="حساب شما">' +
@@ -377,14 +381,22 @@
     if (nameEl) nameEl.textContent = name;
     if (userEl) userEl.textContent = uname;
 
-    back.querySelectorAll("[data-role-i]").forEach(function (btn) {
+    back.querySelectorAll("[data-role-id]").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        var i = parseInt(btn.getAttribute("data-role-i"), 10);
-        if (roleBtns[i]) {
-          roleBtns[i].el.click();
-          closeSheet();
-          try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+        var rid = btn.getAttribute("data-role-id");
+        if (!rid) return;
+        try {
+          if (window.__lbSetRole) window.__lbSetRole(rid);
+          else if (window.Z && Z.getState && Z.getState().setRole) Z.getState().setRole(rid);
+          else {
+            localStorage.setItem("lb_role", rid);
+            location.reload();
+          }
+        } catch (e) {
+          try { localStorage.setItem("lb_role", rid); location.reload(); } catch (e2) {}
         }
+        closeSheet();
+        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
       });
     });
 
@@ -2916,11 +2928,10 @@ var reset = document.getElementById("lb-theme-reset");
         if (nameInp) nameInp.value = "";
         updateAvatarButton();
         try {
-          if (Z && Z.getState && Z.getState().hydrateLive) Z.getState().hydrateLive();
-          else window.location.reload();
-        } catch (e) {
-          try { window.location.reload(); } catch (e2) {}
-        }
+          if (window.__lbHydrate) window.__lbHydrate();
+          else window.dispatchEvent(new Event("lb:hydrate"));
+        } catch (e) {}
+
       })
       .catch(function (err) {
         show(String((err && err.message) || err || "خطا"));

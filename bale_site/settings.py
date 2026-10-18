@@ -45,6 +45,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'miniapp.json_errors.MiniappJsonErrorMiddleware',
 ]
 
 ROOT_URLCONF = 'bale_site.urls'
