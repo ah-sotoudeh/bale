@@ -1,5 +1,16 @@
 /* پوستهٔ تم، برگهٔ حساب و ترجیح‌های کاربر. منطق سفارش این‌جا نیست. */
 (function () {
+
+  function lbSafeRemove(el) {
+    try {
+      if (!el) return;
+      if (typeof el.remove === "function" && el.isConnected !== false) {
+        var p = el.parentNode;
+        if (p) p.removeChild(el);
+        else el.remove();
+      }
+    } catch (err) {}
+  }
   /* cache initData ASAP */
   try {
     var _id = (window.Bale && Bale.WebApp && Bale.WebApp.initData) || (window.Telegram && Telegram.WebApp && Telegram.WebApp.initData) || "";
@@ -592,24 +603,9 @@ var reset = document.getElementById("lb-theme-reset");
   }
 
   function syncSkeletons() {
-    // پاک‌سازی اسکلت‌های یتیم — علت نمایش دائمی روی همه صفحات
-    document.querySelectorAll(".lb-skeleton-stack").forEach(function (sk) {
-      var next = sk.nextElementSibling;
-      if (!isLoadingParagraph(next)) {
-        sk.remove();
-      }
-    });
-    // فقط وقتی پیام لودینگ واقعاً هست اسکلت بساز
-    document.querySelectorAll("main p.lb-loading-msg, main p.text-center.text-muted").forEach(function (p) {
-      if (!isLoadingParagraph(p)) return;
-      p.classList.add("lb-loading-msg");
-      var prev = p.previousElementSibling;
-      if (prev && prev.classList && prev.classList.contains("lb-skeleton-stack")) return;
-      var sk = document.createElement("div");
-      sk.className = "lb-skeleton-stack";
-      sk.setAttribute("aria-hidden", "true");
-      sk.innerHTML = '<div class="lb-skel"></div><div class="lb-skel"></div><div class="lb-skel short"></div>';
-      p.parentElement && p.parentElement.insertBefore(sk, p);
+    // فقط پاک‌سازی اسکلت‌های یتیم — دیگر داخل درخت React چیزی تزریق نکن
+    document.querySelectorAll(".lb-skeleton-stack, .lb-list-skeleton").forEach(function (sk) {
+      lbSafeRemove(sk);
     });
   }
 
@@ -905,32 +901,18 @@ var reset = document.getElementById("lb-theme-reset");
 
   /* 1) اسکلت لیست وقتی main تقریباً خالی است و لودینگ حساب نیست */
   function listSkeleton() {
+    /* اسکلت لیست را غیرفعال کردیم — با React تداخل و خطای removeChild می‌داد */
     var main = document.querySelector("main");
     if (!main) return;
     var existing = main.querySelector(".lb-list-skeleton");
-    var hasCards = main.querySelectorAll(".rounded-2xl.bg-surface").length > 0;
-    var loading = main.querySelector(".lb-loading-msg, p.text-center.text-muted");
-    var isLoad = loading && /در حال/.test(loading.textContent || "");
-    if (isLoad && !hasCards) {
-      if (!existing) {
-        var sk = document.createElement("div");
-        sk.className = "lb-list-skeleton";
-        sk.innerHTML =
-          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>' +
-          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>' +
-          '<div class="lb-skel-card"><div class="lb-skel"></div><div class="lb-skel short"></div></div>';
-        main.appendChild(sk);
-      }
-    } else if (existing) {
-      existing.remove();
-    }
+    if (existing) lbSafeRemove(existing);
   }
 
   /* 6) نشان «جدید» — اگر ردیف سفارش تازه در DOM آمد */
   function markNewRows() {
     /* نشان «جدید» فقط از دادهٔ API روی فهرست مشتری (is_new) — نه تزریق عمومی */
     document.querySelectorAll(".lb-new-badge:not(.lb-new-real)").forEach(function (b) {
-      b.remove();
+      lbSafeRemove(b);
     });
   }
   window.__lbMarkNew = false;

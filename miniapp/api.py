@@ -103,7 +103,29 @@ def _can_switch_roles(bale_user_id: str) -> bool:
     return True
 
 
+def _channel_tariff_rows(ch: Channel) -> list:
+    rows = []
+    try:
+        for t in ch.tariffs.all()[:50]:
+            rows.append({
+                'id': t.id,
+                'name': t.name,
+                'price': t.price,
+                'duration_hours': t.duration_hours,
+                'start_hour': t.start_hour,
+                'is_active': bool(t.is_active),
+                'channel_id': ch.id,
+                'group_id': None,
+                'is_package': False,
+                'owner': ch.name,
+            })
+    except Exception:
+        logger.exception('channel tariff rows %s', getattr(ch, 'id', '?'))
+    return rows
+
+
 def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, Any]:
+    trows = _channel_tariff_rows(ch)
     return {
         'id': ch.id,
         'name': ch.name,
@@ -115,7 +137,8 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'bot_checked_at': ch.bot_checked_at.isoformat() if ch.bot_checked_at else '',
         'linkyar_checked_at': ch.linkyar_checked_at.isoformat() if ch.linkyar_checked_at else '',
         'manual_remind_hours': ch.manual_remind_hours,
-        'tariff_count': ch.tariffs.count(),
+        'tariff_count': len(trows) if trows else ch.tariffs.count(),
+        'tariffs': trows,
         'is_listed': bool(getattr(ch, 'is_listed', True)),
         'ownership_verified': bool(getattr(ch, 'ownership_verified', False)),
         'pending_manager_username': (getattr(ch, 'pending_manager_username', None) or ''),
