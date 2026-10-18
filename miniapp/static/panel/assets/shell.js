@@ -33,6 +33,29 @@
     { key: "paid", label: "انتشار" },
     { key: "completed", label: "پایان" },
   ];
+
+  function lbCleanupInputWraps() {
+    /* فقط یک‌بار قبل از hydrate؛ جابه‌جایی مداوم با React می‌جنگد */
+    if (window.__lbWrapCleaned) return;
+    window.__lbWrapCleaned = true;
+    try {
+      document.querySelectorAll("main .lb-input-wrap").forEach(function (wrap) {
+        var inp = wrap.querySelector("input, textarea");
+        var parent = wrap.parentNode;
+        if (!inp || !parent) {
+          lbSafeRemove(wrap);
+          return;
+        }
+        try {
+          /* برگرداندن input به parent اصلی و حذف wrap اضافی */
+          parent.insertBefore(inp, wrap);
+          lbSafeRemove(wrap);
+          try { delete inp.dataset.lbClear; } catch (e2) {}
+        } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
   function orderStepIndex(status) {
     for (var i = 0; i < ORDER_STEPS.length; i++) if (ORDER_STEPS[i].key === status) return i;
     if (status === "rejected" || status === "cancelled") return -1;
@@ -480,11 +503,9 @@ var reset = document.getElementById("lb-theme-reset");
   function ensureAvatar() {
     var header = document.querySelector("header");
     if (!header) return;
-    /* مخفی کردن سوییچ نقش بالای صفحه — نقش فقط در تنظیمات */
     header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
       row.classList.add("lb-roles-hidden");
     });
-    /* هر div که سه دکمه نقش دارد */
     header.querySelectorAll("div").forEach(function (row) {
       var btns = row.querySelectorAll("button.rounded-full");
       if (btns.length >= 2 && btns.length <= 4) {
@@ -492,105 +513,8 @@ var reset = document.getElementById("lb-theme-reset");
         if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
       }
     });
-
-    if (header.querySelector(".lb-user-avatar")) return;
-    var h1 = header.querySelector("h1");
-    if (!h1 || !h1.parentElement) return;
-    var u = getBaleUser();
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "lb-user-avatar";
-    btn.setAttribute("aria-label", "حساب و تنظیمات");
-    var photo = u && (u.photo_url || u.photoUrl);
-    if (photo) {
-      var img = document.createElement("img");
-      img.src = photo;
-      img.alt = "";
-      btn.appendChild(img);
-    } else {
-      var span = document.createElement("span");
-      span.className = "lb-user-avatar-initials";
-      span.textContent = userInitials(u);
-      btn.appendChild(span);
-    }
-    btn.addEventListener("click", function () {
-      if (window.lbOpenAccount) window.lbOpenAccount();
-      try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
-    });
-    var row = h1.parentElement;
-    row.classList.add("lb-header-row");
-    /* پروفایل سمت چپ: اول در DOM برای absolute left */
-    row.insertBefore(btn, row.firstChild);
-    /* عنوان وسط — کلاس */
-    h1.classList.add("lb-header-title");
-    syncHeaderBack();
-      syncGroupTariffPanel();
-    /* تم را به انتهای ردیف ببر */
-    var tt = row.querySelector("button.tt");
-    if (tt) row.appendChild(tt);
-    /* دکمه بازگشت اگر هست، کنار پروفایل نباشد — مخفی یا کوچک */
-    var back = row.querySelector('button[aria-label]');
-    if (back && back !== btn && !back.classList.contains("tt")) {
-      back.classList.add("lb-header-back");
-    }
+    /* دیگر دکمه آواتار به هدر React تزریق نمی‌شود — علت removeChild و UI تکراری */
   }
-
-  
-  function syncHeaderBack() {
-    var header = document.querySelector("header");
-    if (!header) return;
-    var row = header.querySelector(".lb-header-row") || header.querySelector(":scope > div");
-    if (!row) return;
-    row.classList.add("lb-header-row");
-
-    /* دکمه واقعی React را پیدا کن ولی جابه‌جا نکن — فقط مخفی */
-    var realBack = null;
-    row.querySelectorAll("button").forEach(function (b) {
-      if (b.id === "lb-nav-back") return;
-      if (b.classList.contains("tt") || b.classList.contains("lb-user-avatar") || b.classList.contains("lb-ch-edit-btn")) return;
-      var al = (b.getAttribute("aria-label") || "");
-      if (/برگشت|back|بازگشت/i.test(al)) realBack = b;
-      else if (b.classList.contains("grid") && b.querySelector("svg") && !b.classList.contains("tt")) {
-        if (!realBack) realBack = b;
-      }
-    });
-
-    var shellBack = document.getElementById("lb-nav-back");
-    if (realBack) {
-      realBack.classList.add("lb-react-back-hidden");
-      header.classList.add("lb-has-back");
-      if (!shellBack) {
-        shellBack = document.createElement("button");
-        shellBack.id = "lb-nav-back";
-        shellBack.type = "button";
-        shellBack.className = "lb-header-back";
-        shellBack.setAttribute("aria-label", "برگشت");
-        shellBack.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
-        shellBack.addEventListener("click", function (ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          if (shellBack.dataset.busy) return;
-          shellBack.dataset.busy = "1";
-          setTimeout(function () { delete shellBack.dataset.busy; }, 400);
-          /* اول همان دکمه React */
-          var rb = row.querySelector("button.lb-react-back-hidden, button[aria-label*='برگشت'], button[aria-label*='back']");
-          if (rb) {
-            try { rb.click(); return; } catch (e) {}
-          }
-          /* fallback: اگر store در دسترس بود */
-          try {
-            if (window.__LB_BACK) window.__LB_BACK();
-          } catch (e) {}
-        });
-        row.appendChild(shellBack);
-      }
-      shellBack.hidden = false;
-    } else {
-      header.classList.remove("lb-has-back");
-      if (shellBack) shellBack.hidden = true;
-    }
-  }
-
 
   function ensureLogo() {
     ensureAvatar();
@@ -610,17 +534,8 @@ var reset = document.getElementById("lb-theme-reset");
   }
 
   function enhanceEmptyNotes() {
-    document.querySelectorAll(".empty-note").forEach(function (el) {
-      if (el.dataset.lbEmpty) return;
-      el.dataset.lbEmpty = "1";
-      if (!el.querySelector(".lb-empty-icon")) {
-        var icon = document.createElement("div");
-        icon.className = "lb-empty-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = "◇";
-        el.insertBefore(icon, el.firstChild);
-      }
-    });
+    /* disabled — inject into React tree caused removeChild */
+    return;
   }
 
   var tickScheduled = false;
@@ -630,6 +545,7 @@ var reset = document.getElementById("lb-theme-reset");
     requestAnimationFrame(function () {
       tickScheduled = false;
       try {
+        lbCleanupInputWraps();
         ensureLogo();
         syncSkeletons();
         enhanceEmptyNotes();
@@ -1888,40 +1804,11 @@ var reset = document.getElementById("lb-theme-reset");
     if (window.lbFieldError) window.lbFieldError(el, null);
   };
 
-  /* 3) دکمه پاک‌کن روی inputهای پر */
+  /* 3) دکمه پاک‌کن — غیرفعال: جابه‌جایی input زیر React باعث
+     تکرار فیلد و خطای removeChild می‌شد. */
   function wireClearButtons() {
-    document.querySelectorAll("main input[type=text], main input:not([type]), main input[type=search]").forEach(function (inp) {
-      if (inp.dataset.lbClear) return;
-      if (inp.closest(".lb-input-wrap")) {
-        inp.dataset.lbClear = "1";
-        return;
-      }
-      inp.dataset.lbClear = "1";
-      /* wrapper فقط هم‌ارتفاع خود input — نه کل کارت/لیبل */
-      var wrap = document.createElement("div");
-      wrap.className = "lb-input-wrap";
-      var parent = inp.parentElement;
-      if (!parent) return;
-      parent.insertBefore(wrap, inp);
-      wrap.appendChild(inp);
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "lb-clear-btn";
-      btn.setAttribute("aria-label", "پاک کردن");
-      btn.textContent = "×";
-      btn.hidden = !(inp.value || "").length;
-      btn.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.lbClearField(inp);
-        btn.hidden = true;
-        inp.focus();
-      });
-      inp.addEventListener("input", function () {
-        btn.hidden = !(inp.value || "").length;
-      });
-      wrap.appendChild(btn);
-    });
+    /* no-op: هرگز parent React-managed را تغییر نده */
+    return;
   }
 
   /* 4) یادآوری آخرین نقش */
