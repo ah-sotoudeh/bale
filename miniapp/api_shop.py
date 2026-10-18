@@ -201,8 +201,13 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
     elif t is False:
         return _err('forbidden', 403, _NOT_YOUR_TARIFF)
     ready_banner = True if not customer else viewer_has_ready_banner(user)
+    try:
+        span = int(request.GET.get('days') or 42)
+    except (TypeError, ValueError):
+        span = 42
+    span = max(14, min(span, 62))
     days = []
-    for d, raw in day_status_map(t, 14):
+    for d, raw in day_status_map(t, span):
         status = raw if not customer else day_status_for_viewer(t, d, ready_banner=ready_banner)
         days.append({
             'date': d.isoformat(),

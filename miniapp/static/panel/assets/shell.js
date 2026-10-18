@@ -2881,12 +2881,25 @@ var reset = document.getElementById("lb-theme-reset");
 
     fetch(lbApiBase() + "/groups/add", {
       method: "POST",
+      credentials: "same-origin",
       headers: lbApiHeaders(),
       body: JSON.stringify(body),
     })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.text().then(function (txt) {
+          var g = null;
+          try { g = txt ? JSON.parse(txt) : null; } catch (e) {
+            throw new Error(r.status === 404
+              ? "آدرس ثبت مجموعه پیدا نشد (404)"
+              : "پاسخ سرور JSON نبود (کد " + r.status + ")");
+          }
+          if (!r.ok || !g || !g.ok) {
+            throw new Error((g && (g.message || g.error)) || ("خطا در ساخت مجموعه (" + r.status + ")"));
+          }
+          return g;
+        });
+      })
       .then(function (g) {
-        if (!g || !g.ok) throw new Error((g && (g.message || g.error)) || "خطا در ساخت مجموعه");
         show("مجموعه ثبت شد", true);
         if (window.lbToast) window.lbToast("مجموعه «" + name + "» ساخته شد");
         window.__lbGroupSel = {};
@@ -2902,9 +2915,12 @@ var reset = document.getElementById("lb-theme-reset");
         var nameInp = document.getElementById("lb-gp-name");
         if (nameInp) nameInp.value = "";
         updateAvatarButton();
-        setTimeout(function () {
-          try { window.location.reload(); } catch (e) {}
-        }, 500);
+        try {
+          if (Z && Z.getState && Z.getState().hydrateLive) Z.getState().hydrateLive();
+          else window.location.reload();
+        } catch (e) {
+          try { window.location.reload(); } catch (e2) {}
+        }
       })
       .catch(function (err) {
         show(String((err && err.message) || err || "خطا"));

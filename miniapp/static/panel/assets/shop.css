@@ -4399,3 +4399,28 @@ main button.lb-ch-row .lb-ch-ava {
 #lb-shell-host {
   display: none !important; /* دیگر برای UI استفاده نمی‌شود */
 }
+
+/* تقویم ماهانه */
+.lb-cal-month .lb-day {
+  min-height: 48px !important;
+  border-radius: 12px !important;
+  border-width: 0 !important;
+  background: transparent !important;
+}
+.lb-cal-month .lb-day span.block.text-sm {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+.lb-cal-month .lb-past {
+  opacity: 0.35;
+}
+.lb-cal-month .lb-free {
+  color: var(--lb-text, #0b1220);
+}
+.lb-cal-month .lb-full {
+  background: rgba(15, 23, 42, 0.06) !important;
+}
+.lb-cal-month .lb-pick {
+  outline: 2px solid var(--lb-primary, #0d9488);
+  background: rgba(13, 148, 136, 0.12) !important;
+}

@@ -767,30 +767,38 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    name = str(body.get('name') or '').strip()[:200]
-    if not name:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=400)
-    raw_ids = body.get('channel_ids') or body.get('channels') or []
-    if not isinstance(raw_ids, list) or not raw_ids:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال انتخاب کنید.'}, status=400)
-    chans = list(Channel.objects.filter(id__in=raw_ids, manager=user))
-    if len(chans) != len(set(int(x) for x in raw_ids)):
-        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
-    g = ChannelGroup.objects.create(name=name, manager=user)
-    g.channels.set(chans)
-    av = body.get('avatar_channel_id')
     try:
-        av = int(av) if av not in (None, '', 0, '0') else None
-    except (TypeError, ValueError):
-        av = None
-    if av is None and chans:
-        top = max(chans, key=lambda c: (getattr(c, 'members_count', 0) or 0, c.id))
-        av = top.id
-    if av and any(c.id == av for c in chans):
-        g.avatar_channel_id = av
-        g.save(update_fields=['avatar_channel_id'])
-    return JsonResponse({'ok': True, 'group': _group_payload(g)})
+        body = _json_body(request)
+        name = str(body.get('name') or '').strip()[:200]
+        if not name:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=400)
+        raw_ids = body.get('channel_ids') or body.get('channels') or []
+        if not isinstance(raw_ids, list) or len(raw_ids) < 2:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل ۲ کانال انتخاب کنید.'}, status=400)
+        try:
+            id_set = {int(x) for x in raw_ids}
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=400)
+        chans = list(Channel.objects.filter(id__in=id_set, manager=user))
+        if len(chans) != len(id_set):
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
+        g = ChannelGroup.objects.create(name=name, manager=user)
+        g.channels.set(chans)
+        av = body.get('avatar_channel_id')
+        try:
+            av = int(av) if av not in (None, '', 0, '0') else None
+        except (TypeError, ValueError):
+            av = None
+        if av is None and chans:
+            top = max(chans, key=lambda c: (getattr(c, 'members_count', 0) or 0, c.id))
+            av = top.id
+        if av and any(c.id == av for c in chans):
+            g.avatar_channel_id = av
+            g.save(update_fields=['avatar_channel_id'])
+        return JsonResponse({'ok': True, 'group': _group_payload(g)})
+    except Exception as exc:
+        logger.exception('api_group_add')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت مجموعه ناموفق بود. دوباره تلاش کنید.'}, status=500)
 
 
 @csrf_exempt
