@@ -75,8 +75,14 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
         return err
-    needle = (request.GET.get('q') or '').strip().casefold()
-    ready_only = (request.GET.get('ready') or '').strip() in ('1', 'true', 'yes')
+    body = {}
+    try:
+        if request.method == 'POST':
+            body = _json_body(request) or {}
+    except Exception:
+        body = {}
+    needle = (request.GET.get('q') or body.get('q') or '').strip().casefold()
+    ready_only = str(request.GET.get('ready') or body.get('ready') or '').strip().lower() in ('1', 'true', 'yes')
 
     def _text_match(ch) -> bool:
         if not needle:
@@ -102,12 +108,33 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             return False
         return True
 
-    qs = list(
-        Tariff.objects.filter(is_active=True)
-        .select_related('channel', 'group')
-        .prefetch_related('group__channels')
-        .order_by('-channel__members_count', 'price', 'id')[:400]
-    )
+    # اگر همهٔ تعرفه‌های یک کانال لیست‌شده خاموش شده‌اند (مثلاً بعد از audit ادمین)،
+    # برای حالت manual دوباره روشن کن تا در کاتالوگ مشتری دیده شوند.
+    try:
+        from channels_app.models import Channel
+        for ch in Channel.objects.filter(is_listed=True).iterator():
+            has_active = Tariff.objects.filter(channel=ch, is_active=True).exists()
+            if has_active:
+                continue
+            inactive = Tariff.objects.filter(channel=ch, is_active=False)
+            if inactive.exists() and (ch.publish_mode or 'manual') == 'manual':
+                inactive.update(is_active=True)
+            elif inactive.exists() and ch.publish_mode == 'bot' and ch.bot_is_admin:
+                inactive.update(is_active=True)
+            elif inactive.exists() and ch.publish_mode == 'linkyar' and ch.linkyar_is_admin:
+                inactive.update(is_active=True)
+    except Exception:
+        pass
+
+    try:
+        qs = list(
+            Tariff.objects.filter(is_active=True)
+            .select_related('channel', 'group')
+            .prefetch_related('group__channels')
+            .order_by('-channel__members_count', 'price', 'id')[:400]
+        )
+    except Exception:
+        qs = []
     items = []
     channels: dict = {}
     groups: dict = {}

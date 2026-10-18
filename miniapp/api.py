@@ -859,38 +859,68 @@ def api_tariffs(request: HttpRequest) -> JsonResponse:
     assert user is not None
     from django.db.models import Q
 
-    qs = Tariff.objects.filter(Q(channel__manager=user) | Q(group__manager=user)).select_related(
-        'channel', 'group'
-    ).order_by('-id')[:200]
+    try:
+        qs = list(
+            Tariff.objects.filter(Q(channel__manager=user) | Q(group__manager=user))
+            .select_related('channel', 'group')
+            .order_by('-id')[:200]
+        )
+    except Exception:
+        logger.exception('api_tariffs list')
+        qs = []
+
     items = []
     for t in qs:
-        items.append({
-            'id': t.id,
-            'name': t.name,
-            'price': t.price,
-            'duration_hours': t.duration_hours,
-            'start_hour': t.start_hour,
-            'is_active': t.is_active,
-            'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else '?'),
-            'channel_id': t.channel_id,
-            'group_id': t.group_id,
-            'is_package': bool(t.group_id),
-            'channel_count': t.group.channels.count() if t.group_id else (1 if t.channel_id else 0),
-        })
-    from orders.availability import list_manual_busy_slots
+        try:
+            items.append({
+                'id': t.id,
+                'name': t.name,
+                'price': t.price,
+                'duration_hours': t.duration_hours,
+                'start_hour': t.start_hour,
+                'is_active': t.is_active,
+                'owner': t.group.name if t.group_id else (t.channel.name if t.channel_id else '?'),
+                'channel_id': t.channel_id,
+                'group_id': t.group_id,
+                'is_package': bool(t.group_id),
+                'channel_count': (
+                    t.group.channels.count() if t.group_id else (1 if t.channel_id else 0)
+                ),
+            })
+        except Exception:
+            logger.exception('tariff payload %s', getattr(t, 'id', '?'))
 
     busy = []
-    for t in qs:
-        for slot in list_manual_busy_slots(t):
-            start = slot.start
-            day = timezone.localtime(start).date() if timezone.is_aware(start) else start.date()
-            busy.append({
-                'id': slot.id,
-                'tariff_id': t.id,
-                'date': day.isoformat(),
-                'manual': True,
-            })
-    return JsonResponse({'ok': True, 'tariffs': items, 'busy': busy})
+    try:
+        from orders.availability import list_manual_busy_slots
+        for t in qs:
+            try:
+                for slot in list_manual_busy_slots(t):
+                    start = slot.start
+                    day = (
+                        timezone.localtime(start).date()
+                        if timezone.is_aware(start)
+                        else start.date()
+                    )
+                    busy.append({
+                        'id': slot.id,
+                        'tariff_id': t.id,
+                        'date': day.isoformat(),
+                        'manual': True,
+                    })
+            except Exception:
+                logger.exception('busy slots tariff %s', getattr(t, 'id', '?'))
+    except Exception:
+        logger.exception('list_manual_busy_slots import')
+
+    return JsonResponse({
+        'ok': True,
+        'tariffs': items,
+        'busy': busy,
+        'manager_id': user.id,
+        'bale_user_id': str(user.bale_user_id or ''),
+    })
+
 
 
 @csrf_exempt
