@@ -1,6 +1,10 @@
 """Mini-app shop APIs: banners, cart, calendar, tariff edit, operator banners."""
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from datetime import datetime
 
 from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
@@ -249,24 +253,28 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    t = _own_tariff(user, body.get('tariff_id'))
-    if t is None:
-        return _err('not_found', 404)
-    if t is False:
-        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
-    day = _parse_day(body)
-    if not day:
-        return _err('bad_date')
     try:
-        slot = mark_tariff_day_busy(t, day)
-    except Exception as exc:
-        from orders.slots import SlotConflict
-
-        if isinstance(exc, SlotConflict):
-            return _err('slot_conflict', 409)
-        raise
-    return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
+        body = _json_body(request)
+        t = _own_tariff(user, body.get('tariff_id'))
+        if t is None:
+            return _err('not_found', 404)
+        if t is False:
+            return _err('forbidden', 403, _NOT_YOUR_TARIFF)
+        day = _parse_day(body)
+        if not day:
+            return _err('bad_date')
+        try:
+            slot = mark_tariff_day_busy(t, day)
+        except Exception as exc:
+            from orders.slots import SlotConflict
+            if isinstance(exc, SlotConflict):
+                return _err('slot_conflict', 409)
+            logger.exception('mark_tariff_day_busy')
+            return _err('server', 500, 'ثبت روز پر نشد. دوباره تلاش کنید.')
+        return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
+    except Exception:
+        logger.exception('api_busy_day')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت روز پر نشد.'}, status=500)
 
 
 @csrf_exempt
