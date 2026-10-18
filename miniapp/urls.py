@@ -16,6 +16,7 @@ urlpatterns = [
     path('api/me/prefs', api.api_me_prefs),
     path('api/channels/<int:channel_id>/avatar', api.api_channel_avatar),
     path('api/channels', api.api_channels),
+    path('api/channels/refresh-admin', api.api_channel_refresh_admin),
     path('api/channels/refresh', api.api_refresh_channel_stats),
     path('api/channels/add', api.api_add_channel),
     path('api/channels/update', api.api_channel_update),

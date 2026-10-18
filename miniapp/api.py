@@ -62,19 +62,28 @@ def _channel_ref_key(ref: str) -> str:
 
 
 def claim_pending_channels(user: User) -> int:
-    """Connect operator-assigned channels when manager first appears."""
+    """Connect operator-assigned channels when manager first appears.
+
+    تطبیق با username (انعطاف‌پذیر) و در صورت نیاز با شناسه عددی بله.
+    """
     handle = _norm_username(getattr(user, 'bale_username', None) or '')
-    if not handle:
+    uid = str(getattr(user, 'bale_user_id', None) or '').strip()
+    if not handle and not uid:
         return 0
     from django.db.models import Q
-    # تطبیق انعطاف‌پذیر: link_yar / linkyar / با و بدون زیرخط
-    variants = {handle, handle.replace('_', ''), handle.replace('-', '')}
+    variants = set()
+    if handle:
+        variants.update({handle, handle.replace('_', ''), handle.replace('-', '')})
+    if uid:
+        variants.add(uid)
     q = Q()
     for v in variants:
         if not v:
             continue
         q |= Q(pending_manager_username__iexact=v)
         q |= Q(pending_manager_username__iexact='@' + v)
+    if not q:
+        return 0
     qs = Channel.objects.filter(q).filter(Q(manager__isnull=True) | Q(manager=user))
     n = 0
     for ch in qs:
@@ -173,6 +182,15 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
         user.set_unusable_password()
         user.bale_username = meta.get('username')
         user.save()
+    else:
+        # همگام‌سازی نام کاربری بله برای claim انتساب‌های پشتیبان
+        uname = meta.get('username')
+        if uname and str(user.bale_username or '') != str(uname):
+            user.bale_username = uname
+            try:
+                user.save(update_fields=['bale_username'])
+            except Exception:
+                pass
     return user, None
 
 
@@ -464,6 +482,48 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     except Exception:
         logger.exception('stats after miniapp register')
     return JsonResponse({'ok': True, 'channel': _channel_payload(ch)})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_channel_refresh_admin(request: HttpRequest) -> JsonResponse:
+    """بررسی دوباره ادمین بودن بازو / لینک‌یار برای کانال مالک."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request)
+    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    if not ch:
+        # پشتیبان هم بتواند همه کانال‌ها را چک کند
+        if ws.is_operator(user.bale_user_id or ''):
+            ch = Channel.objects.filter(id=body.get('channel_id')).first()
+    if not ch:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+    from orders.publish import check_bot_admin, check_linkyar_admin
+    bot_state = 'unknown'
+    ly_state = 'unknown'
+    try:
+        bot_state = check_bot_admin(ch)
+    except Exception:
+        logger.exception('refresh bot admin')
+    try:
+        ly_state = check_linkyar_admin(ch)
+    except Exception:
+        logger.exception('refresh linkyar admin')
+    ch.refresh_from_db()
+    return JsonResponse({
+        'ok': True,
+        'channel_id': ch.id,
+        'bot_is_admin': bool(ch.bot_is_admin),
+        'bot_state': bot_state,
+        'linkyar_is_admin': bool(ch.linkyar_is_admin),
+        'linkyar_state': ly_state,
+        'message': (
+            'بازو ادمین است.' if ch.bot_is_admin else
+            'بازو هنوز ادمین این کانال نیست — در تنظیمات کانال، بازو را مدیر کنید.'
+        ),
+    })
 
 
 @csrf_exempt
@@ -1364,10 +1424,22 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
     if not ws.is_operator(user.bale_user_id or ''):
         return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=403)
     body = _json_body(request)
-    mgr_raw = str(body.get('manager') or body.get('username') or '').strip()
-    mgr_key = _norm_username(mgr_raw)
+    mgr_raw = str(
+        body.get('manager')
+        or body.get('username')
+        or body.get('bale_user_id')
+        or body.get('manager_id')
+        or ''
+    ).strip()
+    # قبول هم @username و هم شناسه عددی بله
+    mgr_is_numeric = mgr_raw.lstrip('@').isdigit()
+    mgr_key = mgr_raw.lstrip('@').strip() if mgr_is_numeric else _norm_username(mgr_raw)
     if not mgr_key:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کاربری مدیر را بنویسید (مثل @test).'}, status=400)
+        return JsonResponse({
+            'ok': False,
+            'error': 'bad_fields',
+            'message': 'نام کاربری یا شناسه بله مدیر را بنویسید (مثل @test یا 1164810718).',
+        }, status=400)
     refs = body.get('channels') or body.get('channel_list') or []
     if isinstance(refs, str):
         refs = re.split(r'[,\s]+', refs)
@@ -1377,10 +1449,14 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
 
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
-    manager = (
-        UserModel.objects.filter(bale_username__iexact=mgr_key).first()
-        or UserModel.objects.filter(bale_username__iexact='@' + mgr_key).first()
-    )
+    manager = None
+    if mgr_is_numeric:
+        manager = UserModel.objects.filter(bale_user_id=str(mgr_key)).first()
+    if manager is None and not mgr_is_numeric:
+        manager = (
+            UserModel.objects.filter(bale_username__iexact=mgr_key).first()
+            or UserModel.objects.filter(bale_username__iexact='@' + mgr_key).first()
+        )
 
     created, updated, pending = [], [], []
     from integrations.bale_client import get_channel_info

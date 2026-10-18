@@ -504,8 +504,42 @@ def get_chat_member(chat_id: str, user_id: str) -> Dict[str, Any]:
         return {'error': _redact(str(e))}
 
 
+def _chat_id_candidates(channel_id: str) -> list:
+    """فرمت‌های محتمل chat_id برای API بله."""
+    raw = str(channel_id or '').strip()
+    if not raw:
+        return []
+    out: list = []
+    seen: set = set()
+
+    def add(x: str) -> None:
+        x = str(x or '').strip()
+        if not x or x in seen:
+            return
+        seen.add(x)
+        out.append(x)
+
+    add(raw)
+    if raw.startswith('@'):
+        add(raw[1:])
+    elif not raw.lstrip('-').isdigit():
+        add('@' + raw.lstrip('@'))
+    # اگر عددی است، هم با و هم بدون منفی امتحان کن (بعضی کانال‌های بله)
+    digits = raw.lstrip('@')
+    if digits.lstrip('-').isdigit():
+        n = int(digits)
+        add(str(n))
+        add(str(-abs(n)))
+        add(str(abs(n)))
+    return out
+
+
 def bot_admin_state(channel_id: str) -> str:
-    """admin، not_admin، یا unknown. خطای شبکه نباید تعرفه را خاموش کند."""
+    """admin، not_admin، یا unknown. خطای شبکه نباید تعرفه را خاموش کند.
+
+    چند شکل chat_id (@user، عدد، منفی) را امتحان می‌کند چون getChatMember
+    بله گاهی فقط با یکی از آن‌ها جواب می‌دهد.
+    """
     me = get_me()
     if me.get('error'):
         return 'unknown'
@@ -516,20 +550,24 @@ def bot_admin_state(channel_id: str) -> str:
         bot_id = me.get('id')
     if not bot_id:
         return 'unknown'
-    member = get_chat_member(str(channel_id), str(bot_id))
-    if member.get('error'):
-        return 'unknown'
-    if not member.get('ok', True):
-        code = member.get('error_code')
-        if code in (400, 403):
-            return 'not_admin'
-        return 'unknown'
-    status_name = (member.get('result') or {}).get('status') or ''
-    if status_name in ('administrator', 'creator'):
-        return 'admin'
-    if status_name:
-        return 'not_admin'
-    return 'unknown'
+
+    saw_not_admin = False
+    for cid in _chat_id_candidates(channel_id):
+        member = get_chat_member(str(cid), str(bot_id))
+        if member.get('error'):
+            continue
+        if not member.get('ok', True):
+            code = member.get('error_code')
+            if code in (400, 403):
+                saw_not_admin = True
+            continue
+        status_name = (member.get('result') or {}).get('status') or ''
+        if status_name in ('administrator', 'creator'):
+            return 'admin'
+        if status_name:
+            saw_not_admin = True
+            continue
+    return 'not_admin' if saw_not_admin else 'unknown'
 
 
 def bot_is_channel_admin(channel_id: str) -> bool:

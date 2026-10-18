@@ -109,7 +109,26 @@ def check_linkyar_admin(ch: Channel) -> str:
 
 
 def check_bot_admin(ch: Channel) -> str:
-    state = bc.bot_admin_state(channel_ref(ch))
+    """وضعیت ادمین بودن بازو را با چند مرجع کانال چک می‌کند."""
+    candidates = []
+    peer = getattr(ch, 'bale_peer_id', None)
+    if peer not in (None, '', 0, '0'):
+        candidates.append(str(peer))
+    ref = channel_ref(ch)
+    if ref:
+        candidates.append(ref)
+    link = (ch.link or '').strip()
+    if link and link not in candidates:
+        candidates.append(link)
+
+    state = 'unknown'
+    for cid in candidates:
+        state = bc.bot_admin_state(cid)
+        if state == 'admin':
+            break
+        if state == 'not_admin':
+            # ادامه بده؛ شاید با peer جواب admin بیاید
+            continue
     if state in ('admin', 'not_admin'):
         ch.bot_is_admin = state == 'admin'
         ch.bot_checked_at = timezone.now()
