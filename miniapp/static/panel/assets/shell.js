@@ -501,58 +501,59 @@ var reset = document.getElementById("lb-theme-reset");
   }
 
   function ensureAvatar() {
-    /* پروفایل خارج از درخت React تا removeChild ندهد */
-    var host = document.getElementById("lb-shell-host");
-    if (!host) {
-      host = document.createElement("div");
-      host.id = "lb-shell-host";
-      document.body.insertBefore(host, document.body.firstChild);
-    }
     var header = document.querySelector("header");
-    if (header) {
-      header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
-        row.classList.add("lb-roles-hidden");
-      });
-      header.querySelectorAll("div").forEach(function (row) {
-        var btns = row.querySelectorAll("button.rounded-full");
-        if (btns.length >= 2 && btns.length <= 4) {
-          var txt = row.textContent || "";
-          if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
-        }
-      });
-    }
-    var btn = document.getElementById("lb-user-avatar-btn");
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.type = "button";
-      btn.id = "lb-user-avatar-btn";
-      btn.className = "lb-user-avatar lb-user-avatar-fixed";
-      btn.setAttribute("aria-label", "حساب و تنظیمات");
-      btn.addEventListener("click", function () {
-        if (window.lbOpenAccount) window.lbOpenAccount();
-        try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
-      });
-      host.appendChild(btn);
-    }
-    var u = getBaleUser();
-    var photo = u && (u.photo_url || u.photoUrl);
-    var cur = btn.getAttribute("data-photo") || "";
-    var next = photo || "";
-    if (cur !== next || !btn.childNodes.length) {
-      btn.setAttribute("data-photo", next);
-      btn.innerHTML = "";
-      if (photo) {
-        var img = document.createElement("img");
-        img.src = photo;
-        img.alt = "";
-        btn.appendChild(img);
-      } else {
-        var span = document.createElement("span");
-        span.className = "lb-user-avatar-initials";
-        span.textContent = userInitials(u);
-        btn.appendChild(span);
+    if (!header) return;
+
+    /* مخفی سوییچ نقش */
+    header.querySelectorAll(":scope > div.px-3").forEach(function (row) {
+      row.classList.add("lb-roles-hidden");
+    });
+    header.querySelectorAll("div").forEach(function (row) {
+      var btns = row.querySelectorAll("button.rounded-full");
+      if (btns.length >= 2 && btns.length <= 4) {
+        var txt = row.textContent || "";
+        if (/پشتیبانی|کانال|مشتری/.test(txt)) row.classList.add("lb-roles-hidden");
       }
+    });
+
+    /* اگر از هاست ثابت قبلی مانده، حذف کن */
+    var fixed = document.getElementById("lb-user-avatar-btn");
+    if (fixed && fixed.classList.contains("lb-user-avatar-fixed")) {
+      try { fixed.parentNode && fixed.parentNode.removeChild(fixed); } catch (e) {}
     }
+
+    if (header.querySelector(".lb-user-avatar")) return;
+    var h1 = header.querySelector("h1");
+    if (!h1 || !h1.parentElement) return;
+    var row = h1.parentElement;
+    row.classList.add("lb-header-row");
+    h1.classList.add("lb-header-title");
+
+    var u = getBaleUser();
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lb-user-avatar";
+    btn.setAttribute("aria-label", "حساب و تنظیمات");
+    var photo = u && (u.photo_url || u.photoUrl);
+    if (photo) {
+      var img = document.createElement("img");
+      img.src = photo;
+      img.alt = "";
+      btn.appendChild(img);
+    } else {
+      var span = document.createElement("span");
+      span.className = "lb-user-avatar-initials";
+      span.textContent = userInitials(u);
+      btn.appendChild(span);
+    }
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.lbOpenAccount) window.lbOpenAccount();
+      try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (err) {}
+    });
+    /* فقط insert — تم را جابه‌جا نکن (باعث removeChild می‌شد) */
+    row.insertBefore(btn, row.firstChild);
   }
 
   function ensureLogo() {
@@ -2518,6 +2519,24 @@ var reset = document.getElementById("lb-theme-reset");
     return window.__LIVE_API || "/miniapp/api";
   }
 
+
+  function placeGroupPanel(panel, main, channelRows) {
+    /* زیر لیست کانال‌ها (بعد از ul)، نه fixed روی صفحه */
+    var list = null;
+    if (channelRows && channelRows.length) {
+      var last = channelRows[channelRows.length - 1];
+      list = last.closest("ul") || last.parentElement;
+    }
+    if (list && list.parentNode) {
+      if (panel.parentNode !== list.parentNode || panel.previousSibling !== list) {
+        if (list.nextSibling) list.parentNode.insertBefore(panel, list.nextSibling);
+        else list.parentNode.appendChild(panel);
+      }
+    } else if (main) {
+      main.appendChild(panel);
+    }
+  }
+
   function syncGroupPanel() {
     var h1 = document.querySelector("header h1");
     var title = h1 ? (h1.textContent || "").trim() : "";
@@ -2535,8 +2554,7 @@ var reset = document.getElementById("lb-theme-reset");
     var onList = title === "کانال‌ها";
     if (!onList) {
       if (panel) {
-        panel.hidden = true;
-        panel.setAttribute("aria-hidden", "true");
+        try { panel.remove(); } catch (e) { panel.hidden = true; }
       }
       document.documentElement.classList.remove("lb-group-picking");
       clearRowPickBindings();
@@ -2566,7 +2584,7 @@ var reset = document.getElementById("lb-theme-reset");
     if (panel) {
       panel.hidden = false;
       panel.setAttribute("aria-hidden", "false");
-      if (panel.parentNode !== host) host.appendChild(panel);
+      placeGroupPanel(panel, main, channelRows);
     }
 
     if (!panel) {
@@ -2594,7 +2612,7 @@ var reset = document.getElementById("lb-theme-reset");
         '  <p class="lb-gp-msg" id="lb-gp-msg" hidden></p>' +
         '</div>';
       panel.hidden = false;
-      host.appendChild(panel);
+      placeGroupPanel(panel, main, channelRows);
 
       panel.querySelector("#lb-gp-toggle").addEventListener("click", function () {
         var st = window.__lbGroupState;
