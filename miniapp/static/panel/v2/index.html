@@ -18,7 +18,7 @@
         var w = window.Bale && Bale.WebApp;
         if (w) {
           try { if (typeof w.ready === "function") w.ready(); } catch (e) {}
-          try { if (typeof w.expand === "function") w.expand(); } catch (e) {}
+          /* no expand — keep Bale mini-app chrome */
           window.__LB_BALE = w;
           if (w.initDataUnsafe && w.initDataUnsafe.user) window.__LB_USER = w.initDataUnsafe.user;
           if (w.initData || window.__LB_USER) { resolve(w); return; }

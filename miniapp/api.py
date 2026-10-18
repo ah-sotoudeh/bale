@@ -212,19 +212,57 @@ def api_me(request: HttpRequest) -> JsonResponse:
     except Exception:
         logger.exception('balance_breakdown')
         br = {'available': 0, 'pending': 0, 'total': 0}
-    ch_count = Channel.objects.filter(manager=user).count()
-    is_op = ws.is_operator(user.bale_user_id or '')
-    debug_user = is_debug_user(user.bale_user_id or '')
-    if debug_user:
-        is_op = True
-    can_switch = _can_switch_roles(user.bale_user_id or '')
-    # هر کاربر می‌تواند پنل مدیر را باز کند (برای ثبت کانال). سوییچ نقش فقط مالک/پشتیبانی.
+
+    try:
+        ch_count = Channel.objects.filter(manager=user).count()
+    except Exception:
+        logger.exception('channel_count')
+        ch_count = 0
+
+    is_op = False
+    debug_user = False
+    try:
+        is_op = ws.is_operator(user.bale_user_id or '')
+        debug_user = is_debug_user(user.bale_user_id or '')
+        if debug_user:
+            is_op = True
+    except Exception:
+        logger.exception('is_operator')
+
+    can_switch = True
+    try:
+        can_switch = _can_switch_roles(user.bale_user_id or '')
+    except Exception:
+        pass
+
+    pending_orders = 0
+    try:
+        pending_orders = OrderItem.objects.filter(manager=user, manager_status='pending').count()
+    except Exception:
+        logger.exception('pending_orders')
+
+    prefs: Dict[str, Any] = {'theme': None, 'onboarded': {}}
+    try:
+        prefs = _read_prefs(user)
+    except Exception:
+        logger.exception('prefs')
+
+    queues: Dict[str, Any] = {
+        'operator_banners': [],
+        'operator_payouts': [],
+        'operator_reviews': [],
+    }
+    try:
+        queues = _operator_queues(is_op)
+    except Exception:
+        logger.exception('operator_queues')
+
     return JsonResponse({
         'ok': True,
         'user': {
             'id': user.id,
             'bale_user_id': user.bale_user_id,
-            'handle': user.bale_handle,
+            'handle': getattr(user, 'bale_handle', None) or '',
             'username': user.bale_username,
         },
         'wallet': br,
@@ -238,9 +276,9 @@ def api_me(request: HttpRequest) -> JsonResponse:
             'customer': True,
             'operator': is_op,
         },
-        'pending_orders': OrderItem.objects.filter(manager=user, manager_status='pending').count(),
-        'prefs': _read_prefs(user),
-        **_operator_queues(is_op),
+        'pending_orders': pending_orders,
+        'prefs': prefs,
+        **queues,
     })
 
 
@@ -884,7 +922,7 @@ def _operator_queues(is_op: bool) -> Dict[str, Any]:
             'owner': owner,
             'order_id': item.order_id,
             'price': int(item.price or 0),
-            'when': format_slot(timezone.localtime(start)) if start else '',
+            'when': (format_slot(timezone.localtime(start)) if start else ''),
             'customer': item.order.customer.bale_user_id or '',
             'manager': (item.manager.bale_user_id or '') if item.manager_id else '',
             'link': item.published_link or '',
