@@ -123,19 +123,20 @@ body,
 
 header.sticky {
   position: sticky;
-  min-height: 52px;
+  min-height: 48px;
   background: color-mix(in srgb, var(--lb-header) 94%, transparent) !important;
   backdrop-filter: blur(16px) saturate(1.4);
   border-bottom: 1px solid var(--lb-border) !important;
-  box-shadow: var(--lb-shadow);
+  box-shadow: none;
   z-index: 20;
 }
 
 header > div:first-child {
   position: relative;
-  min-height: 52px;
+  min-height: 48px;
   overflow: visible;
-  padding-top: 6px;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 header h1 {
@@ -243,15 +244,16 @@ nav.bg-header,
 nav.fixed {
   background: color-mix(in srgb, var(--lb-header) 94%, transparent) !important;
   backdrop-filter: blur(16px) saturate(1.4);
-  padding-bottom: max(6px, env(safe-area-inset-bottom));
-  box-shadow: var(--lb-shadow);
+  padding-top: 2px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom));
+  box-shadow: none;
   border-top: 1px solid var(--lb-border) !important;
   z-index: 30;
 }
 
 nav button {
   position: relative;
-  min-height: 60px;
+  min-height: 54px;
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
@@ -690,9 +692,9 @@ main {
 
 /* نوار پایین ثابت است. فاصلهٔ بالا عنوان و نمودار را از زیر هدر جدا می‌کند. */
 main.overflow-y-auto {
-  padding-top: 12px;
-  padding-bottom: calc(72px + env(safe-area-inset-bottom));
-  scroll-padding-top: 12px;
+  padding-top: 6px;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  scroll-padding-top: 6px;
 }
 
 /* lb-phone-column */
@@ -5150,4 +5152,104 @@ main .lb-sort-row {
 }
 .lb-sort-dir svg {
   display: block;
+}
+
+
+/* === ORDERS UI POLISH === */
+.lb-ord-ava {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  position: relative;
+  flex-shrink: 0;
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 0 0 1px var(--lb-border);
+}
+.lb-ord-ava img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  z-index: 1;
+}
+.lb-ord-ava > span {
+  position: relative;
+  z-index: 0;
+}
+.lb-ord-row {
+  gap: 12px !important;
+}
+
+/* تب وضعیت سفارش: خط زیر مثل کاتالوگ */
+.lb-ord-tabs {
+  gap: 0 !important;
+  border-bottom: 1px solid var(--lb-border);
+  margin-bottom: 8px !important;
+  padding: 0 2px !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.lb-ord-tabs::-webkit-scrollbar { display: none; }
+.lb-ord-tabs button {
+  flex: 0 0 auto !important;
+  position: relative !important;
+  min-height: 40px !important;
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--lb-text-2) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  white-space: nowrap !important;
+}
+.lb-ord-tabs button.bg-link,
+.lb-ord-tabs button.text-on {
+  background: transparent !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
+}
+.lb-ord-tabs button.bg-link::after,
+.lb-ord-tabs button.text-on::after {
+  content: "" !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  inset-inline: 8px !important;
+  height: 2.5px !important;
+  border-radius: 999px 999px 0 0 !important;
+  background: var(--lb-primary) !important;
+}
+
+/* مرتب‌سازی سفارش */
+.lb-ord-sort {
+  gap: 6px !important;
+  margin-bottom: 10px !important;
+}
+.lb-ord-sort button {
+  min-height: 30px !important;
+  padding: 0 12px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--lb-border) !important;
+  background: var(--lb-surface) !important;
+  color: var(--lb-text-2) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+.lb-ord-sort button.bg-link,
+.lb-ord-sort button.text-on {
+  background: var(--lb-primary-soft) !important;
+  border-color: color-mix(in srgb, var(--lb-primary) 45%, var(--lb-border)) !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
 }

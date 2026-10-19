@@ -1064,12 +1064,26 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
                 ),
                 'published_link': it.published_link or '',
             })
+        ban = o.customer_banner if o.customer_banner_id else None
+        ban_media = ''
+        ban_poster = ''
+        if ban is not None:
+            try:
+                from orders.banner_media import public_media_url
+                ban_media = public_media_url(ban) or ''
+                ban_poster = '' if (ban.media_kind or '') in ('video', 'animation') else ban_media
+            except Exception:
+                ban_media = ''
+                ban_poster = ''
         rows.append({
             'id': o.id,
             'status': o.status,
             'total': o.total_amount,
             'created': timezone.localtime(o.created_at).date().isoformat() if o.created_at else '',
-            'banner_title': o.customer_banner.display_title() if o.customer_banner_id else '',
+            'banner_title': ban.display_title() if ban is not None else '',
+            'banner_id': ban.id if ban is not None else None,
+            'banner_media_url': ban_media,
+            'banner_poster_url': ban_poster,
             'pay_hint': _order_deadline_hint(o),
             'managers_deadline': deadline_iso,
             'payment_deadline': deadline_iso if can_pay else '',
