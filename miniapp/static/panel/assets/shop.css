@@ -4832,3 +4832,33 @@ main button[aria-label*="نشان"]:active {
   background: var(--lb-primary-soft) !important;
   color: var(--lb-primary) !important;
 }
+
+
+/* فرم‌های فشرده باقی‌مانده */
+main form input,
+main form select,
+main form textarea,
+.lb-tar-form input,
+.lb-tar-form select,
+.lb-tar-form textarea {
+  min-height: 42px;
+  font-size: 14px;
+}
+main textarea {
+  min-height: 88px;
+  line-height: 1.5;
+}
+/* بج‌های کوچک وضعیت سفارش مشتری */
+.lb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.lb-pill-ok { background: var(--lb-success-bg); color: var(--lb-success); }
+.lb-pill-wait { background: var(--lb-warning-bg); color: var(--lb-warning); }
+.lb-pill-info { background: var(--lb-info-bg); color: var(--lb-info); }
+.lb-pill-bad { background: var(--lb-danger-bg); color: var(--lb-danger); }

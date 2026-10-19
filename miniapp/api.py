@@ -559,13 +559,13 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
         missing = 'کانال را از بله نخواندیم. پیوند را یک بار دیگر بررسی کنید.'
         return JsonResponse(
             {'ok': False, 'error': missing, 'message': missing, 'code': 'lookup_failed'},
-            status=400,
+            status=200,
         )
     if not proved:
         prompt = ownership_prompt(user)
         return JsonResponse(
             {'ok': False, 'error': prompt, 'message': prompt, 'code': 'owner_username'},
-            status=400,
+            status=200,
         )
 
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
@@ -618,11 +618,23 @@ def api_channel_refresh_admin(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    try:
+        _cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=_cid, manager=user).first()
     if not ch:
         # پشتیبان هم بتواند همه کانال‌ها را چک کند
         if ws.is_operator(user.bale_user_id or ''):
-            ch = Channel.objects.filter(id=body.get('channel_id')).first()
+            try:
+
+                _cid = int(body.get('channel_id'))
+
+            except (TypeError, ValueError):
+
+                return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+
+            ch = Channel.objects.filter(id=_cid).first()
     if not ch:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     from orders.publish import check_bot_admin, check_linkyar_admin
@@ -944,7 +956,11 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    try:
+        _cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=_cid, manager=user).first()
     if not ch:
         return _fail('not_found', 404)
     mode = body.get('publish_mode')
@@ -1162,7 +1178,7 @@ def _fail(error: str, status: int = 200) -> JsonResponse:
         msg = str(error)
     return JsonResponse(
         {'ok': False, 'error': error, 'message': msg},
-        status=status if status else 200,
+        status=200,
     )
 
 
@@ -1606,23 +1622,27 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_request_payout(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request) or {}
     try:
-        bid = int(body.get('bank_id'))
-    except (TypeError, ValueError):
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حساب بانکی نامعتبر است.'}, status=200)
-    bank = BankAccount.objects.filter(id=bid, user=user).first()
-    if not bank:
-        return _fail('bank_not_found', 404)
-    r = ws.request_payout(user, bank)
-    if not r.get('ok'):
-        return JsonResponse(_with_message(r), status=200)
-    pr = r['payout']
-    return JsonResponse({'ok': True, 'payout_id': pr.id, 'amount_toman': pr.amount_toman})
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            bid = int(body.get('bank_id'))
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حساب بانکی نامعتبر است.'}, status=200)
+        bank = BankAccount.objects.filter(id=bid, user=user).first()
+        if not bank:
+            return JsonResponse({'ok': False, 'error': 'bank_not_found', 'message': 'حساب بانکی پیدا نشد.'}, status=200)
+        r = ws.request_payout(user, bank)
+        if not r.get('ok'):
+            return JsonResponse(_with_message(r), status=200)
+        pr = r['payout']
+        return JsonResponse({'ok': True, 'payout_id': pr.id, 'amount_toman': pr.amount_toman})
+    except Exception as exc:
+        logger.exception('api_request_payout')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'درخواست واریز نشد: ' + type(exc).__name__}, status=200)
 
 
 def _avatar_type(data: bytes) -> str:
@@ -1860,7 +1880,11 @@ def api_operator_unassign(request: HttpRequest) -> JsonResponse:
     if not ws.is_operator(user.bale_user_id or ''):
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=200)
     body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id')).first()
+    try:
+        _cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=_cid).first()
     if not ch:
         return JsonResponse({'ok': False, 'error': 'not_found'}, status=200)
     ch.manager = None
