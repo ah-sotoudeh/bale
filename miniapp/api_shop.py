@@ -33,6 +33,11 @@ from wallet import services as ws
 
 
 ERR_FA = {
+    'caption_short': 'کپشن کوتاه است.',
+    'need_media': 'تصویر یا ویدیو بنر لازم است.',
+    'file_too_large': 'حجم فایل زیاد است.',
+    'empty_cart': 'سبد خالی است.',
+    'bad_media': 'فایل بنر خوانده نشد.',
     'not_found': 'این مورد را پیدا نکردم. یک بار دیگر از فهرست انتخاب کنید.',
     'forbidden': 'این کار برای شما نیست.',
     'bad_fields': 'نام، ساعت، مدت و قیمت را کامل بنویسید.',
@@ -64,10 +69,13 @@ def _err(code: str, status: int = 200, message: str = '') -> JsonResponse:
     """خطاهای مینی‌اپ با status=200 تا کلاینت بدنه JSON را بخواند (نه HTML)."""
     from bot_flow.messages import user_error
 
-    text = message or ERR_FA.get(code) or user_error(code) or code
     return JsonResponse(
-        {'ok': False, 'error': code, 'message': text},
-        status=status if status else 200,
+        {
+            'ok': False,
+            'error': code,
+            'message': message or ERR_FA.get(code) or user_error(code),
+        },
+        status=200,
     )
 
 
@@ -846,20 +854,31 @@ def api_cart_add(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_cart_remove(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
-    it = OrderItem.objects.filter(
-        id=body.get('item_id'), order__customer=user, manager_status='cart'
-    ).first()
-    if not it:
-        return _err('not_found', 404)
-    order = it.order
-    it.delete()
-    order.recompute_total()
-    return JsonResponse({'ok': True})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            iid = int(body.get('item_id'))
+        except (TypeError, ValueError):
+            return _err('not_found', message='آیتم سبد پیدا نشد.')
+        it = OrderItem.objects.filter(
+            id=iid, order__customer=user, manager_status='cart'
+        ).first()
+        if not it:
+            return _err('not_found', message='آیتم سبد پیدا نشد یا قبلاً حذف شده.')
+        order = it.order
+        it.delete()
+        try:
+            order.recompute_total()
+        except Exception:
+            pass
+        return JsonResponse({'ok': True})
+    except Exception as exc:
+        logger.exception('api_cart_remove')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'حذف از سبد نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -1204,7 +1223,7 @@ def api_order_confirm(request: HttpRequest) -> JsonResponse:
     if not result.get('ok'):
         from miniapp.api import _with_message
 
-        return JsonResponse(_with_message(result), status=400)
+        return JsonResponse(_with_message(result), status=200)
     note = str(body.get('note') or '').strip()[:240]
     if not accept and note:
         op = operator_chat_id()
@@ -1266,7 +1285,7 @@ def api_operator_resolve(request: HttpRequest) -> JsonResponse:
     if not result.get('ok'):
         from miniapp.api import _with_message
 
-        return JsonResponse(_with_message(result), status=400)
+        return JsonResponse(_with_message(result), status=200)
     return JsonResponse({'ok': True, 'status': result.get('status') or ''})
 
 

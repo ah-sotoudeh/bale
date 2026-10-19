@@ -4803,3 +4803,32 @@ main button[aria-label*="نشان"]:active {
 .lb-grp-ch:active {
   background: var(--lb-surface-2);
 }
+
+
+/* بنر جدید + سبد + مالی فرم */
+.lb-composer-preview {
+  border-radius: var(--lb-r);
+  overflow: hidden;
+  background: var(--lb-surface-2);
+  border: 1px solid var(--lb-border);
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+}
+.lb-composer-preview img,
+.lb-composer-preview video {
+  max-height: 220px;
+  width: 100%;
+  object-fit: contain;
+}
+.lb-media-pick {
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--lb-border) !important;
+  font-weight: 600;
+}
+.lb-media-pick.on {
+  border-color: var(--lb-primary) !important;
+  background: var(--lb-primary-soft) !important;
+  color: var(--lb-primary) !important;
+}
