@@ -386,17 +386,21 @@
         var rid = btn.getAttribute("data-role-id");
         if (!rid) return;
         try {
-          if (window.__lbSetRole) window.__lbSetRole(rid);
-          else if (window.Z && Z.getState && Z.getState().setRole) Z.getState().setRole(rid);
-          else {
-            localStorage.setItem("lb_role", rid);
-            location.reload();
+          localStorage.setItem("lb_role", rid);
+          localStorage.setItem("lb_role_chosen", "1");
+        } catch (e) {}
+        var applied = false;
+        try {
+          if (typeof window.__lbSetRole === "function") {
+            window.__lbSetRole(rid);
+            applied = true;
           }
-        } catch (e) {
-          try { localStorage.setItem("lb_role", rid); location.reload(); } catch (e2) {}
-        }
+        } catch (e) {}
         closeSheet();
         try { if (window.lbHaptic) window.lbHaptic("selection"); } catch (e) {}
+        if (!applied) {
+          try { location.reload(); } catch (e2) {}
+        }
       });
     });
 
