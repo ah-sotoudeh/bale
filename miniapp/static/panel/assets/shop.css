@@ -4701,3 +4701,61 @@ main button[aria-label*="نشان"]:active {
 .lb-chip.on {
   font-weight: 700;
 }
+
+
+/* مالی + بنرها */
+.lb-fin-hero {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--lb-primary) 35%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+.lb-fin-hero::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: -20%;
+  top: -30%;
+  width: 60%;
+  height: 160%;
+  background: radial-gradient(circle, rgba(255,255,255,.18), transparent 70%);
+  pointer-events: none;
+}
+.lb-fin-hero > * {
+  position: relative;
+  z-index: 1;
+}
+.lb-ban-row {
+  min-height: 64px;
+  padding-block: 4px;
+}
+.lb-ban-row:active {
+  background: var(--lb-surface-2);
+}
+.lb-ban-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--lb-surface-2);
+  flex-shrink: 0;
+}
+.lb-stage {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.lb-stage-ready { background: var(--lb-success-bg); color: var(--lb-success); }
+.lb-stage-pending { background: var(--lb-warning-bg); color: var(--lb-warning); }
+.lb-stage-rejected { background: var(--lb-danger-bg); color: var(--lb-danger); }
+/* بخش‌های مالی */
+.lb-fin-sec {
+  margin-bottom: 12px;
+}
+.lb-fin-sec h2 {
+  font-size: 12px !important;
+  color: var(--lb-text-3);
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-inline: 4px;
+}
