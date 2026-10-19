@@ -248,10 +248,13 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
         lang = (payload.get('language') or '').strip()
         if lang:
             languages[lang] = languages.get(lang, 0) + 1
-    language_rows = [
-        {'language': lang, 'count': count}
-        for lang, count in sorted(languages.items(), key=lambda kv: (-kv[1], kv[0]))
-    ]
+    try:
+        language_rows = [
+            {'language': lang, 'count': count}
+            for lang, count in sorted(languages.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+    except Exception:
+        language_rows = []
     return JsonResponse({
         'ok': True,
         'tariffs': items,
@@ -313,9 +316,7 @@ def api_operator_payouts(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        from miniapp.api import _fail
-
-        return _fail('forbidden', 403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبانی.'}, status=200)
     rows = []
     for p in PayoutRequest.objects.filter(status='pending').order_by('id')[:100]:
         rows.append({
@@ -336,12 +337,10 @@ def api_operator_mark_paid(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        from miniapp.api import _fail
-
-        return _fail('forbidden', 403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبانی.'}, status=200)
     from bot_flow.messages import user_error
 
     return JsonResponse(
-        {'ok': False, 'error': 'use_bot', 'message': user_error('use_bot')},
-        status=400,
+        {'ok': False, 'error': 'use_bot', 'message': user_error('use_bot') or 'این کار را از بازو انجام دهید.'},
+        status=200,
     )

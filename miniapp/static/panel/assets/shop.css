@@ -4570,3 +4570,134 @@ main .lb-chips {
 .text-ok {
   color: var(--lb-success) !important;
 }
+
+
+/* ——— UI polish batch ——— */
+.lb-home-card {
+  box-shadow: var(--lb-shadow);
+  border: 1px solid var(--lb-border);
+  transition: background .15s ease, transform .1s ease;
+}
+.lb-home-card:active {
+  background: var(--lb-surface-2);
+  transform: scale(0.99);
+}
+.lb-home-cta {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--lb-primary) 35%, transparent);
+}
+.lb-home-cta:active {
+  filter: brightness(0.95);
+}
+.empty-note {
+  border-radius: var(--lb-r);
+  background: var(--lb-surface);
+  border: 1px dashed var(--lb-border);
+  margin-inline: 0;
+  padding: 28px 16px !important;
+}
+.lb-order-card {
+  border-radius: var(--lb-r);
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.lb-status {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.lb-status-pending { background: var(--lb-warning-bg); color: var(--lb-warning); }
+.lb-status-ok { background: var(--lb-success-bg); color: var(--lb-success); }
+.lb-status-wait { background: var(--lb-info-bg); color: var(--lb-info); }
+.lb-status-bad { background: var(--lb-danger-bg); color: var(--lb-danger); }
+.lb-price, .tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+/* فشرده‌تر کردن جستجو کاتالوگ */
+input.lb-cat-search,
+main input[class*="rounded"] {
+  min-height: 42px !important;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  font-size: 14px !important;
+}
+/* FAB بنر */
+main button.fixed,
+.lb-fab {
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--lb-primary) 40%, transparent) !important;
+}
+/* فیلتر سفارش‌ها */
+.lb-chips .lb-chip {
+  scroll-snap-align: start;
+}
+.lb-chips {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+/* هدر صفحه داخل محتوا */
+main > h1, main > h2 {
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  margin-bottom: 0.6rem !important;
+}
+/* فاصله کارت‌های لیست */
+main .overflow-hidden.rounded-2xl.bg-surface > .border-b {
+  padding-inline: 4px;
+}
+/* دکمه اقدام سفارش */
+.lb-act-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.lb-act-row button {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ردیف سفارش مدیر */
+main ul.overflow-hidden.rounded-2xl.bg-surface > li,
+main ul.overflow-hidden > li {
+  padding: 12px 14px !important;
+  border-bottom: 1px solid var(--lb-border);
+}
+main ul.overflow-hidden.rounded-2xl.bg-surface > li:last-child {
+  border-bottom: 0;
+}
+main ul.overflow-hidden.rounded-2xl.bg-surface > li button {
+  border-radius: 10px;
+}
+/* نوار سبد پایین اگر باشد */
+.lb-cart-strip {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--lb-surface);
+  border-top: 1px solid var(--lb-border);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -4px 16px rgba(0,0,0,.06);
+}
+
+/* ستاره نشان‌شده */
+main button[aria-label*="ذخیره"],
+main button[aria-label*="نشان"] {
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+}
+main button[aria-label*="ذخیره"]:active,
+main button[aria-label*="نشان"]:active {
+  background: var(--lb-surface-2);
+}
+/* بج تعداد در فیلتر سفارش */
+.lb-chip.on {
+  font-weight: 700;
+}
