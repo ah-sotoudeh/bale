@@ -657,16 +657,24 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=cid, manager=user).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     name = str(body.get('name') or '').strip()
     if not name:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=200)
     ch.name = name[:200]
     ch.save(update_fields=['name'])
-    return JsonResponse({'ok': True, 'channel': _channel_payload(ch)})
+    try:
+        payload = _channel_payload(ch)
+    except Exception:
+        payload = {'id': ch.id, 'name': ch.name, 'link': ch.link or ''}
+    return JsonResponse({'ok': True, 'channel': payload})
 
 
 @csrf_exempt
@@ -677,10 +685,14 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=cid, manager=user).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     from django.db.models import Q
     from orders.models import OrderItem
 
@@ -699,7 +711,7 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'has_orders',
             'message': 'این کانال سفارش باز دارد؛ بعد از اتمام یا لغو سفارش می‌توانید حذف کنید.',
-        }, status=400)
+        }, status=200)
     cid = ch.id
     from channels_app.models import Tariff
     # قلم‌های بسته‌شده را از کانال جدا کن تا CASCADE مانع نشود
@@ -717,10 +729,14 @@ def api_channel_archive(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=cid, manager=user).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     listed = body.get('is_listed')
     if listed is None:
         # toggle: archive if currently listed
@@ -848,10 +864,14 @@ def api_group_update(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    g = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        gid = int(body.get('group_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه مجموعه نامعتبر است.'}, status=200)
+    g = ChannelGroup.objects.filter(id=gid, manager=user).first()
     if not g:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=200)
     if 'name' in body and str(body.get('name') or '').strip():
         g.name = str(body.get('name')).strip()[:200]
         g.save(update_fields=['name'])
@@ -885,10 +905,14 @@ def api_group_delete(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    g = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        gid = int(body.get('group_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه مجموعه نامعتبر است.'}, status=200)
+    g = ChannelGroup.objects.filter(id=gid, manager=user).first()
     if not g:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'مجموعه پیدا نشد.'}, status=200)
     from orders.models import OrderItem
     if OrderItem.objects.filter(tariff__group=g).exists():
         return JsonResponse({
@@ -1009,7 +1033,7 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'bad_fields',
             'message': 'دقیقاً یک کانال یا یک مجموعه را انتخاب کنید.',
-        }, status=400)
+        }, status=200)
     try:
         name = str(body.get('name') or '').strip()[:100]
         duration = int(body.get('duration_hours'))
@@ -1404,7 +1428,7 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
+    body = _json_body(request) or {}
     from orders.bale_pay import (
         announce_invoices,
         invoice_for_order,
@@ -1551,8 +1575,12 @@ def api_request_payout(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    bank = BankAccount.objects.filter(id=body.get('bank_id'), user=user).first()
+    body = _json_body(request) or {}
+    try:
+        bid = int(body.get('bank_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حساب بانکی نامعتبر است.'}, status=200)
+    bank = BankAccount.objects.filter(id=bid, user=user).first()
     if not bank:
         return _fail('bank_not_found', 404)
     r = ws.request_payout(user, bank)
@@ -1758,7 +1786,7 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_operator_assignments(request: HttpRequest) -> JsonResponse:
     """لیست کانال‌های انتساب‌داده‌شده / در انتظار claim."""
     user, err = _auth_user(request)
@@ -1766,9 +1794,12 @@ def api_operator_assignments(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبانی.'}, status=200)
     rows = []
-    qs = Channel.objects.filter(ownership_verified=True).select_related('manager').order_by('-id')[:200]
+    try:
+        qs = list(Channel.objects.filter(ownership_verified=True).select_related('manager').order_by('-id')[:200])
+    except Exception:
+        qs = []
     for ch in qs:
         uname = (ch.manager.bale_username if ch.manager_id else '') or ch.pending_manager_username
         rows.append({
@@ -1979,7 +2010,7 @@ def api_operator_test_delete(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
     """بنرهای تأییدشده و کانال‌ها برای تست ارسال پشتیبان."""
     user, err = _auth_user(request)

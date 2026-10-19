@@ -166,10 +166,14 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
+    body = _json_body(request) or {}
+    try:
+        cid = int(body.get('channel_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    ch = Channel.objects.filter(id=cid, manager=user).first()
     if not ch:
-        return _err('not_found', 404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     mode = body.get('publish_mode')
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
         return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'این روش انتشار را نمی‌شناسم.'}, status=400)
@@ -461,7 +465,7 @@ def api_tariff_update(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
+    body = _json_body(request) or {}
     t = _own_tariff(user, body.get('tariff_id'))
     if t is None:
         return _err('not_found', 404)
@@ -497,12 +501,12 @@ def api_tariff_delete(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
+    body = _json_body(request) or {}
     t = _own_tariff(user, body.get('tariff_id'))
     if t is None:
-        return _err('not_found', 404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
     if t is False:
-        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=200)
     has_items = OrderItem.objects.filter(tariff_id=t.id).exists()
     from orders.models import SlotReservation
     has_slots = SlotReservation.objects.filter(tariff_id=t.id).exists()
@@ -1012,14 +1016,14 @@ def api_order_cancel(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_operator_banners(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return _err('forbidden', 403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبانی.'}, status=200)
     rows = []
     for r in BannerPublishRequest.objects.filter(status='pending').select_related('customer').order_by('id')[:50]:
         rows.append({
@@ -1034,26 +1038,33 @@ def api_operator_banners(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_banner_decide(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    if not ws.is_operator(user.bale_user_id or ''):
-        return _err('forbidden', 403)
-    body = _json_body(request)
-    r = operator_decide(int(body.get('request_id') or 0), str(user.bale_user_id), bool(body.get('approve')))
-    if not r.get('ok'):
-        from bot_flow.messages import user_error
-
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': r.get('error'),
-                'message': r.get('message') or ERR_FA.get(r.get('error') or '') or user_error(r.get('error')),
-            },
-            status=400,
-        )
-    return JsonResponse({'ok': True, 'message': r.get('message') or 'ثبت شد'})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        if not ws.is_operator(user.bale_user_id or ''):
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبانی.'}, status=200)
+        body = _json_body(request) or {}
+        try:
+            rid = int(body.get('request_id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه درخواست نامعتبر است.'}, status=200)
+        r = operator_decide(rid, str(user.bale_user_id), bool(body.get('approve')))
+        if not r.get('ok'):
+            from bot_flow.messages import user_error
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': r.get('error'),
+                    'message': r.get('message') or ERR_FA.get(r.get('error') or '') or user_error(r.get('error')),
+                },
+                status=200,
+            )
+        return JsonResponse({'ok': True, 'message': r.get('message') or 'ثبت شد'})
+    except Exception as exc:
+        logger.exception('operator_banner_decide')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'تصمیم بنر ثبت نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
