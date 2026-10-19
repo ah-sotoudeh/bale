@@ -4508,6 +4508,7 @@ main button.lb-ch-row .lb-ch-ava {
   padding: 2px 7px;
   border-radius: 999px;
   white-space: nowrap;
+  margin-inline-start: 0.55em !important; /* فاصله از عنوان */
 }
 .lb-cat-ch:active {
   background: var(--lb-surface-2);
@@ -5096,3 +5097,57 @@ main .lb-sort-row {
 
 /* فیلتر کلاینتی مخفی‌سازی کارت */
 .lb-cat-card.lb-hide-card { display: none !important; }
+
+
+/* ردیف مرتب‌سازی: عنوان + دو فلش */
+.lb-sort-row-ui {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--lb-border);
+}
+.lb-sort-row-ui:last-child {
+  border-bottom: none;
+}
+.lb-sort-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lb-text);
+  min-width: 0;
+  flex: 1;
+}
+.lb-sort-title.on {
+  color: var(--lb-primary);
+}
+.lb-sort-dirs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.lb-sort-dir {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid var(--lb-border);
+  background: var(--lb-surface);
+  color: var(--lb-text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.lb-sort-dir:active {
+  background: var(--lb-surface-2);
+}
+.lb-sort-dir.on {
+  border-color: var(--lb-primary);
+  background: var(--lb-primary);
+  color: var(--lb-on-primary);
+}
+.lb-sort-dir svg {
+  display: block;
+}

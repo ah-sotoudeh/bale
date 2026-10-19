@@ -1789,51 +1789,55 @@ var reset = document.getElementById("lb-theme-reset");
       chips.forEach(function (chip) {
         var base = (chip.textContent || "").replace(/\s*↓\s*$/, "").trim();
         if (!base) return;
-        /* دو جهت */
-        [
-          { rev: false, suffix: " (بیشتر → کمتر)" },
-          { rev: true, suffix: " (کمتر → بیشتر)" }
-        ].forEach(function (dir) {
-          /* برای قیمت: برعکس برچسب واضح‌تر */
-          var label = base + dir.suffix;
-          if (base === "قیمت") {
-            /* پیش‌فرض sort صعودی = ارزان‌ترین */
-            label = dir.rev ? "قیمت (گران‌ترین)" : "قیمت (ارزان‌ترین)";
-          } else if (base === "هر هزار") {
-            label = dir.rev ? "هر هزار (گران‌تر)" : "هر هزار (ارزان‌تر)";
-          } else if (base === "بازدید" || base === "بازدید روز" || base === "رشد" || base === "استناد") {
-            /* پیش‌فرض نزولی = بیشترین */
-            label = dir.rev ? base + " (کمترین)" : base + " (بیشترین)";
-          }
-          var on = chip.classList.contains("on") && ((chip.textContent || "").indexOf("↓") >= 0) === dir.rev;
-          /* React: on + ↓ means rev; on without ↓ means !rev */
-          var isOn = chip.classList.contains("on");
-          var isRev = (chip.textContent || "").indexOf("↓") >= 0;
-          on = isOn && (isRev === dir.rev);
+        var isOn = chip.classList.contains("on");
+        var isRev = (chip.textContent || "").indexOf("↓") >= 0;
 
-          var o = document.createElement("button");
-          o.type = "button";
-          o.className = "lb-sheet-opt" + (on ? " on" : "");
-          o.innerHTML = '<span></span><span class="ck"></span>';
-          o.querySelector("span").textContent = label;
-          o.onclick = function () {
-            /* تنظیم مرتب‌سازی + جهت */
+        var row = document.createElement("div");
+        row.className = "lb-sort-row-ui";
+
+        var title = document.createElement("span");
+        title.className = "lb-sort-title";
+        title.textContent = base;
+        if (isOn) title.classList.add("on");
+        row.appendChild(title);
+
+        var dirs = document.createElement("div");
+        dirs.className = "lb-sort-dirs";
+
+        function mkBtn(wantRev, arrow) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "lb-sort-dir" + (isOn && isRev === wantRev ? " on" : "");
+          b.setAttribute("aria-label", base + (wantRev ? " صعودی" : " نزولی"));
+          b.innerHTML = arrow;
+          b.onclick = function (e) {
+            e.stopPropagation();
             if (!chip.classList.contains("on")) {
-              clickChip(chip); /* select + rev false */
-              if (dir.rev) {
-                setTimeout(function () { clickChip(chip); }, 30); /* toggle rev */
+              clickChip(chip);
+              if (wantRev) {
+                setTimeout(function () { clickChip(chip); }, 30);
               }
             } else {
               var nowRev = (chip.textContent || "").indexOf("↓") >= 0;
-              if (nowRev !== dir.rev) clickChip(chip);
+              if (nowRev !== wantRev) clickChip(chip);
             }
             setTimeout(function () {
               syncCatBar();
               closeLbSheet();
             }, 50);
           };
-          sheet.appendChild(o);
-        });
+          return b;
+        }
+
+        /* فلش بالا = مقدار بیشتر اول (rev=false برای بازدید؛ برای قیمت = گران‌تر = rev true) */
+        /* ساده‌سازی UX: بالا = !rev در React بعد از انتخاب، پایین = rev */
+        /* برای قیمت/cpm پیش‌فرض !rev = ارزان؛ کاربر فلش بالا را «بیشتر» می‌فهمد */
+        var up = mkBtn(false, '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>');
+        var down = mkBtn(true, '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>');
+        dirs.appendChild(up);
+        dirs.appendChild(down);
+        row.appendChild(dirs);
+        sheet.appendChild(row);
       });
     });
   }
