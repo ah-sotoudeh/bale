@@ -1624,6 +1624,123 @@ var reset = document.getElementById("lb-theme-reset");
     } catch (e) {}
   }
 
+  function isCustomerCatalog() {
+    try {
+      var filter = document.querySelector("main .lb-filter-row");
+      var search = document.querySelector("main input.lb-cat-search, main input[placeholder*='جست']");
+      return !!(filter && search);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function closeSortSheet() {
+    var back = document.getElementById("lb-sort-sheet");
+    if (back) back.remove();
+  }
+
+  function openSortSheet() {
+    closeSortSheet();
+    var chips = document.querySelectorAll("main .lb-sort-row button.lb-chip, main .lb-sort-row .lb-chip");
+    if (!chips.length) {
+      if (window.lbToast) window.lbToast("گزینه مرتب‌سازی در دسترس نیست");
+      return;
+    }
+    var back = document.createElement("div");
+    back.id = "lb-sort-sheet";
+    back.className = "lb-sort-sheet-back";
+    var sheet = document.createElement("div");
+    sheet.className = "lb-sort-sheet";
+    var hd = document.createElement("div");
+    hd.className = "lb-sort-sheet-hd";
+    hd.innerHTML = '<span>مرتب‌سازی بر اساس</span>';
+    var x = document.createElement("button");
+    x.type = "button";
+    x.setAttribute("aria-label", "بستن");
+    x.textContent = "×";
+    x.onclick = closeSortSheet;
+    hd.appendChild(x);
+    sheet.appendChild(hd);
+    chips.forEach(function (chip) {
+      var label = (chip.textContent || "").replace(/\s*↓\s*$/, "").trim();
+      if (!label) return;
+      var opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = "lb-sort-opt" + (chip.classList.contains("on") ? " on" : "");
+      opt.innerHTML = '<span></span><span class="lb-sort-check"></span>';
+      opt.querySelector("span").textContent = label;
+      opt.onclick = function () {
+        try { chip.click(); } catch (e) {}
+        closeSortSheet();
+        setTimeout(syncSortBtnLabel, 50);
+      };
+      sheet.appendChild(opt);
+    });
+    back.appendChild(sheet);
+    back.addEventListener("click", function (e) {
+      if (e.target === back) closeSortSheet();
+    });
+    document.body.appendChild(back);
+  }
+
+  function syncSortBtnLabel() {
+    var btn = document.getElementById("lb-sort-btn");
+    if (!btn) return;
+    var on = document.querySelector("main .lb-sort-row button.lb-chip.on, main .lb-sort-row .lb-chip.on");
+    var label = on ? (on.textContent || "").replace(/\s*↓\s*$/, "").trim() : "مرتب‌سازی";
+    var text = btn.querySelector(".lb-sort-btn-txt");
+    if (text) text.textContent = label || "مرتب‌سازی";
+    else btn.lastChild && (btn.lastChild.textContent = label);
+  }
+
+  function ensureCatalogToolbar() {
+    try {
+      if (!isCustomerCatalog()) {
+        var orphan = document.getElementById("lb-sort-btn");
+        if (orphan) orphan.remove();
+        closeSortSheet();
+        return;
+      }
+      enhanceCatSearch();
+      var filter = document.querySelector("main .lb-filter-row");
+      if (!filter) return;
+
+      /* مخفی کردن برچسب مرتب‌سازی */
+      document.querySelectorAll("main p.lb-sec-label, main .lb-sec-label").forEach(function (p) {
+        var tx = (p.textContent || "").trim();
+        if (tx.indexOf("مرتب") >= 0) {
+          p.style.display = "none";
+          p.setAttribute("data-lb-hide", "sort-label");
+        }
+      });
+
+      filter.classList.add("lb-filter-sticky");
+
+      var btn = document.getElementById("lb-sort-btn");
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.id = "lb-sort-btn";
+        btn.type = "button";
+        btn.className = "lb-sort-btn";
+        btn.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
+          '<span class="lb-sort-btn-txt">مرتب‌سازی</span>';
+        /* بعد از ردیف فیلتر — React این گره را مالک نیست */
+        if (filter.parentNode) {
+          filter.parentNode.insertBefore(btn, filter.nextSibling);
+        }
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          openSortSheet();
+        });
+      } else if (btn.previousElementSibling !== filter && filter.parentNode) {
+        /* اگر React دوباره فیلتر ساخت، دکمه را کنارش نگه دار */
+        filter.parentNode.insertBefore(btn, filter.nextSibling);
+      }
+      syncSortBtnLabel();
+    } catch (e) {}
+  }
+
   /* 7) وضعیت «خالی از نتیجه جستجو» زیر لیست */
   function searchEmptyState() {
     var inp = document.querySelector("main input[placeholder*='جستجو']");
@@ -1819,6 +1936,7 @@ var reset = document.getElementById("lb-theme-reset");
     try {
       wireDrafts();
       enhanceCatSearch();
+      ensureCatalogToolbar();
       searchEmptyState();
       filterActiveCount();
       watchNavBadge();
