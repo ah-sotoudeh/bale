@@ -265,29 +265,32 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
 def _set_item_status(request: HttpRequest, action: str) -> JsonResponse:
     """تأیید و رد از همان مسیر سبد بازو می‌گذرد تا فاکتور و وضعیت سفارش یکی بماند."""
     from orders.cart import process_manager_item
-
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    if not user.bale_user_id:
-        from miniapp.api import _fail
-
-        return _fail('no_user')
-    body = _json_body(request)
+    import logging
+    log = logging.getLogger(__name__)
     try:
-        item_id = int(body.get('item_id') or 0)
-    except (TypeError, ValueError):
-        from miniapp.api import _fail
-
-        return _fail('not_found', 404)
-    result = process_manager_item(item_id, str(user.bale_user_id), action)
-    if not result.get('ok'):
-        from miniapp.api import _with_message
-
-        code = 404 if result.get('error') in ('item_not_found', 'manager_not_found') else 400
-        return JsonResponse(_with_message(result), status=code)
-    return JsonResponse(result)
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        if not user.bale_user_id:
+            return JsonResponse({'ok': False, 'error': 'no_user', 'message': 'شناسه بله کاربر مشخص نیست.'}, status=200)
+        body = _json_body(request) or {}
+        try:
+            item_id = int(body.get('item_id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'سفارش پیدا نشد.'}, status=200)
+        result = process_manager_item(item_id, str(user.bale_user_id), action)
+        if not result.get('ok'):
+            from miniapp.api import _with_message
+            payload = _with_message(result) if callable(_with_message) else result
+            if not isinstance(payload, dict):
+                payload = {'ok': False, 'error': result.get('error') or 'error'}
+            payload.setdefault('message', result.get('message') or result.get('error') or 'انجام نشد')
+            return JsonResponse(payload, status=200)
+        return JsonResponse(result if isinstance(result, dict) else {'ok': True})
+    except Exception as exc:
+        log.exception('_set_item_status %s', action)
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'عملیات سفارش نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -303,7 +306,7 @@ def api_order_reject(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_operator_payouts(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

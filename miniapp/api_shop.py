@@ -192,27 +192,34 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_calendar(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
         return err
     assert user is not None
-    t = _own_tariff(user, request.GET.get('tariff_id'))
-    customer = request.GET.get('for') == 'customer'
+    body = {}
+    try:
+        if request.method == 'POST':
+            body = _json_body(request) or {}
+    except Exception:
+        body = {}
+    tid_raw = request.GET.get('tariff_id') or body.get('tariff_id')
+    customer = (request.GET.get('for') or body.get('for') or '') == 'customer'
+    t = _own_tariff(user, tid_raw)
     if customer:
         t = Tariff.objects.select_related('channel', 'group').filter(
-            id=request.GET.get('tariff_id'), is_active=True
+            id=tid_raw, is_active=True
         ).first()
         if not t:
-            return _err('not_found', 404)
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
     elif t is None:
-        return _err('not_found', 404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
     elif t is False:
-        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=200)
     ready_banner = True if not customer else viewer_has_ready_banner(user)
     try:
-        span = int(request.GET.get('days') or 42)
+        span = int(request.GET.get('days') or body.get('days') or 42)
     except (TypeError, ValueError):
         span = 42
     span = max(14, min(span, 62))
@@ -765,21 +772,30 @@ def api_cart(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_cart_add(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
-    t = Tariff.objects.select_related('channel', 'group').filter(id=body.get('tariff_id'), is_active=True).first()
-    if not t:
-        return _err('not_found', 404)
-    day = _parse_day(body)
-    if not day:
-        return _err('bad_date')
-    r = cart_svc.add_to_cart(user, t, day)
-    if not r.get('ok'):
-        return _err(r.get('error') or 'slot_conflict')
-    return JsonResponse({'ok': True, 'item_id': r['item'].id, 'order_id': r['order'].id})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            tid = int(body.get('tariff_id'))
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'تعرفه نامعتبر است.'}, status=200)
+        t = Tariff.objects.select_related('channel', 'group').filter(id=tid, is_active=True).first()
+        if not t:
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد یا غیرفعال است.'}, status=200)
+        day = _parse_day(body)
+        if not day:
+            return JsonResponse({'ok': False, 'error': 'bad_date', 'message': 'تاریخ نامعتبر است.'}, status=200)
+        r = cart_svc.add_to_cart(user, t, day)
+        if not r.get('ok'):
+            code = r.get('error') or 'slot_conflict'
+            return JsonResponse({'ok': False, 'error': code, 'message': ERR_FA.get(code) or 'این روز قابل رزرو نیست.'}, status=200)
+        return JsonResponse({'ok': True, 'item_id': r['item'].id, 'order_id': r['order'].id})
+    except Exception as exc:
+        logger.exception('api_cart_add')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'افزودن به سبد نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -828,18 +844,23 @@ def api_cart_banner(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_checkout(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    cart_svc.release_abandoned_carts(user)
-    order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
-    if not order:
-        return _err('empty_cart')
-    r = cart_svc.checkout(order)
-    if not r.get('ok'):
-        return _err(r.get('error') or 'empty_cart')
-    return JsonResponse({'ok': True, 'order_id': order.id, 'count': r.get('count')})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        cart_svc.release_abandoned_carts(user)
+        order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
+        if not order:
+            return JsonResponse({'ok': False, 'error': 'empty_cart', 'message': 'سبد خالی است.'}, status=200)
+        r = cart_svc.checkout(order)
+        if not r.get('ok'):
+            code = r.get('error') or 'empty_cart'
+            return JsonResponse({'ok': False, 'error': code, 'message': ERR_FA.get(code) or 'ثبت سفارش ممکن نشد.'}, status=200)
+        return JsonResponse({'ok': True, 'order_id': order.id, 'count': r.get('count')})
+    except Exception as exc:
+        logger.exception('api_checkout')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'تسویه سبد نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt

@@ -1219,7 +1219,7 @@ def api_orders(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def api_free_days(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:
