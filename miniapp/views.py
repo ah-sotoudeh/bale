@@ -102,6 +102,61 @@ def rules_page(_request: HttpRequest) -> HttpResponse:
     return _framed(HttpResponse(html, content_type='text/html; charset=utf-8'))
 
 
+
+@xframe_options_exempt
+def ui_debug(request: HttpRequest) -> HttpResponse:
+    """مسیر جدا برای دیباگ UI در /miniapp/ui-debug/
+
+    لاگین و /miniapp/ اصلی را تغییر نمی‌دهد.
+    پیش‌فرض: دموی فرانت بدون API.
+    اگر MINIAPP_UI_OPEN_DEBUG=1 و DEBUG_BALE_ID و ALLOW_MINIAPP_DEBUG=1:
+    فقط این صفحه با debug_bale_id به API واقعی وصل می‌شود.
+    """
+    import os
+
+    html = (PANEL / 'index.html').read_text(encoding='utf-8')
+    open_debug = os.environ.get('MINIAPP_UI_OPEN_DEBUG', '').strip().lower() in (
+        '1', 'true', 'yes',
+    )
+    debug_id = (
+        os.environ.get('DEBUG_BALE_ID')
+        or os.environ.get('OPERATOR_BALE_ID')
+        or ''
+    ).strip()
+
+    if open_debug and debug_id:
+        inject = (
+            '<script>(function(){window.__LB_UI_DEBUG=1;'
+            + ('window.__LB_DEBUG_BALE_ID=%r;' % debug_id)
+            + 'try{var u=new URL(location.href);'
+            + 'u.searchParams.set("debug_bale_id",window.__LB_DEBUG_BALE_ID);'
+            + 'if(!location.search.includes("debug_bale_id"))'
+            + 'history.replaceState(null,"",u);}catch(e){}'
+            + 'console.info("[lb ui-debug] live API + debug_bale_id");'
+            + '})();</script>'
+        )
+    else:
+        html = html.replace(
+            'window.__LIVE_API = "/miniapp/api";',
+            'window.__LIVE_API = ""; /* ui-debug demo */',
+            1,
+        )
+        inject = (
+            '<script>(function(){window.__LB_UI_DEBUG=1;'
+            'try{window.__LB_DEMO_ROLE=localStorage.getItem("lb_role")||"customer"}catch(e){}'
+            'console.info("[lb ui-debug] demo mode — main /miniapp/ auth unchanged");'
+            '})();</script>'
+        )
+
+    if '<head>' in html:
+        html = html.replace('<head>', '<head>\n' + inject, 1)
+    else:
+        html = inject + html
+
+    resp = HttpResponse(html, content_type='text/html; charset=utf-8')
+    return _framed(resp)
+
+
 def panel_asset(_request: HttpRequest, name: str) -> FileResponse:
     file = _safe(PANEL / 'assets', name)
     content_type = guess_type(file.name)[0] or 'application/octet-stream'

@@ -46,6 +46,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'miniapp.json_errors.MiniappJsonErrorMiddleware',
+    'miniapp.api_access_log.MiniappApiAccessLogMiddleware',
 ]
 
 ROOT_URLCONF = 'bale_site.urls'
@@ -145,3 +146,27 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Allow Bale web to embed miniapp iframe in DEBUG
 X_FRAME_OPTIONS = 'ALLOWALL' if DEBUG else 'SAMEORIGIN'
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {'format': '[{levelname}] {name}: {message}', 'style': '{'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'},
+    },
+    'loggers': {
+        'miniapp.api_access': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'miniapp': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

@@ -1,12 +1,13 @@
 from django.urls import path
 
 from miniapp import api, api_extra, api_shop, api_banner_create
-from miniapp.views import demo_asset, demo_page, demos_hub, manager_app, media_file, mini_app, panel_asset, rules_page
+from miniapp.views import demo_asset, demo_page, demos_hub, manager_app, media_file, mini_app, panel_asset, rules_page, ui_debug
 
 urlpatterns = [
     path('assets/<path:name>', panel_asset, name='miniapp_asset'),
     path('media/<path:name>', media_file, name='miniapp_media'),
     path('rules/', rules_page, name='miniapp_rules'),
+    path('ui-debug/', ui_debug, name='miniapp_ui_debug'),
     path('', mini_app, name='miniapp_home'),
     path('demos/', demos_hub, name='miniapp_demos'),
     path('demos/<str:name>/', demo_page, name='miniapp_demo_page'),
