@@ -519,7 +519,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     name = str(body.get('name') or '').strip()[:200]
     if not link or link == '@':
         missing_link = 'پیوند کانال را بنویسید.'
-        return JsonResponse({'ok': False, 'error': missing_link, 'message': missing_link}, status=400)
+        return JsonResponse({'ok': False, 'error': missing_link, 'message': missing_link}, status=200)
 
     info: Dict[str, Any] = {}
     try:
@@ -797,14 +797,14 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
         body = _json_body(request) or {}
         name = str(body.get('name') or '').strip()[:200]
         if not name:
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=200)
         raw_ids = body.get('channel_ids') or body.get('channels') or []
         if not isinstance(raw_ids, list) or len(raw_ids) < 2:
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل ۲ کانال انتخاب کنید.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل ۲ کانال انتخاب کنید.'}, status=200)
         try:
             id_set = {int(x) for x in raw_ids}
         except (TypeError, ValueError):
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
         chans = list(Channel.objects.filter(id__in=id_set, manager=user))
         if len(chans) != len(id_set):
             return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=200)
@@ -888,7 +888,7 @@ def api_group_update(request: HttpRequest) -> JsonResponse:
     if 'channel_ids' in body or 'channels' in body:
         raw_ids = body.get('channel_ids') or body.get('channels') or []
         if not isinstance(raw_ids, list) or not raw_ids:
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال لازم است.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال لازم است.'}, status=200)
         chans = list(Channel.objects.filter(id__in=raw_ids, manager=user))
         if len(chans) != len(set(int(x) for x in raw_ids)):
             return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=200)
@@ -1316,7 +1316,11 @@ def api_mark_busy(request: HttpRequest) -> JsonResponse:
         return _fail('need_date')
 
     ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first()
-    group = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first()
+    try:
+        _gid = int(body.get('group_id')) if body.get('group_id') not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه مجموعه نامعتبر است.'}, status=200)
+    group = ChannelGroup.objects.filter(id=_gid, manager=user).first() if _gid is not None else None
     if not ch and not group:
         return _fail('target_required')
 
@@ -1479,13 +1483,13 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'already_paid',
             'message': 'این سفارش قبلاً پرداخت شده.',
-        }, status=400)
+        }, status=200)
     if order.status != 'waiting_payment':
         return JsonResponse({
             'ok': False,
             'error': 'not_waiting_payment',
             'message': 'این سفارش الان قابل پرداخت نیست.',
-        }, status=400)
+        }, status=200)
 
     via = str(body.get('via') or 'auto').strip().lower()
     total = int(order.total_amount or 0)
@@ -1505,7 +1509,7 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
                         'message': 'اعتبار کافی نیست. از پرداخت در بازو استفاده کنید.',
                         'credit': credit,
                         'total': total,
-                    }, status=400)
+                    }, status=200)
             else:
                 spent = spend_customer_credit(
                     user,
@@ -1519,14 +1523,14 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
                         'ok': False,
                         'error': spent.get('error') or 'low_balance',
                         'message': 'کسر از اعتبار انجام نشد.',
-                    }, status=400)
+                    }, status=200)
                 result = process_payment_paid(order.id)
                 if not result.get('ok'):
                     return JsonResponse({
                         'ok': False,
                         'error': result.get('error') or 'pay_failed',
                         'message': 'پرداخت از اعتبار ثبت نشد. پشتیبانی را خبر کنید.',
-                    }, status=400)
+                    }, status=200)
                 return JsonResponse({
                     'ok': True,
                     'via': 'wallet',
@@ -1541,7 +1545,7 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'no_chat',
             'message': 'شناسه بله شما پیدا نشد. یک‌بار از بازو وارد مینی‌اپ شوید.',
-        }, status=400)
+        }, status=200)
 
     # مسیر اصلی بدون اعتبار کافی: فاکتور در چت بازو
     if via in ('bot', 'chat', 'reopen', 'auto', ''):
@@ -1555,13 +1559,13 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
                 'ok': False,
                 'error': payment.get('error') or 'invoice_failed',
                 'message': 'فاکتور در گفتگوی بازو فرستاده نشد. یک‌بار دیگر تلاش کنید.',
-            }, status=400)
+            }, status=200)
         if sent == 0 and skipped == 0:
             return JsonResponse({
                 'ok': False,
                 'error': 'invoice_failed',
                 'message': 'فاکتور ساخته نشد. مبلغ یا وضعیت سفارش را بررسی کنید.',
-            }, status=400)
+            }, status=200)
         if sent:
             bc_msg = (
                 'فاکتور در گفتگوی بازو (لینک‌بان) فرستاده شد. '
@@ -1616,7 +1620,7 @@ def api_request_payout(request: HttpRequest) -> JsonResponse:
         return _fail('bank_not_found', 404)
     r = ws.request_payout(user, bank)
     if not r.get('ok'):
-        return JsonResponse(_with_message(r), status=400)
+        return JsonResponse(_with_message(r), status=200)
     pr = r['payout']
     return JsonResponse({'ok': True, 'payout_id': pr.id, 'amount_toman': pr.amount_toman})
 
@@ -1711,13 +1715,13 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'bad_fields',
             'message': 'نام کاربری یا شناسه بله مدیر را بنویسید (مثل @test یا 1164810718).',
-        }, status=400)
+        }, status=200)
     refs = body.get('channels') or body.get('channel_list') or []
     if isinstance(refs, str):
         refs = re.split(r'[,\s]+', refs)
     refs = [str(x).strip() for x in refs if str(x).strip()]
     if not refs:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال (@name) لازم است.'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال (@name) لازم است.'}, status=200)
 
     from django.contrib.auth import get_user_model
     UserModel = get_user_model()
@@ -1912,7 +1916,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
                     'ok': False,
                     'error': 'not_on_linkbank',
                     'message': 'این بنر در لینک‌بانک نیست؛ فقط بنر تأییدشده قابل فوروارد است.',
-                }, status=400)
+                }, status=200)
             from_chat = str(bn.linkbank_chat_id or from_chat)
             msg_id = bn.linkbank_message_id
         caption = caption or (bn.caption or '')
@@ -1936,7 +1940,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'bad_fields',
             'message': 'منبع بنر در لینک‌بانک لازم است (banner_id تأییدشده).',
-        }, status=400)
+        }, status=200)
 
     # تست آپلود+فوروارد — قبل از اعتبارسنجی mode
     if body.get('upload_then_forward') or str(body.get('mode') or '').strip().lower() == 'upload_then_forward':
