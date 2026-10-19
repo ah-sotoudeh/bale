@@ -1615,7 +1615,7 @@ var reset = document.getElementById("lb-theme-reset");
   };
 
 
-  /* جستجوی کاتالوگ: فقط کلاس — آیکن با CSS تا React DOM را نشکند */
+  /* جستجوی کاتالوگ: فقط کلاس */
   function enhanceCatSearch() {
     try {
       document.querySelectorAll("main input[placeholder*='جست‌وجو'], main input[placeholder*='جستجو'], input.lb-cat-search").forEach(function (inp) {
@@ -1625,119 +1625,310 @@ var reset = document.getElementById("lb-theme-reset");
   }
 
   function isCustomerCatalog() {
-    try {
-      var filter = document.querySelector("main .lb-filter-row");
-      var search = document.querySelector("main input.lb-cat-search, main input[placeholder*='جست']");
-      return !!(filter && search);
-    } catch (e) {
-      return false;
-    }
+    return !!(document.querySelector("main .lb-filter-row") && document.querySelector("main input.lb-cat-search, main input[placeholder*='جست']"));
   }
 
-  function closeSortSheet() {
-    var back = document.getElementById("lb-sort-sheet");
-    if (back) back.remove();
+  function closeLbSheet() {
+    var el = document.getElementById("lb-sheet");
+    if (el) el.remove();
   }
 
-  function openSortSheet() {
-    closeSortSheet();
-    var chips = document.querySelectorAll("main .lb-sort-row button.lb-chip, main .lb-sort-row .lb-chip");
-    if (!chips.length) {
-      if (window.lbToast) window.lbToast("گزینه مرتب‌سازی در دسترس نیست");
-      return;
-    }
+  function openLbSheet(title, bodyBuild) {
+    closeLbSheet();
     var back = document.createElement("div");
-    back.id = "lb-sort-sheet";
-    back.className = "lb-sort-sheet-back";
+    back.id = "lb-sheet";
+    back.className = "lb-sheet-back";
     var sheet = document.createElement("div");
-    sheet.className = "lb-sort-sheet";
+    sheet.className = "lb-sheet";
     var hd = document.createElement("div");
-    hd.className = "lb-sort-sheet-hd";
-    hd.innerHTML = '<span>مرتب‌سازی بر اساس</span>';
+    hd.className = "lb-sheet-hd";
+    var tit = document.createElement("span");
+    tit.textContent = title;
     var x = document.createElement("button");
     x.type = "button";
     x.setAttribute("aria-label", "بستن");
     x.textContent = "×";
-    x.onclick = closeSortSheet;
+    x.onclick = closeLbSheet;
+    hd.appendChild(tit);
     hd.appendChild(x);
     sheet.appendChild(hd);
-    chips.forEach(function (chip) {
-      var label = (chip.textContent || "").replace(/\s*↓\s*$/, "").trim();
-      if (!label) return;
-      var opt = document.createElement("button");
-      opt.type = "button";
-      opt.className = "lb-sort-opt" + (chip.classList.contains("on") ? " on" : "");
-      opt.innerHTML = '<span></span><span class="lb-sort-check"></span>';
-      opt.querySelector("span").textContent = label;
-      opt.onclick = function () {
-        try { chip.click(); } catch (e) {}
-        closeSortSheet();
-        setTimeout(syncSortBtnLabel, 50);
-      };
-      sheet.appendChild(opt);
-    });
+    bodyBuild(sheet);
     back.appendChild(sheet);
-    back.addEventListener("click", function (e) {
-      if (e.target === back) closeSortSheet();
-    });
+    back.addEventListener("click", function (e) { if (e.target === back) closeLbSheet(); });
     document.body.appendChild(back);
+    return back;
   }
 
-  function syncSortBtnLabel() {
-    var btn = document.getElementById("lb-sort-btn");
-    if (!btn) return;
-    var on = document.querySelector("main .lb-sort-row button.lb-chip.on, main .lb-sort-row .lb-chip.on");
-    var label = on ? (on.textContent || "").replace(/\s*↓\s*$/, "").trim() : "مرتب‌سازی";
-    var text = btn.querySelector(".lb-sort-btn-txt");
-    if (text) text.textContent = label || "مرتب‌سازی";
-    else btn.lastChild && (btn.lastChild.textContent = label);
+  function filterChips() {
+    return Array.prototype.slice.call(document.querySelectorAll("main .lb-filter-row button.lb-chip, main .lb-filter-row .lb-chip"));
+  }
+  function sortChips() {
+    return Array.prototype.slice.call(document.querySelectorAll("main .lb-sort-row button.lb-chip, main .lb-sort-row .lb-chip"));
+  }
+  function chipByText(chips, text) {
+    text = (text || "").replace(/\s+/g, "");
+    for (var i = 0; i < chips.length; i++) {
+      var t = (chips[i].textContent || "").replace(/\s+/g, "").replace(/↓/g, "");
+      if (t === text || t.indexOf(text) === 0) return chips[i];
+    }
+    return null;
+  }
+
+  /* state for client-side package + multi category */
+  window.__lbCatUi = window.__lbCatUi || { pkg: false, cats: {} };
+
+  function applyClientCardFilter() {
+    var st = window.__lbCatUi;
+    var cards = document.querySelectorAll("main .lb-cat-card");
+    var catKeys = Object.keys(st.cats).filter(function (k) { return st.cats[k]; });
+    cards.forEach(function (card) {
+      var hide = false;
+      if (st.pkg) {
+        if (!card.querySelector(".lb-pkg-badge")) hide = true;
+      }
+      if (!hide && catKeys.length) {
+        var txt = card.textContent || "";
+        var ok = catKeys.some(function (lab) { return txt.indexOf(lab) >= 0; });
+        if (!ok) hide = true;
+      }
+      card.classList.toggle("lb-hide-card", hide);
+    });
+  }
+
+  function clickChip(chip) {
+    if (chip) try { chip.click(); } catch (e) {}
+  }
+
+  function openCategorySheet() {
+    var chips = filterChips();
+    /* category chips = all except همه / نشان / آماده */
+    var skip = { "همه": 1, "نشان‌شده‌ها": 1, "نشانشدهها": 1, "آمادهانتشار": 1, "آماده انتشار": 1 };
+    var cats = chips.filter(function (c) {
+      var t = (c.textContent || "").trim();
+      var key = t.replace(/\s+/g, "");
+      return t && !skip[t] && !skip[key];
+    });
+    /* also include آماده انتشار as optional in sheet */
+    var ready = chipByText(chips, "آماده انتشار");
+
+    openLbSheet("دسته‌بندی", function (sheet) {
+      var st = window.__lbCatUi;
+      if (ready) {
+        var o0 = document.createElement("button");
+        o0.type = "button";
+        o0.className = "lb-sheet-opt" + (ready.classList.contains("on") ? " on" : "");
+        o0.innerHTML = '<span>آماده انتشار</span><span class="ck"></span>';
+        o0.onclick = function () {
+          clickChip(ready);
+          setTimeout(function () {
+            o0.classList.toggle("on", ready.classList.contains("on"));
+            syncCatBar();
+          }, 30);
+        };
+        sheet.appendChild(o0);
+      }
+      cats.forEach(function (chip) {
+        var lab = (chip.textContent || "").trim();
+        var o = document.createElement("button");
+        o.type = "button";
+        o.className = "lb-sheet-opt" + (st.cats[lab] ? " on" : "");
+        o.innerHTML = '<span></span><span class="ck"></span>';
+        o.querySelector("span").textContent = lab;
+        o.onclick = function () {
+          st.cats[lab] = !st.cats[lab];
+          o.classList.toggle("on", !!st.cats[lab]);
+          /* برای سازگاری با React: اگر فقط یکی روشن است همان chip را بزن؛ وگرنه همه */
+          var active = Object.keys(st.cats).filter(function (k) { return st.cats[k]; });
+          var allChip = chipByText(filterChips(), "همه");
+          if (active.length === 0) {
+            clickChip(allChip);
+          } else if (active.length === 1) {
+            var one = chipByText(filterChips(), active[0]);
+            clickChip(one || allChip);
+          } else {
+            clickChip(allChip);
+          }
+          setTimeout(function () {
+            applyClientCardFilter();
+            syncCatBar();
+          }, 40);
+        };
+        sheet.appendChild(o);
+      });
+      var foot = document.createElement("div");
+      foot.className = "lb-sheet-foot";
+      var clear = document.createElement("button");
+      clear.type = "button";
+      clear.textContent = "پاک کردن";
+      clear.onclick = function () {
+        window.__lbCatUi.cats = {};
+        clickChip(chipByText(filterChips(), "همه"));
+        applyClientCardFilter();
+        syncCatBar();
+        closeLbSheet();
+      };
+      var done = document.createElement("button");
+      done.type = "button";
+      done.className = "primary";
+      done.textContent = "اعمال";
+      done.onclick = function () {
+        applyClientCardFilter();
+        syncCatBar();
+        closeLbSheet();
+      };
+      foot.appendChild(clear);
+      foot.appendChild(done);
+      sheet.appendChild(foot);
+    });
+  }
+
+  function openSortSheet() {
+    var chips = sortChips();
+    if (!chips.length) return;
+    openLbSheet("مرتب‌سازی بر اساس", function (sheet) {
+      chips.forEach(function (chip) {
+        var base = (chip.textContent || "").replace(/\s*↓\s*$/, "").trim();
+        if (!base) return;
+        /* دو جهت */
+        [
+          { rev: false, suffix: " (بیشتر → کمتر)" },
+          { rev: true, suffix: " (کمتر → بیشتر)" }
+        ].forEach(function (dir) {
+          /* برای قیمت: برعکس برچسب واضح‌تر */
+          var label = base + dir.suffix;
+          if (base === "قیمت") {
+            /* پیش‌فرض sort صعودی = ارزان‌ترین */
+            label = dir.rev ? "قیمت (گران‌ترین)" : "قیمت (ارزان‌ترین)";
+          } else if (base === "هر هزار") {
+            label = dir.rev ? "هر هزار (گران‌تر)" : "هر هزار (ارزان‌تر)";
+          } else if (base === "بازدید" || base === "بازدید روز" || base === "رشد" || base === "استناد") {
+            /* پیش‌فرض نزولی = بیشترین */
+            label = dir.rev ? base + " (کمترین)" : base + " (بیشترین)";
+          }
+          var on = chip.classList.contains("on") && ((chip.textContent || "").indexOf("↓") >= 0) === dir.rev;
+          /* React: on + ↓ means rev; on without ↓ means !rev */
+          var isOn = chip.classList.contains("on");
+          var isRev = (chip.textContent || "").indexOf("↓") >= 0;
+          on = isOn && (isRev === dir.rev);
+
+          var o = document.createElement("button");
+          o.type = "button";
+          o.className = "lb-sheet-opt" + (on ? " on" : "");
+          o.innerHTML = '<span></span><span class="ck"></span>';
+          o.querySelector("span").textContent = label;
+          o.onclick = function () {
+            /* تنظیم مرتب‌سازی + جهت */
+            if (!chip.classList.contains("on")) {
+              clickChip(chip); /* select + rev false */
+              if (dir.rev) {
+                setTimeout(function () { clickChip(chip); }, 30); /* toggle rev */
+              }
+            } else {
+              var nowRev = (chip.textContent || "").indexOf("↓") >= 0;
+              if (nowRev !== dir.rev) clickChip(chip);
+            }
+            setTimeout(function () {
+              syncCatBar();
+              closeLbSheet();
+            }, 50);
+          };
+          sheet.appendChild(o);
+        });
+      });
+    });
+  }
+
+  function syncCatBar() {
+    var bar = document.getElementById("lb-cat-bar");
+    if (!bar) return;
+    var chips = filterChips();
+    var allOn = false, favOn = false;
+    chips.forEach(function (c) {
+      var t = (c.textContent || "").trim();
+      if (t === "همه" && c.classList.contains("on")) allOn = true;
+      if (t.indexOf("نشان") >= 0 && c.classList.contains("on")) favOn = true;
+    });
+    var st = window.__lbCatUi;
+    var catCount = Object.keys(st.cats).filter(function (k) { return st.cats[k]; }).length;
+    bar.querySelectorAll("[data-act]").forEach(function (btn) {
+      var act = btn.getAttribute("data-act");
+      if (act === "all") btn.classList.toggle("on", allOn && !favOn && !st.pkg && catCount === 0);
+      if (act === "fav") btn.classList.toggle("on", favOn);
+      if (act === "pkg") btn.classList.toggle("on", !!st.pkg);
+      if (act === "cat") {
+        btn.classList.toggle("on", catCount > 0);
+        var tx = btn.querySelector(".tx");
+        if (tx) tx.textContent = catCount ? ("دسته (" + catCount + ")") : "دسته‌بندی";
+      }
+      if (act === "sort") {
+        var sc = sortChips().filter(function (c) { return c.classList.contains("on"); })[0];
+        var tx = btn.querySelector(".tx");
+        if (tx && sc) {
+          var lab = (sc.textContent || "").trim();
+          tx.textContent = lab || "مرتب‌سازی";
+        } else if (tx) tx.textContent = "مرتب‌سازی";
+        btn.classList.toggle("on", !!sc);
+      }
+    });
   }
 
   function ensureCatalogToolbar() {
     try {
       if (!isCustomerCatalog()) {
-        var orphan = document.getElementById("lb-sort-btn");
-        if (orphan) orphan.remove();
-        closeSortSheet();
+        var bar = document.getElementById("lb-cat-bar");
+        if (bar) bar.remove();
+        closeLbSheet();
         return;
       }
       enhanceCatSearch();
       var filter = document.querySelector("main .lb-filter-row");
       if (!filter) return;
 
-      /* مخفی کردن برچسب مرتب‌سازی */
-      document.querySelectorAll("main p.lb-sec-label, main .lb-sec-label").forEach(function (p) {
-        var tx = (p.textContent || "").trim();
-        if (tx.indexOf("مرتب") >= 0) {
-          p.style.display = "none";
-          p.setAttribute("data-lb-hide", "sort-label");
-        }
-      });
-
-      filter.classList.add("lb-filter-sticky");
-
-      var btn = document.getElementById("lb-sort-btn");
-      if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "lb-sort-btn";
-        btn.type = "button";
-        btn.className = "lb-sort-btn";
-        btn.innerHTML =
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' +
-          '<span class="lb-sort-btn-txt">مرتب‌سازی</span>';
-        /* بعد از ردیف فیلتر — React این گره را مالک نیست */
+      var bar = document.getElementById("lb-cat-bar");
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "lb-cat-bar";
+        bar.className = "lb-cat-bar";
+        bar.innerHTML =
+          '<button type="button" class="lb-cat-bar-item" data-act="all">همه</button>' +
+          '<button type="button" class="lb-cat-bar-item" data-act="fav">نشان‌شده</button>' +
+          '<button type="button" class="lb-cat-bar-item" data-act="pkg">مجموعه</button>' +
+          '<button type="button" class="lb-cat-bar-item is-btn" data-act="cat"><span class="tx">دسته‌بندی</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>' +
+          '<button type="button" class="lb-cat-bar-item is-btn" data-act="sort"><span class="tx">مرتب‌سازی</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg></button>';
         if (filter.parentNode) {
-          filter.parentNode.insertBefore(btn, filter.nextSibling);
+          filter.parentNode.insertBefore(bar, filter);
         }
-        btn.addEventListener("click", function (e) {
-          e.preventDefault();
-          openSortSheet();
+        bar.addEventListener("click", function (e) {
+          var btn = e.target.closest("[data-act]");
+          if (!btn) return;
+          var act = btn.getAttribute("data-act");
+          var chips = filterChips();
+          if (act === "all") {
+            window.__lbCatUi.pkg = false;
+            window.__lbCatUi.cats = {};
+            clickChip(chipByText(chips, "همه"));
+            setTimeout(function () { applyClientCardFilter(); syncCatBar(); }, 40);
+          } else if (act === "fav") {
+            window.__lbCatUi.pkg = false;
+            clickChip(chipByText(chips, "نشان‌شده‌ها") || chipByText(chips, "نشان‌شده"));
+            setTimeout(function () { applyClientCardFilter(); syncCatBar(); }, 40);
+          } else if (act === "pkg") {
+            window.__lbCatUi.pkg = !window.__lbCatUi.pkg;
+            if (window.__lbCatUi.pkg) {
+              clickChip(chipByText(chips, "همه"));
+            }
+            setTimeout(function () { applyClientCardFilter(); syncCatBar(); }, 40);
+          } else if (act === "cat") {
+            openCategorySheet();
+          } else if (act === "sort") {
+            openSortSheet();
+          }
         });
-      } else if (btn.previousElementSibling !== filter && filter.parentNode) {
-        /* اگر React دوباره فیلتر ساخت، دکمه را کنارش نگه دار */
-        filter.parentNode.insertBefore(btn, filter.nextSibling);
+      } else if (filter.parentNode && bar.nextElementSibling !== filter) {
+        filter.parentNode.insertBefore(bar, filter);
       }
-      syncSortBtnLabel();
+      applyClientCardFilter();
+      syncCatBar();
     } catch (e) {}
   }
 
