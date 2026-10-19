@@ -312,6 +312,7 @@ def api_me(request: HttpRequest) -> JsonResponse:
             'username': user.bale_username,
         },
         'wallet': br,
+        'channel_categories': [{'id': c[0], 'label': c[1]} for c in getattr(Channel, 'CATEGORY_CHOICES', ())],
         'is_operator': is_op,
         'can_switch_roles': can_switch,
         'debug': debug_user,
@@ -569,7 +570,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
 
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
         taken = 'این کانال برای کانال‌دار دیگری ثبت شده. اگر مال شماست، به پشتیبانی بگویید.'
-        return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=403)
+        return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=200)
     if existing:
         existing.manager = user
         existing.name = name
@@ -623,7 +624,7 @@ def api_channel_refresh_admin(request: HttpRequest) -> JsonResponse:
         if ws.is_operator(user.bale_user_id or ''):
             ch = Channel.objects.filter(id=body.get('channel_id')).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     from orders.publish import check_bot_admin, check_linkyar_admin
     bot_state = 'unknown'
     ly_state = 'unknown'
@@ -806,7 +807,7 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
             return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=400)
         chans = list(Channel.objects.filter(id__in=id_set, manager=user))
         if len(chans) != len(id_set):
-            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=200)
         from django.db import OperationalError, ProgrammingError
         try:
             g = ChannelGroup.objects.create(name=name, manager=user)
@@ -890,7 +891,7 @@ def api_group_update(request: HttpRequest) -> JsonResponse:
             return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'حداقل یک کانال لازم است.'}, status=400)
         chans = list(Channel.objects.filter(id__in=raw_ids, manager=user))
         if len(chans) != len(set(int(x) for x in raw_ids)):
-            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=200)
         g.channels.set(chans)
     if 'avatar_channel_id' in body:
         av = body.get('avatar_channel_id')
@@ -928,7 +929,7 @@ def api_group_delete(request: HttpRequest) -> JsonResponse:
             'ok': False,
             'error': 'has_orders',
             'message': 'این مجموعه سفارش دارد؛ حذف ممکن نیست.',
-        }, status=400)
+        }, status=200)
     gid = g.id
     Tariff.objects.filter(group=g).delete()
     g.delete()
@@ -1035,8 +1036,18 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     body = _json_body(request)
-    ch = Channel.objects.filter(id=body.get('channel_id'), manager=user).first() if body.get('channel_id') not in (None, '', 0, '0') else None
-    group = ChannelGroup.objects.filter(id=body.get('group_id'), manager=user).first() if body.get('group_id') not in (None, '', 0, '0') else None
+    ch = None
+    group = None
+    if body.get('channel_id') not in (None, '', 0, '0'):
+        try:
+            ch = Channel.objects.filter(id=int(body.get('channel_id')), manager=user).first()
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+    if body.get('group_id') not in (None, '', 0, '0'):
+        try:
+            group = ChannelGroup.objects.filter(id=int(body.get('group_id')), manager=user).first()
+        except (TypeError, ValueError):
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه مجموعه نامعتبر است.'}, status=200)
     if bool(ch) == bool(group):
         return JsonResponse({
             'ok': False,
@@ -1683,7 +1694,7 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
     body = _json_body(request)
     mgr_raw = str(
         body.get('manager')
@@ -1843,11 +1854,11 @@ def api_operator_unassign(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=200)
     body = _json_body(request)
     ch = Channel.objects.filter(id=body.get('channel_id')).first()
     if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=200)
     ch.manager = None
     ch.ownership_verified = False
     ch.pending_manager_username = ''
@@ -1865,7 +1876,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
     body = _json_body(request)
     ch_raw = body.get('channel') or body.get('channel_id') or body.get('link') or ''
     ch = None
@@ -1879,7 +1890,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
                 or Channel.objects.filter(name__iexact=key).first()
             )
     if ch is None:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
 
     from_chat = str(body.get('from_chat_id') or '').strip()
     msg_id = body.get('message_id')
@@ -1890,7 +1901,7 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
         from orders.models import CustomerBanner
         bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
         if not bn:
-            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'بنر پیدا نشد.'}, status=404)
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'بنر پیدا نشد.'}, status=200)
         if bn.from_linkbank and bn.linkbank_message_id:
             from_chat = str(bn.linkbank_chat_id or from_chat)
             msg_id = bn.linkbank_message_id
@@ -2009,7 +2020,7 @@ def api_operator_test_delete(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=200)
     body = _json_body(request)
     from orders.publish import delete_test_post, channel_ref
     ch_raw = body.get('channel') or body.get('channel_id') or body.get('ref') or ''
@@ -2038,7 +2049,7 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=200)
     from orders.models import CustomerBanner
     from orders.banner_media import public_media_url
     rows = []

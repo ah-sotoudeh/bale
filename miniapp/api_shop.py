@@ -177,7 +177,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     mode = body.get('publish_mode')
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'این روش انتشار را نمی‌شناسم.'}, status=400)
+        return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'این روش انتشار را نمی‌شناسم.'}, status=200)
     ch.publish_mode = mode
     fields = ['publish_mode']
     hours = body.get('remind_hours')
@@ -424,12 +424,12 @@ def api_clear_busy(request: HttpRequest) -> JsonResponse:
         try:
             tid = int(body.get('tariff_id'))
         except (TypeError, ValueError):
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه تعرفه نامعتبر است.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه تعرفه نامعتبر است.'}, status=200)
         t = _own_tariff(user, tid)
         if t is None:
-            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=404)
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
         if t is False:
-            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=403)
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=200)
         slot_id = 0
         try:
             slot_id = int(body.get('slot_id') or 0)
@@ -1122,42 +1122,47 @@ def api_operator_banner_decide(request: HttpRequest) -> JsonResponse:
 @require_http_methods(['POST'])
 def api_operator_paid(request: HttpRequest) -> JsonResponse:
     """Build batch from pending payouts then mark paid (notifies managers)."""
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    if not ws.is_operator(user.bale_user_id or ''):
-        return _err('forbidden', 403)
-    body = _json_body(request)
-    if not body.get('confirm'):
-        built = ws.build_payout_batch(user)
-        if not built.get('ok'):
-            return _err(
-                str(built.get('error') or 'no_pending'),
-                message='درخواست تسویه‌ای برای واریز نیست. وقتی درخواستی باز شد، دوباره بزنید.',
-            )
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        if not ws.is_operator(user.bale_user_id or ''):
+            return _err('forbidden', message='فقط پشتیبانی.')
+        body = _json_body(request) or {}
+        if not body.get('confirm'):
+            built = ws.build_payout_batch(user)
+            if not built.get('ok'):
+                return _err(
+                    str(built.get('error') or 'no_pending'),
+                    message='درخواست تسویه‌ای برای واریز نیست. وقتی درخواستی باز شد، دوباره بزنید.',
+                )
+            return JsonResponse({
+                'ok': True,
+                'file_text': built.get('file_text') or '',
+                'count': built.get('count') or 0,
+                'batch_id': built['batch'].id,
+                'marked_paid': False,
+            })
+        try:
+            batch_id = int(body.get('batch_id') or 0)
+        except (TypeError, ValueError):
+            return _err('bad_fields', message='شناسه دسته نامعتبر است.')
+        marked = ws.mark_batch_paid(batch_id)
+        if not marked.get('ok'):
+            code = str(marked.get('error') or 'batch_not_found')
+            if code == 'already_paid':
+                return _err(code, message='این واریز قبلاً ثبت شده. نیازی به تأیید دوباره نیست.')
+            return _err(code)
         return JsonResponse({
             'ok': True,
-            'file_text': built.get('file_text') or '',
-            'count': built.get('count') or 0,
-            'batch_id': built['batch'].id,
-            'marked_paid': False,
+            'marked_paid': True,
+            'notified': len(marked.get('notified') or []),
         })
-    try:
-        batch_id = int(body.get('batch_id') or 0)
-    except (TypeError, ValueError):
-        return _err('bad_fields')
-    marked = ws.mark_batch_paid(batch_id)
-    if not marked.get('ok'):
-        code = str(marked.get('error') or 'batch_not_found')
-        if code == 'already_paid':
-            return _err(code, message='این واریز قبلاً ثبت شده. نیازی به تأیید دوباره نیست.')
-        return _err(code)
-    return JsonResponse({
-        'ok': True,
-        'marked_paid': True,
-        'notified': len(marked.get('notified') or []),
-    })
+    except Exception as exc:
+        logger.exception('api_operator_paid')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت واریز نشد: ' + type(exc).__name__}, status=200)
+
 
 
 @csrf_exempt
@@ -1234,7 +1239,7 @@ def api_operator_resolve(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return _err('forbidden', 403)
+        return _err('forbidden', message='فقط پشتیبانی.')
     body = _json_body(request)
     try:
         item_id = int(body.get('item_id') or 0)
@@ -1257,7 +1262,7 @@ def api_operator_refund(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if not ws.is_operator(user.bale_user_id or ''):
-        return _err('forbidden', 403)
+        return _err('forbidden', message='فقط پشتیبانی.')
     body = _json_body(request)
     try:
         order_id = int(body.get('order_id') or 0)
