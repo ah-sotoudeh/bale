@@ -46,6 +46,26 @@ class Channel(models.Model):
     bale_peer_id = models.BigIntegerField(null=True, blank=True)
     about = models.TextField(blank=True, default='')
     language = models.CharField(max_length=16, blank=True, default='')
+    CATEGORY_CHOICES = [
+        ('news', 'خبری'),
+        ('women', 'بانوان'),
+        ('entertainment', 'سرگرمی'),
+        ('education', 'آموزشی'),
+        ('business', 'کسب‌وکار'),
+        ('tech', 'تکنولوژی'),
+        ('sports', 'ورزشی'),
+        ('lifestyle', 'سبک زندگی'),
+        ('kids', 'کودک'),
+        ('other', 'سایر'),
+    ]
+    category = models.CharField(
+        max_length=32,
+        choices=CATEGORY_CHOICES,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='موضوع کانال برای فیلتر کاتالوگ',
+    )
     members_count = models.PositiveIntegerField(default=0)
     avg_views = models.PositiveIntegerField(default=0)
     daily_reach = models.PositiveIntegerField(default=0)

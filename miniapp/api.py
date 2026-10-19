@@ -147,6 +147,7 @@ def _channel_payload(ch: Channel, history: Optional[list] = None) -> Dict[str, A
         'daily_reach': getattr(ch, 'daily_reach', 0) or 0,
         'err_percent': str(getattr(ch, 'err_percent', '') or ''),
         'language': getattr(ch, 'language', '') or '',
+        'category': getattr(ch, 'category', '') or '',
         'about': getattr(ch, 'about', '') or '',
         'description': (getattr(ch, 'description', '') or '')[:500],
         'stats_updated_at': ch.stats_updated_at.isoformat() if getattr(ch, 'stats_updated_at', None) else '',
@@ -669,7 +670,15 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
     if not name:
         return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=200)
     ch.name = name[:200]
-    ch.save(update_fields=['name'])
+    fields = ['name']
+    if 'category' in body:
+        cat = str(body.get('category') or '').strip()[:32]
+        allowed = {c[0] for c in getattr(Channel, 'CATEGORY_CHOICES', [])}
+        if cat and cat not in allowed:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'موضوع کانال نامعتبر است.'}, status=200)
+        ch.category = cat
+        fields.append('category')
+    ch.save(update_fields=fields)
     try:
         payload = _channel_payload(ch)
     except Exception:

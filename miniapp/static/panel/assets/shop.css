@@ -4519,3 +4519,54 @@ main .lb-chips {
   margin-bottom: 8px !important;
   border-bottom: 1px solid var(--lb-border);
 }
+
+
+/* ——— کاتالوگ v2: بنر، فیلتر موضوع، مرتب‌سازی ——— */
+.lb-ban-bar {
+  background: var(--lb-primary-soft);
+  border: 1px solid color-mix(in srgb, var(--lb-primary) 28%, transparent);
+}
+.lb-ban-need {
+  background: var(--lb-warning-bg);
+  border: 1px solid color-mix(in srgb, var(--lb-warning) 25%, transparent);
+  color: var(--lb-text);
+}
+.lb-ban-change {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+}
+.lb-sec-label {
+  margin: 10px 4px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lb-text-3);
+  letter-spacing: 0.02em;
+}
+.lb-filter-row,
+.lb-sort-row {
+  margin-bottom: 4px !important;
+  border-bottom: none !important;
+  padding-bottom: 2px !important;
+}
+.lb-sort-row {
+  margin-bottom: 12px !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid var(--lb-border) !important;
+}
+.lb-chip.lb-sort.on {
+  font-weight: 700;
+}
+.lb-cat-search {
+  margin-bottom: 4px;
+}
+.lb-cat-card {
+  min-height: 64px;
+}
+.lb-cat-main {
+  gap: 12px !important;
+}
+.text-ok {
+  color: var(--lb-success) !important;
+}
