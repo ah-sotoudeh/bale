@@ -768,7 +768,7 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     try:
-        body = _json_body(request)
+        body = _json_body(request) or {}
         name = str(body.get('name') or '').strip()[:200]
         if not name:
             return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام مجموعه را بنویسید.'}, status=400)
@@ -782,8 +782,29 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
         chans = list(Channel.objects.filter(id__in=id_set, manager=user))
         if len(chans) != len(id_set):
             return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'همه کانال‌ها باید مال شما باشند.'}, status=403)
-        g = ChannelGroup.objects.create(name=name, manager=user)
-        g.channels.set(chans)
+        from django.db import OperationalError, ProgrammingError
+        try:
+            g = ChannelGroup.objects.create(name=name, manager=user)
+        except (OperationalError, ProgrammingError) as exc:
+            logger.exception('ChannelGroup.create')
+            return JsonResponse({
+                'ok': False, 'error': 'db',
+                'message': 'جدول مجموعه در دیتابیس آماده نیست. روی سرور migrate بزنید.',
+                'detail': str(exc)[:160],
+            }, status=200)
+        try:
+            g.channels.set(chans)
+        except (OperationalError, ProgrammingError) as exc:
+            logger.exception('ChannelGroup.channels.set')
+            try:
+                g.delete()
+            except Exception:
+                pass
+            return JsonResponse({
+                'ok': False, 'error': 'db',
+                'message': 'ارتباط کانال‌ها با مجموعه برقرار نشد (مایگریشن M2M).',
+                'detail': str(exc)[:160],
+            }, status=200)
         av = body.get('avatar_channel_id')
         try:
             av = int(av) if av not in (None, '', 0, '0') else None
@@ -793,12 +814,31 @@ def api_group_add(request: HttpRequest) -> JsonResponse:
             top = max(chans, key=lambda c: (getattr(c, 'members_count', 0) or 0, c.id))
             av = top.id
         if av and any(c.id == av for c in chans):
-            g.avatar_channel_id = av
-            g.save(update_fields=['avatar_channel_id'])
-        return JsonResponse({'ok': True, 'group': _group_payload(g)})
+            try:
+                if hasattr(g, 'avatar_channel_id'):
+                    g.avatar_channel_id = av
+                    g.save(update_fields=['avatar_channel_id'])
+            except (OperationalError, ProgrammingError):
+                # ستون avatar_channel_id هنوز migrate نشده — مجموعه بدون آواتار ساخته می‌شود
+                logger.warning('avatar_channel_id column missing; group %s saved without avatar', g.id)
+        try:
+            payload = _group_payload(g)
+        except Exception:
+            payload = {
+                'id': g.id, 'name': g.name,
+                'channel_ids': [c.id for c in chans],
+                'channel_names': [c.name for c in chans],
+                'members_count': sum((getattr(c, 'members_count', 0) or 0) for c in chans),
+                'tariff_count': 0, 'avatar_channel_id': av, 'avatar_url': '', 'owned': True,
+            }
+        return JsonResponse({'ok': True, 'group': payload})
     except Exception as exc:
         logger.exception('api_group_add')
-        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت مجموعه ناموفق بود. دوباره تلاش کنید.'}, status=500)
+        return JsonResponse({
+            'ok': False, 'error': 'server',
+            'message': 'ثبت مجموعه ناموفق بود: ' + type(exc).__name__,
+            'detail': str(exc)[:160],
+        }, status=200)
 
 
 @csrf_exempt

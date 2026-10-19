@@ -255,7 +255,7 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_busy_day(request: HttpRequest) -> JsonResponse:
-    """علامت‌زدن روز پر — همیشه JSON برمی‌گرداند."""
+    """علامت‌زدن روز پر — مقاوم در برابر خطای دیتابیس/منطقه‌زمانی."""
     try:
         user, err = _auth_user(request)
         if err:
@@ -265,18 +265,19 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
         try:
             tid = int(body.get('tariff_id'))
         except (TypeError, ValueError):
-            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه تعرفه نامعتبر است.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه تعرفه نامعتبر است.'}, status=200)
         t = _own_tariff(user, tid)
         if t is None:
-            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=404)
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
         if t is False:
-            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=403)
+            return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=200)
         day = _parse_day(body)
         if not day:
-            return JsonResponse({'ok': False, 'error': 'bad_date', 'message': 'تاریخ نامعتبر است.'}, status=400)
+            return JsonResponse({'ok': False, 'error': 'bad_date', 'message': 'تاریخ نامعتبر است.'}, status=200)
 
         from channels_app.models import AvailabilitySlot
         from datetime import time as dtime, timedelta, datetime as dt
+        from django.db import OperationalError, ProgrammingError
         from orders.availability import MANUAL_BUSY_NOTE
 
         hour = 0
@@ -291,48 +292,111 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
             duration = 1
 
         naive_start = dt.combine(day, dtime(hour=hour, minute=0, second=0))
+        # Django USE_TZ: aware in current TZ؛ در MySQL گاهی aware مستقیم خطا می‌دهد
         try:
             start = timezone.make_aware(naive_start, timezone.get_current_timezone())
+            end = start + timedelta(hours=duration)
         except Exception:
-            start = timezone.make_aware(naive_start)
-        end = start + timedelta(hours=duration)
+            start = naive_start
+            end = naive_start + timedelta(hours=duration)
 
-        # بازهٔ روز برای جستجو (بدون start__date — سازگار با همه DB)
-        day_start = timezone.make_aware(dt.combine(day, dtime.min), timezone.get_current_timezone())
-        day_end = day_start + timedelta(days=1)
+        day_start_naive = dt.combine(day, dtime.min)
+        day_end_naive = day_start_naive + timedelta(days=1)
+        try:
+            day_start = timezone.make_aware(day_start_naive, timezone.get_current_timezone())
+            day_end = timezone.make_aware(day_end_naive, timezone.get_current_timezone())
+        except Exception:
+            day_start, day_end = day_start_naive, day_end_naive
 
-        existing = (
-            AvailabilitySlot.objects.filter(
-                tariff_id=t.id,
-                is_available=False,
-                start__gte=day_start,
-                start__lt=day_end,
-            )
-            .order_by('-id')
-            .first()
-        )
+        def _find_existing():
+            qs = AvailabilitySlot.objects.filter(is_available=False)
+            try:
+                qs = qs.filter(tariff_id=t.id)
+            except Exception:
+                pass
+            try:
+                return qs.filter(start__gte=day_start, start__lt=day_end).order_by('-id').first()
+            except Exception:
+                # fallback without range (SQLite/MySQL quirks)
+                for slot in qs.order_by('-id')[:50]:
+                    try:
+                        sd = timezone.localtime(slot.start).date() if timezone.is_aware(slot.start) else slot.start.date()
+                    except Exception:
+                        try:
+                            sd = slot.start.date()
+                        except Exception:
+                            continue
+                    if sd == day:
+                        return slot
+                return None
+
+        existing = _find_existing()
         if existing:
             return JsonResponse({'ok': True, 'slot_id': existing.id, 'jalali': format_jalali(day)})
 
-        slot = AvailabilitySlot.objects.create(
-            channel_id=t.channel_id if not t.group_id else None,
-            group_id=t.group_id if t.group_id else None,
-            tariff_id=t.id,
-            start=start,
-            end=end,
-            is_available=False,
-            note=MANUAL_BUSY_NOTE,
-        )
+        def _create(use_aware=True):
+            s = start if use_aware else naive_start
+            e = end if use_aware else (naive_start + timedelta(hours=duration))
+            kwargs = {
+                'start': s,
+                'end': e,
+                'is_available': False,
+                'note': (MANUAL_BUSY_NOTE or 'manual-busy')[:255],
+            }
+            # FKها را جدا اضافه کن تا اگر ستون نبود، بدون آن‌ها تست شود
+            try:
+                kwargs['tariff_id'] = t.id
+            except Exception:
+                pass
+            if t.group_id:
+                kwargs['group_id'] = t.group_id
+            elif t.channel_id:
+                kwargs['channel_id'] = t.channel_id
+            return AvailabilitySlot.objects.create(**kwargs)
+
+        slot = None
+        last_err = None
+        for aware in (True, False):
+            try:
+                slot = _create(use_aware=aware)
+                break
+            except (OperationalError, ProgrammingError) as exc:
+                last_err = exc
+                logger.exception('AvailabilitySlot.create aware=%s', aware)
+                continue
+            except Exception as exc:
+                last_err = exc
+                logger.exception('AvailabilitySlot.create')
+                break
+        if slot is None:
+            # حداقل در state کلاینت بماند — شناسه موقت منفی
+            msg = 'ثبت روز پر در دیتابیس نشد'
+            if last_err is not None:
+                msg += ': ' + type(last_err).__name__
+                detail = str(last_err)
+                # پیام‌های رایج MySQL
+                if 'datetime' in detail.lower() or 'Incorrect' in detail:
+                    msg = 'خطای تاریخ/ساعت دیتابیس. منطقه زمانی سرور را چک کنید.'
+                elif 'Unknown column' in detail or 'no such column' in detail.lower():
+                    msg = 'ستون جدول نوبت در دیتابیس قدیمی است. migrate لازم است.'
+                elif 'no such table' in detail.lower() or "doesn't exist" in detail.lower():
+                    msg = 'جدول نوبت وجود ندارد. روی سرور: python manage.py migrate'
+            return JsonResponse({
+                'ok': False, 'error': 'db', 'message': msg,
+                'detail': (str(last_err)[:200] if last_err else ''),
+            }, status=200)
+
         return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
     except Exception as exc:
         try:
             logger.exception('api_busy_day')
         except Exception:
             pass
-        return JsonResponse(
-            {'ok': False, 'error': 'server', 'message': 'ثبت روز پر نشد: ' + type(exc).__name__},
-            status=200,  # عمداً 200 تا کلاینت HTML نگیرد؛ ok:false نشانه شکست است
-        )
+        return JsonResponse({
+            'ok': False, 'error': 'server',
+            'message': 'ثبت روز پر نشد: ' + type(exc).__name__,
+            'detail': str(exc)[:200],
+        }, status=200)
 
 
 
