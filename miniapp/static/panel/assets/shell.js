@@ -1614,6 +1614,16 @@ var reset = document.getElementById("lb-theme-reset");
     setTimeout(function () { el.classList.remove("lb-row-flash"); }, 1000);
   };
 
+
+  /* جستجوی کاتالوگ: فقط کلاس — آیکن با CSS تا React DOM را نشکند */
+  function enhanceCatSearch() {
+    try {
+      document.querySelectorAll("main input[placeholder*='جست‌وجو'], main input[placeholder*='جستجو'], input.lb-cat-search").forEach(function (inp) {
+        inp.classList.add("lb-cat-search");
+      });
+    } catch (e) {}
+  }
+
   /* 7) وضعیت «خالی از نتیجه جستجو» زیر لیست */
   function searchEmptyState() {
     var inp = document.querySelector("main input[placeholder*='جستجو']");
@@ -1808,6 +1818,7 @@ var reset = document.getElementById("lb-theme-reset");
     if (typeof _prevTick5 === "function") _prevTick5();
     try {
       wireDrafts();
+      enhanceCatSearch();
       searchEmptyState();
       filterActiveCount();
       watchNavBadge();

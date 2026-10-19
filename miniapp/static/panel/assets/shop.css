@@ -4893,3 +4893,224 @@ main button.is-busy {
   background: var(--lb-primary-soft);
   color: var(--lb-primary);
 }
+
+
+/* === CATALOG UI POLISH 2026-10 === */
+
+/* بنر سفارش: تصویر کوچک کنار عنوان */
+.lb-ban-bar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 10px 12px !important;
+  border-radius: 16px !important;
+  background: var(--lb-primary-soft) !important;
+  border: 1px solid color-mix(in srgb, var(--lb-primary) 30%, transparent) !important;
+}
+.lb-ban-bar .lb-ban-thumb {
+  width: 44px !important;
+  height: 44px !important;
+  min-width: 44px !important;
+  border-radius: 12px !important;
+  object-fit: cover !important;
+  background: var(--lb-surface) !important;
+  border: 1px solid color-mix(in srgb, var(--lb-primary) 20%, transparent) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.lb-ban-ph {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--lb-surface);
+  border: 1px solid var(--lb-border);
+  color: var(--lb-primary);
+  font-size: 18px;
+}
+.lb-ban-ph::before {
+  content: "📝";
+}
+.lb-ban-change {
+  padding: 7px 14px !important;
+  border-radius: 999px !important;
+  background: var(--lb-surface) !important;
+  border: 1px solid var(--lb-border) !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+
+/* جستجو با ذره‌بین (فقط CSS — بدون جابه‌جایی DOM) */
+input.lb-cat-search {
+  width: 100% !important;
+  min-height: 44px !important;
+  padding: 10px 14px !important;
+  padding-inline-start: 42px !important;
+  border-radius: 14px !important;
+  border: 1px solid var(--lb-border) !important;
+  background-color: var(--lb-surface) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%236a7d8c' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 18px 18px !important;
+  font-size: 14px !important;
+  box-shadow: 0 1px 2px rgba(15,40,60,.03) !important;
+  margin-bottom: 6px !important;
+}
+[data-theme="dark"] input.lb-cat-search {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%237a92a4' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") !important;
+}
+input.lb-cat-search:focus {
+  border-color: var(--lb-primary) !important;
+  box-shadow: 0 0 0 3px var(--lb-primary-soft) !important;
+  background-color: var(--lb-surface) !important;
+}
+
+/* برچسب بخش */
+.lb-sec-label {
+  margin: 12px 2px 6px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--lb-text-2) !important;
+  letter-spacing: 0 !important;
+}
+
+/* فیلتر و مرتب‌سازی: چیپ گرد (نه تب خطی شلوغ) */
+main .lb-filter-row.lb-chips,
+main .lb-sort-row.lb-chips,
+main .lb-filter-row,
+main .lb-sort-row {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: none !important;
+  margin: 0 0 8px !important;
+  padding: 2px 0 6px !important;
+  background: transparent !important;
+  mask-image: none !important;
+  -webkit-mask-image: none !important;
+}
+main .lb-filter-row::-webkit-scrollbar,
+main .lb-sort-row::-webkit-scrollbar {
+  display: none;
+}
+main .lb-sort-row {
+  margin-bottom: 12px !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid var(--lb-border) !important;
+}
+
+/* خنثی‌کردن استایل تب خطی فقط روی این دو ردیف */
+main .lb-filter-row button.lb-chip,
+main .lb-sort-row button.lb-chip,
+main .lb-filter-row .lb-chip,
+main .lb-sort-row .lb-chip {
+  flex: 0 0 auto !important;
+  position: relative !important;
+  min-height: 34px !important;
+  height: auto !important;
+  padding: 6px 13px !important;
+  margin: 0 !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--lb-border) !important;
+  background: var(--lb-surface) !important;
+  color: var(--lb-text-2) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+main .lb-filter-row button.lb-chip::after,
+main .lb-sort-row button.lb-chip::after,
+main .lb-filter-row .lb-chip::after,
+main .lb-sort-row .lb-chip::after {
+  display: none !important;
+  content: none !important;
+}
+main .lb-filter-row button.lb-chip.on,
+main .lb-filter-row .lb-chip.on {
+  background: var(--lb-primary-soft) !important;
+  border-color: color-mix(in srgb, var(--lb-primary) 55%, var(--lb-border)) !important;
+  color: var(--lb-primary) !important;
+  font-weight: 700 !important;
+}
+main .lb-sort-row button.lb-chip.on,
+main .lb-sort-row .lb-chip.on,
+main .lb-sort-row button.lb-sort.on {
+  background: var(--lb-brand-blue) !important;
+  border-color: var(--lb-brand-blue) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+}
+[data-theme="dark"] main .lb-sort-row button.lb-chip.on,
+[data-theme="dark"] main .lb-sort-row .lb-chip.on {
+  background: var(--lb-primary) !important;
+  border-color: var(--lb-primary) !important;
+  color: var(--lb-on-primary) !important;
+}
+
+/* کارت کانال */
+main .overflow-hidden.rounded-2xl.bg-surface:has(.lb-cat-card) {
+  background: transparent !important;
+  border: none !important;
+  overflow: visible !important;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb-cat-card {
+  border: 1px solid var(--lb-border) !important;
+  border-radius: 16px !important;
+  background: var(--lb-surface) !important;
+  box-shadow: 0 1px 2px rgba(15,40,60,.04), 0 4px 12px rgba(15,40,60,.03) !important;
+  margin: 0 !important;
+  border-bottom: 1px solid var(--lb-border) !important;
+  padding-inline: 4px !important;
+  min-height: 72px;
+  transition: background .12s ease, transform .1s ease, box-shadow .12s ease;
+}
+.lb-cat-card:last-child {
+  border-bottom: 1px solid var(--lb-border) !important;
+}
+.lb-cat-card:active {
+  background: var(--lb-surface-2) !important;
+  transform: scale(0.995);
+}
+.lb-cat-main {
+  gap: 12px !important;
+  padding-block: 12px !important;
+  padding-inline: 8px !important;
+}
+.lb-ava-cat {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+  min-height: 48px !important;
+  max-width: 48px !important;
+  max-height: 48px !important;
+  flex: 0 0 48px !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 0 2px var(--lb-surface), 0 0 0 3px color-mix(in srgb, var(--lb-primary) 35%, transparent) !important;
+  background: linear-gradient(135deg, var(--lb-primary-soft), var(--lb-info-bg)) !important;
+}
+.lb-cat-card .lb-price {
+  color: var(--lb-text) !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em;
+}
+.lb-pkg-badge {
+  margin-inline-start: 6px;
+  vertical-align: middle;
+  font-size: 10px !important;
+  background: var(--lb-info-bg) !important;
+  color: var(--lb-brand-blue) !important;
+  border: 1px solid color-mix(in srgb, var(--lb-brand-blue) 20%, transparent);
+}
