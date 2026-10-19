@@ -60,13 +60,14 @@ ERR_FA = {
 _NOT_YOUR_TARIFF = 'این تعرفه برای کانال شما نیست. روز کانال خودتان را انتخاب کنید.'
 
 
-def _err(code: str, status: int = 400, message: str = '') -> JsonResponse:
+def _err(code: str, status: int = 200, message: str = '') -> JsonResponse:
+    """خطاهای مینی‌اپ با status=200 تا کلاینت بدنه JSON را بخواند (نه HTML)."""
     from bot_flow.messages import user_error
 
-    text = message or ERR_FA.get(code) or user_error(code)
+    text = message or ERR_FA.get(code) or user_error(code) or code
     return JsonResponse(
         {'ok': False, 'error': code, 'message': text},
-        status=status,
+        status=status if status else 200,
     )
 
 
@@ -461,36 +462,43 @@ def api_clear_busy(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_tariff_update(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request) or {}
-    t = _own_tariff(user, body.get('tariff_id'))
-    if t is None:
-        return _err('not_found', 404)
-    if t is False:
-        return _err('forbidden', 403, _NOT_YOUR_TARIFF)
-    fields = []
-    if 'name' in body and str(body['name']).strip():
-        t.name = str(body['name']).strip()[:100]
-        fields.append('name')
-    if 'price' in body and str(body['price']) != '':
-        t.price = int(body['price'])
-        fields.append('price')
-    if 'duration_hours' in body and str(body['duration_hours']) != '':
-        t.duration_hours = int(body['duration_hours'])
-        fields.append('duration_hours')
-    if 'start_hour' in body and str(body['start_hour']) != '':
-        t.start_hour = int(body['start_hour'])
-        fields.append('start_hour')
-    if 'is_active' in body:
-        t.is_active = bool(body['is_active'])
-        fields.append('is_active')
-    if not fields:
-        return _err('bad_fields')
-    t.save(update_fields=fields)
-    return JsonResponse({'ok': True, 'tariff_id': t.id})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        t = _own_tariff(user, body.get('tariff_id'))
+        if t is None:
+            return _err('not_found', message='تعرفه پیدا نشد.')
+        if t is False:
+            return _err('forbidden', message=_NOT_YOUR_TARIFF)
+        fields = []
+        if 'name' in body and str(body['name']).strip():
+            t.name = str(body['name']).strip()[:100]
+            fields.append('name')
+        try:
+            if 'price' in body and str(body['price']) != '':
+                t.price = max(0, int(body['price']))
+                fields.append('price')
+            if 'duration_hours' in body and str(body['duration_hours']) != '':
+                t.duration_hours = max(1, int(body['duration_hours']))
+                fields.append('duration_hours')
+            if 'start_hour' in body and str(body['start_hour']) != '':
+                t.start_hour = max(0, min(23, int(body['start_hour'])))
+                fields.append('start_hour')
+        except (TypeError, ValueError):
+            return _err('bad_fields', message='قیمت، مدت یا ساعت نامعتبر است.')
+        if 'is_active' in body:
+            t.is_active = bool(body['is_active'])
+            fields.append('is_active')
+        if not fields:
+            return _err('bad_fields', message='چیزی برای ذخیره نبود.')
+        t.save(update_fields=fields)
+        return JsonResponse({'ok': True, 'tariff_id': t.id})
+    except Exception as exc:
+        logger.exception('api_tariff_update')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ویرایش تعرفه نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -577,36 +585,52 @@ def api_banner_media(request: HttpRequest, banner_id: int) -> HttpResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_banner_rename(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
-    b = CustomerBanner.objects.filter(id=body.get('banner_id'), customer=user).first()
-    if not b:
-        return _err('not_found', 404)
-    title = str(body.get('title') or '').strip()[:120]
-    if not title:
-        return _err('bad_fields')
-    b.title = title
-    b.save(update_fields=['title'])
-    return JsonResponse({'ok': True})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            bid = int(body.get('banner_id'))
+        except (TypeError, ValueError):
+            return _err('bad_fields', message='شناسه بنر نامعتبر است.')
+        b = CustomerBanner.objects.filter(id=bid, customer=user).first()
+        if not b:
+            return _err('not_found', message='بنر پیدا نشد.')
+        title = str(body.get('title') or '').strip()[:120]
+        if not title:
+            return _err('bad_fields', message='عنوان بنر را بنویسید.')
+        b.title = title
+        b.save(update_fields=['title'])
+        return JsonResponse({'ok': True, 'banner_id': b.id, 'title': b.title})
+    except Exception as exc:
+        logger.exception('api_banner_rename')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'تغییر عنوان بنر نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_banner_hide(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
-    b = CustomerBanner.objects.filter(id=body.get('banner_id'), customer=user, is_active=True).first()
-    if not b:
-        return _err('not_found', 404)
-    b.is_active = False
-    b.save(update_fields=['is_active'])
-    return JsonResponse({'ok': True})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            bid = int(body.get('banner_id'))
+        except (TypeError, ValueError):
+            return _err('bad_fields', message='شناسه بنر نامعتبر است.')
+        b = CustomerBanner.objects.filter(id=bid, customer=user, is_active=True).first()
+        if not b:
+            return _err('not_found', message='بنر پیدا نشد.')
+        b.is_active = False
+        b.save(update_fields=['is_active'])
+        return JsonResponse({'ok': True, 'banner_id': b.id})
+    except Exception as exc:
+        logger.exception('api_banner_hide')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'مخفی کردن بنر نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -824,25 +848,33 @@ def api_cart_remove(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_cart_banner(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
-    from orders.banner_publish import banner_stage
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        from orders.banner_publish import banner_stage
+        try:
+            bid = int(body.get('banner_id'))
+        except (TypeError, ValueError):
+            return _err('no_banner', message='بنر را انتخاب کنید.')
+        b = CustomerBanner.objects.filter(
+            id=bid, customer=user, is_active=True
+        ).first()
+        if not b or banner_stage(b) == 'rejected':
+            return _err('no_banner')
+        order = cart_svc.get_or_create_draft(user)
+        order.customer_banner = b
+        order.banner_from_chat_id = b.storage_chat_id
+        order.banner_message_id = b.storage_message_id
+        order.banner_caption = b.caption or ''
+        order.save()
+        return JsonResponse({'ok': True, 'banner_id': b.id})
+    except Exception as exc:
+        logger.exception('api_cart_banner')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'انتخاب بنر سبد نشد: ' + type(exc).__name__}, status=200)
 
-    b = CustomerBanner.objects.filter(
-        id=body.get('banner_id'), customer=user, is_active=True
-    ).first()
-    if not b or banner_stage(b) == 'rejected':
-        return _err('no_banner')
-    order = cart_svc.get_or_create_draft(user)
-    order.customer_banner = b
-    order.banner_from_chat_id = b.storage_chat_id
-    order.banner_message_id = b.storage_message_id
-    order.banner_caption = b.caption or ''
-    order.save()
-    return JsonResponse({'ok': True, 'banner_id': b.id})
 
 
 @csrf_exempt
@@ -870,44 +902,56 @@ def api_checkout(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_suggest_time(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    if not user.bale_user_id:
-        return _err('no_user')
-    body = _json_body(request)
-    day = _parse_day(body)
-    if not day:
-        return _err('bad_date')
-    item = OrderItem.objects.select_related('tariff').filter(id=body.get('item_id'), manager=user).first()
-    if not item:
-        return _err('not_found', 404)
-    start, _end = cart_svc.slot_for_day(item.tariff, day)
-    result = cart_svc.process_manager_item(item.id, str(user.bale_user_id), 'edit', new_start=start)
-    if not result.get('ok'):
-        return _err(result.get('error') or 'slot_conflict')
-    return JsonResponse({'ok': True, 'item_id': item.id, 'date': day.isoformat()})
+    try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        if not user.bale_user_id:
+            return _err('no_user', message='شناسه بله مشخص نیست.')
+        body = _json_body(request) or {}
+        day = _parse_day(body)
+        if not day:
+            return _err('bad_date')
+        try:
+            iid = int(body.get('item_id'))
+        except (TypeError, ValueError):
+            return _err('not_found', message='آیتم سفارش پیدا نشد.')
+        item = OrderItem.objects.select_related('tariff').filter(id=iid, manager=user).first()
+        if not item:
+            return _err('not_found', message='آیتم سفارش پیدا نشد.')
+        start, _end = cart_svc.slot_for_day(item.tariff, day)
+        result = cart_svc.process_manager_item(item.id, str(user.bale_user_id), 'edit', new_start=start)
+        if not result.get('ok'):
+            return _err(result.get('error') or 'slot_conflict')
+        return JsonResponse({'ok': True, 'item_id': item.id, 'date': day.isoformat()})
+    except Exception as exc:
+        logger.exception('api_suggest_time')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'پیشنهاد زمان نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_answer_time(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    if not user.bale_user_id:
-        return _err('no_user')
-    body = _json_body(request)
     try:
-        item_id = int(body.get('item_id') or 0)
-    except (TypeError, ValueError):
-        return _err('not_found', 404)
-    result = cart_svc.customer_confirm_edit(item_id, str(user.bale_user_id), bool(body.get('accept')))
-    if not result.get('ok'):
-        return _err(result.get('error') or 'not_pending')
-    return JsonResponse({'ok': True, 'order_status': result.get('order_status')})
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        if not user.bale_user_id:
+            return _err('no_user', message='شناسه بله مشخص نیست.')
+        body = _json_body(request) or {}
+        try:
+            item_id = int(body.get('item_id') or 0)
+        except (TypeError, ValueError):
+            return _err('not_found', message='آیتم سفارش پیدا نشد.')
+        result = cart_svc.customer_confirm_edit(item_id, str(user.bale_user_id), bool(body.get('accept')))
+        if not result.get('ok'):
+            return _err(result.get('error') or 'not_pending')
+        return JsonResponse({'ok': True, 'order_status': result.get('order_status')})
+    except Exception as exc:
+        logger.exception('api_answer_time')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'پاسخ به زمان پیشنهادی نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -997,22 +1041,29 @@ def api_my_orders(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_order_cancel(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
     try:
-        order_id = int(body.get('order_id') or 0)
-    except (TypeError, ValueError):
-        return _err('not_found', 404)
-    order = Order.objects.filter(id=order_id, customer=user).first()
-    if not order:
-        return _err('not_found', 404)
-    result = cart_svc.cancel_customer_order(order)
-    if not result.get('ok'):
-        return _err(result.get('error') or 'not_cancellable', message=str(result.get('message') or ''))
-    return JsonResponse(result)
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            order_id = int(body.get('order_id') or 0)
+        except (TypeError, ValueError):
+            return _err('not_found', message='سفارش پیدا نشد.')
+        order = Order.objects.filter(id=order_id, customer=user).first()
+        if not order:
+            return _err('not_found', message='سفارش پیدا نشد.')
+        result = cart_svc.cancel_customer_order(order)
+        if not result.get('ok'):
+            return _err(
+                result.get('error') or 'not_cancellable',
+                message=str(result.get('message') or 'این سفارش قابل لغو نیست.'),
+            )
+        return JsonResponse(result if isinstance(result, dict) else {'ok': True})
+    except Exception as exc:
+        logger.exception('api_order_cancel')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'لغو سفارش نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -1121,11 +1172,11 @@ def api_order_confirm(request: HttpRequest) -> JsonResponse:
     if err:
         return err
     assert user is not None
-    body = _json_body(request)
+    body = _json_body(request) or {}
     try:
         item_id = int(body.get('item_id') or 0)
     except (TypeError, ValueError):
-        return _err('not_found', 404)
+        return _err('not_found', message='آیتم سفارش پیدا نشد.')
     accept = bool(body.get('accept'))
     result = customer_confirm_execution(item_id, str(user.bale_user_id or ''), accept)
     if not result.get('ok'):
@@ -1146,24 +1197,31 @@ def api_order_confirm(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_order_published(request: HttpRequest) -> JsonResponse:
-    """دکمه «منتشر شد» تاریخچه کانال را می‌خواند و اگر بنر باشد نوبت را می‌بندد."""
+    """Manager marks item as published; verifies via channel history when possible."""
     from orders.publish import verify_manager_published
 
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
     try:
-        item_id = int(body.get('item_id') or 0)
-    except (TypeError, ValueError):
-        return _err('not_found', 404)
-    result = verify_manager_published(item_id, str(user.bale_user_id or ''))
-    if not result.get('ok'):
-        from miniapp.api import _with_message
-
-        return JsonResponse(_with_message(result), status=400)
-    return JsonResponse({'ok': True, 'permalinks': result.get('permalinks') or []})
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
+        try:
+            item_id = int(body.get('item_id') or 0)
+        except (TypeError, ValueError):
+            return _err('not_found', message='آیتم سفارش پیدا نشد.')
+        result = verify_manager_published(item_id, str(user.bale_user_id or ''))
+        if not result.get('ok'):
+            from miniapp.api import _with_message
+            payload = _with_message(result)
+            if not isinstance(payload, dict):
+                payload = {'ok': False, 'error': 'error', 'message': 'تأیید انتشار نشد.'}
+            payload.setdefault('message', str(payload.get('error') or 'تأیید انتشار نشد.'))
+            return JsonResponse(payload, status=200)
+        return JsonResponse(result if isinstance(result, dict) else {'ok': True})
+    except Exception as exc:
+        logger.exception('api_order_published')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'تأیید انتشار نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt

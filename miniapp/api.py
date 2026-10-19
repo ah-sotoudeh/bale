@@ -1133,12 +1133,16 @@ def _operator_queues(is_op: bool) -> Dict[str, Any]:
     }
 
 
-def _fail(error: str, status: int = 400) -> JsonResponse:
+def _fail(error: str, status: int = 200) -> JsonResponse:
+    """خطای قابل‌نمایش در مینی‌اپ؛ status پیش‌فرض 200 تا بدنه JSON خوانده شود."""
     from bot_flow.messages import user_error
 
+    msg = user_error(error)
+    if not msg or msg == error:
+        msg = str(error)
     return JsonResponse(
-        {'ok': False, 'error': error, 'message': user_error(error)},
-        status=status,
+        {'ok': False, 'error': error, 'message': msg},
+        status=status if status else 200,
     )
 
 
@@ -1400,21 +1404,24 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_add_bank(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request)
     try:
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
         acc = ws.save_bank_account(
             user,
             str(body.get('iban') or ''),
             str(body.get('holder_name') or ''),
             make_default=True,
         )
+        return JsonResponse({'ok': True, 'bank_id': acc.id})
     except ValueError as e:
-        return _fail(str(e))
-    return JsonResponse({'ok': True, 'bank_id': acc.id})
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': str(e)}, status=200)
+    except Exception as exc:
+        logger.exception('api_add_bank')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ثبت شبا نشد: ' + type(exc).__name__}, status=200)
 
 
 @csrf_exempt
@@ -1438,9 +1445,13 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
     from orders.models import Order
     from orders.services import process_payment_paid
 
-    order = Order.objects.filter(id=body.get('order_id'), customer=user).first()
+    try:
+        oid = int(body.get('order_id'))
+    except (TypeError, ValueError):
+        return _fail('not_found')
+    order = Order.objects.filter(id=oid, customer=user).first()
     if not order:
-        return _fail('not_found', 404)
+        return _fail('not_found')
     if order.status == 'paid' or order_is_fully_paid(order):
         if order.status == 'waiting_payment' and order_is_fully_paid(order):
             process_payment_paid(order.id)
