@@ -962,7 +962,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
     ch = Channel.objects.filter(id=_cid, manager=user).first()
     if not ch:
-        return _fail('not_found', 404)
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     mode = body.get('publish_mode')
     if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
         return _fail('bad_mode')

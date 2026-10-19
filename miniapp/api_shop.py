@@ -171,37 +171,47 @@ def _own_tariff(user, tariff_id):
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
-    user, err = _auth_user(request)
-    if err:
-        return err
-    assert user is not None
-    body = _json_body(request) or {}
     try:
-        cid = int(body.get('channel_id'))
-    except (TypeError, ValueError):
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
-    ch = Channel.objects.filter(id=cid, manager=user).first()
-    if not ch:
-        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
-    mode = body.get('publish_mode')
-    if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
-        return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'این روش انتشار را نمی‌شناسم.'}, status=200)
-    ch.publish_mode = mode
-    fields = ['publish_mode']
-    hours = body.get('remind_hours')
-    if hours is not None and str(hours) != '':
+        user, err = _auth_user(request)
+        if err:
+            return err
+        assert user is not None
+        body = _json_body(request) or {}
         try:
-            ch.manual_remind_hours = max(1, min(48, int(hours)))
-            fields.append('manual_remind_hours')
+            cid = int(body.get('channel_id'))
         except (TypeError, ValueError):
-            pass
-    ch.save(update_fields=fields)
-    return JsonResponse({
-        'ok': True,
-        'channel_id': ch.id,
-        'publish_mode': ch.publish_mode,
-        'manual_remind_hours': ch.manual_remind_hours,
-    })
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'شناسه کانال نامعتبر است.'}, status=200)
+        ch = Channel.objects.filter(id=cid, manager=user).first()
+        if not ch:
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
+        mode = body.get('publish_mode')
+        if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
+            return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'روش انتشار نامعتبر است.'}, status=200)
+        ch.publish_mode = mode
+        fields = ['publish_mode']
+        if body.get('remind_hours') is not None:
+            try:
+                hours = int(body.get('remind_hours'))
+                if hours < 0:
+                    hours = 0
+                if hours > 168:
+                    hours = 168
+                if hasattr(ch, 'remind_hours'):
+                    ch.remind_hours = hours
+                    fields.append('remind_hours')
+            except (TypeError, ValueError):
+                pass
+        ch.save(update_fields=fields)
+        return JsonResponse({
+            'ok': True,
+            'channel_id': ch.id,
+            'publish_mode': ch.publish_mode,
+            'remind_hours': getattr(ch, 'remind_hours', None),
+        })
+    except Exception as exc:
+        logger.exception('api_set_publish_mode')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': 'ذخیره روش انتشار نشد: ' + type(exc).__name__}, status=200)
+
 
 
 @csrf_exempt

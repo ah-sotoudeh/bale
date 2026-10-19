@@ -4862,3 +4862,34 @@ main textarea {
 .lb-pill-wait { background: var(--lb-warning-bg); color: var(--lb-warning); }
 .lb-pill-info { background: var(--lb-info-bg); color: var(--lb-info); }
 .lb-pill-bad { background: var(--lb-danger-bg); color: var(--lb-danger); }
+
+
+/* تقویم */
+button.lb-cal-day,
+main [data-cal-day] {
+  border-radius: 12px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.lb-cal-day.is-busy,
+main button.is-busy {
+  background: var(--lb-danger-bg) !important;
+  color: var(--lb-danger) !important;
+}
+.lb-cal-day.is-free:active {
+  background: var(--lb-primary-soft);
+}
+.lb-mode-chip {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--lb-border);
+}
+.lb-mode-chip.on {
+  border-color: var(--lb-primary);
+  background: var(--lb-primary-soft);
+  color: var(--lb-primary);
+}
