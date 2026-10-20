@@ -1620,7 +1620,9 @@ var reset = document.getElementById("lb-theme-reset");
     step: 'role',
     role: '',
     biz: { name: '', category: '', mode: '', region: '', url: '' },
-    ch: { link: '', error: '', loading: false },
+    ch: { link: '', error: '', loading: false, id: 0, name: '' },
+    pmode: 'manual',
+    tariff: { name: '۲۴ ساعته', duration: 24, price: '', start_hour: '', error: '', loading: false },
     painted: false
   };
 
@@ -1769,11 +1771,13 @@ var reset = document.getElementById("lb-theme-reset");
 
     var step = __lbOb.step;
     var progress = 12;
-    if (step === 'role') progress = 12;
-    else if (step === 'ch_link' || step === 'name') progress = 40;
-    else if (step === 'ch_verify' || step === 'category') progress = 65;
-    else if (step === 'mode' || step === 'ch_done') progress = 85;
-    else if (step === 'region' || step === 'done') progress = 100;
+    if (step === 'role') progress = 10;
+    else if (step === 'ch_link' || step === 'name') progress = 28;
+    else if (step === 'category' || step === 'pmode') progress = 42;
+    else if (step === 'mode' || step === 'tariff_name') progress = 55;
+    else if (step === 'region' || step === 'tariff_price') progress = 70;
+    else if (step === 'tariff_time') progress = 82;
+    else if (step === 'ch_done' || step === 'done') progress = 100;
 
     var logo =
       '<div class="lb-ob-logo"><img src="/miniapp/static/panel/assets/logo-linkban.jpg" alt="لینک‌بان" /></div>';
@@ -1815,12 +1819,64 @@ var reset = document.getElementById("lb-theme-reset");
         '<p class="lb-ob-note">پس از تأیید می‌توانید نام کاربری را از توضیحات کانال حذف کنید.</p>' +
         '</div>' +
         (__lbOb.ch.error ? '<div class="lb-ob-err">' + __lbOb.ch.error + '</div>' : '');
+    } else if (step === 'pmode') {
+      html +=
+        '<div class="lb-ob-title"><i class="fa-solid fa-paper-plane lb-ob-title-ico"></i> نحوه انتشار تبلیغ</div>' +
+        '<p class="lb-ob-sub">وقتی سفارشی برای «' + (__lbOb.ch.name || 'کانال') + '» قبول می‌کنید، تبلیغ چطور منتشر شود؟</p>' +
+        '<div class="lb-ob-opts">' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.pmode === 'manual' ? ' on' : '') + '" data-ob="pmode-manual"><span class="radio"></span><div><b>ارسال دستی توسط خودم</b><span>خودتان در زمان مقرر تبلیغ را در کانال می‌فرستید</span></div></button>' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.pmode === 'bot' ? ' on' : '') + '" data-ob="pmode-bot"><span class="radio"></span><div><b>ارسال خودکار با بازو</b><span>بازو در زمان مقرر پست را منتشر می‌کند (باید ادمین کانال باشد)</span></div></button>' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.pmode === 'linkyar' ? ' on' : '') + '" data-ob="pmode-linkyar"><span class="radio"></span><div><b>ارسال خودکار با حساب دستیار</b><span>حساب دستیار لینک‌بان باید ادمین کانال باشد</span></div></button>' +
+        '</div>';
+    } else if (step === 'tariff_name') {
+      html +=
+        '<div class="lb-ob-title"><i class="fa-solid fa-tags lb-ob-title-ico"></i> نام تعرفه</div>' +
+        '<p class="lb-ob-sub">برای «' + (__lbOb.ch.name || 'کانال') + '» یک تعرفه بسازید تا آگهی‌دهنده‌ها بتوانند سفارش دهند.</p>' +
+        '<div class="lb-ob-field"><label>نام تعرفه</label>' +
+        '<input id="lb-ob-tar-name" type="text" maxlength="80" placeholder="مثلاً ۲۴ ساعته" value="' +
+        (__lbOb.tariff.name || '').replace(/"/g, '&quot;') + '" autocomplete="off" /></div>' +
+        '<div class="lb-ob-chips" id="lb-ob-dur-presets">' +
+        [['۱۲ ساعت', 12], ['۲۴ ساعت', 24], ['۴۸ ساعت', 48], ['۷۲ ساعت', 72]].map(function (pair) {
+          var on = Number(__lbOb.tariff.duration) === pair[1] ? ' on' : '';
+          return '<button type="button" class="lb-ob-chip' + on + '" data-ob="dur-' + pair[1] + '">' + pair[0] + '</button>';
+        }).join('') +
+        '</div>';
+    } else if (step === 'tariff_price') {
+      html +=
+        '<div class="lb-ob-title"><i class="fa-solid fa-coins lb-ob-title-ico"></i> قیمت تعرفه</div>' +
+        '<p class="lb-ob-sub">مبلغ را به <b>تومان</b> وارد کنید. این همان عددی است که آگهی‌دهنده می‌پردازد.</p>' +
+        '<div class="lb-ob-field"><label>قیمت (تومان)</label>' +
+        '<input id="lb-ob-tar-price" type="number" inputmode="numeric" min="0" step="1000" placeholder="مثلاً ۱۵۰۰۰۰" value="' +
+        (__lbOb.tariff.price || '') + '" autocomplete="off" /></div>' +
+        '<div class="lb-ob-chips">' +
+        [50000, 100000, 150000, 250000, 500000].map(function (p) {
+          var on = String(__lbOb.tariff.price) === String(p) ? ' on' : '';
+          return '<button type="button" class="lb-ob-chip' + on + '" data-ob="price-' + p + '">' +
+            p.toLocaleString('fa-IR') + ' تومان</button>';
+        }).join('') +
+        '</div>';
+    } else if (step === 'tariff_time') {
+      html +=
+        '<div class="lb-ob-title"><i class="fa-solid fa-clock lb-ob-title-ico"></i> ساعت شروع (اختیاری)</div>' +
+        '<p class="lb-ob-sub">اگر تبلیغ باید از ساعت مشخصی در کانال بماند، انتخاب کنید. در غیر این صورت «بدون محدودیت» را بزنید.</p>' +
+        '<div class="lb-ob-chips lb-ob-hours">';
+      html += '<button type="button" class="lb-ob-chip' + (__lbOb.tariff.start_hour === '' || __lbOb.tariff.start_hour === null ? ' on' : '') + '" data-ob="hour-none">بدون محدودیت</button>';
+      for (var h = 0; h < 24; h++) {
+        var lab = (h < 10 ? '۰' : '') + h + ':۰۰';
+        // fa digits optional
+        var on = String(__lbOb.tariff.start_hour) === String(h) ? ' on' : '';
+        html += '<button type="button" class="lb-ob-chip' + on + '" data-ob="hour-' + h + '">' + lab + '</button>';
+      }
+      html += '</div>';
+      if (__lbOb.tariff.error) {
+        html += '<div class="lb-ob-err">' + __lbOb.tariff.error + '</div>';
+      }
     } else if (step === 'ch_done') {
       html +=
         '<div class="lb-ob-success">' +
         '<div class="check"><i class="fa-solid fa-check"></i></div>' +
-        '<div class="lb-ob-title">کانال با موفقیت وصل شد</div>' +
-        '<p class="lb-ob-sub">حالا می‌توانید تعرفه بگذارید و پیشنهاد تبلیغ دریافت کنید. در صورت تمایل شناسه را از درباره کانال بردارید.</p>' +
+        '<div class="lb-ob-title">همه‌چیز آماده است</div>' +
+        '<p class="lb-ob-sub">کانال «' + (__lbOb.ch.name || '') + '» وصل شد و تعرفه ثبت شد. می‌توانید تعرفه یا کانال دیگری اضافه کنید یا وارد برنامه شوید.</p>' +
         '</div>';
     } else if (step === 'name') {
       html +=
@@ -1874,13 +1930,24 @@ var reset = document.getElementById("lb-theme-reset");
     html += '</div><div class="lb-ob-foot">';
     if (step === 'role') {
       html += '';
-    } else if (step === 'ch_done' || step === 'done') {
+    } else if (step === 'ch_done') {
+      html += '<button type="button" class="lb-ob-btn" data-ob="finish"><i class="fa-solid fa-house"></i> ورود به برنامه</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="more-tariff"><i class="fa-solid fa-plus"></i> تعرفه دیگر برای همین کانال</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="more-channel"><i class="fa-solid fa-plus"></i> افزودن کانال دیگر</button>';
+    } else if (step === 'done') {
       html += '<button type="button" class="lb-ob-btn" data-ob="finish">ورود به برنامه</button>';
     } else if (step === 'ch_link') {
       html +=
         '<button type="button" class="lb-ob-btn" data-ob="ch-check"' +
         (__lbOb.ch.loading ? ' disabled' : '') + '>' +
         (__lbOb.ch.loading ? 'در حال بررسی…' : 'بررسی کانال') +
+        '</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="back">قبلی</button>';
+    } else if (step === 'tariff_time') {
+      html +=
+        '<button type="button" class="lb-ob-btn" data-ob="tariff-save"' +
+        (__lbOb.tariff.loading ? ' disabled' : '') + '>' +
+        (__lbOb.tariff.loading ? 'در حال ثبت…' : 'ثبت تعرفه') +
         '</button>';
       html += '<button type="button" class="lb-ob-btn ghost" data-ob="back">قبلی</button>';
     } else {
@@ -1973,9 +2040,10 @@ var reset = document.getElementById("lb-theme-reset");
           .then(function (data) {
             __lbOb.ch.loading = false;
             if (data && data.ok) {
-              __lbOb.step = 'ch_done';
               __lbOb.ch.error = '';
-              try { localStorage.setItem('lb_manager_onboarded', '1'); } catch (e) {}
+              __lbOb.ch.id = (data.channel && data.channel.id) || data.channel_id || 0;
+              __lbOb.ch.name = (data.channel && (data.channel.name || data.channel.link)) || __lbOb.ch.link;
+              __lbOb.step = 'pmode';
               lbObSaveRole('manager');
               lbObSaveServer({});
               if (typeof window.__lbHydrate === 'function') {
@@ -2016,6 +2084,23 @@ var reset = document.getElementById("lb-theme-reset");
           lbObSaveRole('customer');
           try { localStorage.setItem('lb_business', JSON.stringify(__lbOb.biz)); } catch (e) {}
           lbObSaveServer({});
+        } else if (step === 'pmode') {
+          if (!__lbOb.pmode) __lbOb.pmode = 'manual';
+          __lbOb.step = 'tariff_name';
+        } else if (step === 'tariff_name') {
+          var tn = document.getElementById('lb-ob-tar-name');
+          __lbOb.tariff.name = (tn && tn.value || '').trim() || (__lbOb.tariff.duration + ' ساعته');
+          if (!__lbOb.tariff.duration) __lbOb.tariff.duration = 24;
+          __lbOb.step = 'tariff_price';
+        } else if (step === 'tariff_price') {
+          var pr = document.getElementById('lb-ob-tar-price');
+          var pv = (pr && pr.value || __lbOb.tariff.price || '').toString().trim();
+          __lbOb.tariff.price = pv;
+          if (!pv || parseInt(pv.replace(/[^0-9]/g, ''), 10) < 0) {
+            if (pr) pr.focus();
+            return;
+          }
+          __lbOb.step = 'tariff_time';
         }
         __lbOb.painted = false;
         lbObRender(true);
@@ -2024,6 +2109,114 @@ var reset = document.getElementById("lb-theme-reset");
         else if (step === 'category') __lbOb.step = 'name';
         else if (step === 'mode') __lbOb.step = 'category';
         else if (step === 'region') __lbOb.step = 'mode';
+        else if (step === 'pmode') __lbOb.step = 'ch_link';
+        else if (step === 'tariff_name') __lbOb.step = 'pmode';
+        else if (step === 'tariff_price') __lbOb.step = 'tariff_name';
+        else if (step === 'tariff_time') __lbOb.step = 'tariff_price';
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act.indexOf('pmode-') === 0) {
+        __lbOb.pmode = act.slice(6);
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act.indexOf('dur-') === 0) {
+        __lbOb.tariff.duration = parseInt(act.slice(4), 10) || 24;
+        if (!__lbOb.tariff.name || /ساعت/.test(__lbOb.tariff.name) || __lbOb.tariff.name === '۲۴ ساعته') {
+          __lbOb.tariff.name = __lbOb.tariff.duration + ' ساعته';
+        }
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act.indexOf('price-') === 0) {
+        __lbOb.tariff.price = act.slice(6);
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act.indexOf('hour-') === 0) {
+        var hv = act.slice(5);
+        __lbOb.tariff.start_hour = hv === 'none' ? '' : hv;
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act === 'tariff-save') {
+        if (!__lbOb.ch.id) {
+          __lbOb.tariff.error = 'ابتدا کانال را وصل کنید.';
+          __lbOb.painted = false;
+          lbObRender(true);
+          return;
+        }
+        var priceEl = null;
+        /* price was on previous step - use state */
+        var price = parseInt(String(__lbOb.tariff.price || '').replace(/[^0-9]/g, ''), 10) || 0;
+        var duration = parseInt(__lbOb.tariff.duration, 10) || 24;
+        var tname = (__lbOb.tariff.name || '').trim() || (duration + ' ساعته');
+        if (price < 0) {
+          __lbOb.tariff.error = 'قیمت معتبر نیست.';
+          __lbOb.painted = false;
+          lbObRender(true);
+          return;
+        }
+        __lbOb.tariff.loading = true;
+        __lbOb.tariff.error = '';
+        __lbOb.painted = false;
+        lbObRender(true);
+        /* publish mode then tariff */
+        var pmodeBody = lbObBody({
+          channel_id: __lbOb.ch.id,
+          publish_mode: __lbOb.pmode || 'manual'
+        });
+        fetch('/miniapp/api/publish-mode', {
+          method: 'POST',
+          headers: lbObHeaders(),
+          credentials: 'same-origin',
+          body: JSON.stringify(pmodeBody)
+        }).catch(function () {}).finally(function () {
+          var tarBody = lbObBody({
+            channel_id: __lbOb.ch.id,
+            name: tname,
+            duration_hours: duration,
+            price: price,
+            start_hour: __lbOb.tariff.start_hour === '' || __lbOb.tariff.start_hour === null
+              ? null
+              : parseInt(__lbOb.tariff.start_hour, 10)
+          });
+          fetch('/miniapp/api/tariffs/add', {
+            method: 'POST',
+            headers: lbObHeaders(),
+            credentials: 'same-origin',
+            body: JSON.stringify(tarBody)
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              __lbOb.tariff.loading = false;
+              if (data && data.ok) {
+                try { localStorage.setItem('lb_manager_onboarded', '1'); } catch (e) {}
+                lbObSaveRole('manager');
+                lbObSaveServer({});
+                __lbOb.step = 'ch_done';
+                if (typeof window.__lbHydrate === 'function') {
+                  try { window.__lbHydrate(); } catch (e) {}
+                }
+              } else {
+                __lbOb.tariff.error = (data && (data.message || data.error)) || 'ثبت تعرفه انجام نشد.';
+              }
+              __lbOb.painted = false;
+              lbObRender(true);
+            })
+            .catch(function () {
+              __lbOb.tariff.loading = false;
+              __lbOb.tariff.error = 'ارتباط برقرار نشد. دوباره تلاش کنید.';
+              __lbOb.painted = false;
+              lbObRender(true);
+            });
+        });
+      } else if (act === 'more-tariff') {
+        __lbOb.tariff = { name: '۲۴ ساعته', duration: 24, price: '', start_hour: '', error: '', loading: false };
+        __lbOb.step = 'tariff_name';
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act === 'more-channel') {
+        __lbOb.ch = { link: '', error: '', loading: false, id: 0, name: '' };
+        __lbOb.tariff = { name: '۲۴ ساعته', duration: 24, price: '', start_hour: '', error: '', loading: false };
+        __lbOb.pmode = 'manual';
+        __lbOb.step = 'ch_link';
         __lbOb.painted = false;
         lbObRender(true);
       } else if (act === 'finish') {
