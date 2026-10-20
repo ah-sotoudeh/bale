@@ -37,7 +37,7 @@ def open_miniapp_keyboard(
     label: str = 'باز کردن لینک‌بان',
     role: str | None = None,
 ) -> Optional[Dict[str, Any]]:
-    url = miniapp_url(role=role) if role else manager_miniapp_url()
+    url = miniapp_url(role=role) if role else miniapp_url()
     if not url:
         return None
     return bc.inline_keyboard([

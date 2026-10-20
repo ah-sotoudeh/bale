@@ -164,11 +164,25 @@ def start_message(user: User) -> Tuple[str, Dict[str, Any]]:
 
 
 def handle_start(chat_id: str, bale_user_id: str, username: str = '') -> None:
+    """فقط خوش‌آمد + دکمه ورود به مینی‌اپ؛ نقش و ثبت‌نام داخل برنامه."""
     user = ensure_user(bale_user_id, username)
     sess = get_session(bale_user_id)
-    save_session(sess, STATE_AWAIT_ROLE, role=None)
-    text, kb = start_message(user)
-    bc.send_message(str(chat_id), text, reply_markup=kb)
+    save_session(sess, STATE_IDLE, role=None)
+    handle = user.bale_handle or user.bale_user_id or '—'
+    text = MSG_START_WELCOME.format(handle=handle)
+    from miniapp.launch import open_miniapp_keyboard
+    from bot_flow.messages import MSG_START_OPEN_APP
+    kb = open_miniapp_keyboard(label=MSG_START_OPEN_APP, role=None)
+    if kb:
+        # بدون «ادامه در گفتگو» — فقط ورود به برنامه
+        try:
+            rows = (kb.get('inline_keyboard') or [])[:1]
+            kb = {'inline_keyboard': rows} if rows else kb
+        except Exception:
+            pass
+        bc.send_message(str(chat_id), text, reply_markup=kb)
+    else:
+        bc.send_message(str(chat_id), text + '\n\nلینک مینی‌اپ در دسترس نیست؛ کمی بعد دوباره /start را بزنید.')
 
 
 def handle_role_callback(

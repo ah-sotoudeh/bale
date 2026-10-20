@@ -1615,6 +1615,255 @@ var reset = document.getElementById("lb-theme-reset");
   };
 
 
+  /* ─── آنبوردینگ: نقش + ثبت کسب‌وکار (منطق چاوش/پنجره، تم لینک‌بان) ─── */
+  var __lbOb = { step: 'role', role: '', biz: { name: '', category: '', mode: '', region: '', url: '' } };
+
+  var LB_OB_CATS = [
+    'آموزش زبان خارجی', 'آموزش فنی و حرفه‌ای', 'آموزش کامپیوتر و فناوری',
+    'فروشگاه اینترنتی', 'خدمات زیبایی و سلامت', 'املاک', 'خودرو و وسایل نقلیه',
+    'کالای دیجیتال', 'خانه و آشپزخانه', 'خدمات کسب‌وکار', 'سرگرمی و رسانه',
+    'غذا و رستوران', 'پوشاک و مد', 'مسافرت و گردشگری', 'سایر'
+  ];
+
+  function lbObDone() {
+    try {
+      if (localStorage.getItem('lb_role_chosen') === '1') {
+        var biz = null;
+        try { biz = JSON.parse(localStorage.getItem('lb_business') || 'null'); } catch (e) {}
+        var role = localStorage.getItem('lb_role') || '';
+        if (role === 'manager' || role === 'operator') return true;
+        if (role === 'customer' && biz && biz.name) return true;
+        if (role === 'customer' && !biz) return false;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function lbObSaveLocal() {
+    try {
+      localStorage.setItem('lb_role', __lbOb.role);
+      localStorage.setItem('lb_role_chosen', '1');
+      if (__lbOb.role === 'customer' && __lbOb.biz.name) {
+        localStorage.setItem('lb_business', JSON.stringify(__lbOb.biz));
+      }
+    } catch (e) {}
+    try {
+      if (typeof window.__lbSetRole === 'function') window.__lbSetRole(__lbOb.role);
+    } catch (e) {}
+  }
+
+  function lbObSaveServer() {
+    var payload = { onboarded: {} };
+    payload.onboarded[__lbOb.role] = true;
+    if (__lbOb.role === 'customer' && __lbOb.biz.name) {
+      payload.business = __lbOb.biz;
+    }
+    var headers = { 'Content-Type': 'application/json' };
+    try {
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+        headers['X-Bale-Init-Data'] = window.Telegram.WebApp.initData;
+      }
+    } catch (e) {}
+    try {
+      var q = new URLSearchParams(location.search);
+      if (q.get('debug_bale_id')) headers['X-Debug-Bale-Id'] = q.get('debug_bale_id');
+    } catch (e) {}
+    fetch('/miniapp/api/me/prefs', {
+      method: 'POST',
+      headers: headers,
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).catch(function () {});
+  }
+
+  function lbObClose() {
+    var el = document.getElementById('lb-ob-root');
+    if (el) el.remove();
+    document.documentElement.classList.remove('lb-ob-lock');
+  }
+
+  function lbObRender() {
+    if (lbObDone()) { lbObClose(); return; }
+    document.documentElement.classList.add('lb-ob-lock');
+    var root = document.getElementById('lb-ob-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'lb-ob-root';
+      root.className = 'lb-ob-root';
+      document.body.appendChild(root);
+    }
+    var step = __lbOb.step;
+    var progress = 10;
+    if (step === 'role') progress = 15;
+    else if (step === 'name') progress = 35;
+    else if (step === 'category') progress = 55;
+    else if (step === 'mode') progress = 75;
+    else if (step === 'region') progress = 90;
+    else if (step === 'done') progress = 100;
+
+    var html = '<div class="lb-ob-progress"><i style="width:' + progress + '%"></i></div><div class="lb-ob-body">';
+
+    if (step === 'role') {
+      html +=
+        '<div class="lb-ob-title">چطور می‌خواهید از لینک‌بان استفاده کنید؟</div>' +
+        '<p class="lb-ob-sub">نقش خود را انتخاب کنید. هر وقت بخواهید می‌توانید بین نقش‌ها جابه‌جا شوید.</p>' +
+        '<div class="lb-ob-cards">' +
+        '<button type="button" class="lb-ob-card" data-ob="role-customer">' +
+        '<div class="ico">📣</div><h3>آگهی‌دهنده (کسب‌وکار)</h3>' +
+        '<p>اگر محصول یا خدمتی دارید و می‌خواهید در کانال‌های بله دیده شوید، این نقش را انتخاب کنید.</p></button>' +
+        '<button type="button" class="lb-ob-card" data-ob="role-manager">' +
+        '<div class="ico">📡</div><h3>مدیر کانال (ناشر)</h3>' +
+        '<p>اگر کانال بله دارید و می‌خواهید با انتشار تبلیغ درآمد بگیرید، این نقش مناسب شماست.</p></button>' +
+        '</div>';
+    } else if (step === 'name') {
+      html +=
+        '<div class="lb-ob-title">نام کسب‌وکارتان چیست؟</div>' +
+        '<p class="lb-ob-sub">نامی وارد کنید که مشتری‌ها شما را با آن می‌شناسند.</p>' +
+        '<div class="lb-ob-field"><label>نام کسب‌وکار</label>' +
+        '<input id="lb-ob-name" type="text" maxlength="80" placeholder="مثلاً طیبستان" value="' +
+        (__lbOb.biz.name || '').replace(/"/g, '&quot;') + '" /></div>';
+    } else if (step === 'category') {
+      html +=
+        '<div class="lb-ob-title">صنف فعالیت‌تان چیست؟</div>' +
+        '<p class="lb-ob-sub">نزدیک‌ترین صنف به کسب‌وکارتان را انتخاب کنید.</p>' +
+        '<div class="lb-ob-field lb-ob-search"><input id="lb-ob-cat-q" type="search" placeholder="جستجوی صنف…" /></div>' +
+        '<div class="lb-ob-cats" id="lb-ob-cats"></div>';
+    } else if (step === 'mode') {
+      html +=
+        '<div class="lb-ob-title">کسب‌وکارتان چطور فعالیت می‌کند؟</div>' +
+        '<p class="lb-ob-sub">این اطلاعات کمک می‌کند پیشنهادهای دقیق‌تری بدهیم.</p>' +
+        '<div class="lb-ob-opts">' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.biz.mode === 'offline' ? ' on' : '') + '" data-ob="mode-offline"><span class="radio"></span><div><b>حضوری</b><span>مشتری‌ها به محل کسب‌وکارتان می‌آیند</span></div></button>' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.biz.mode === 'online' ? ' on' : '') + '" data-ob="mode-online"><span class="radio"></span><div><b>آنلاین</b><span>از طریق سایت، اینستاگرام یا پیام‌رسان می‌فروشید</span></div></button>' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.biz.mode === 'both' ? ' on' : '') + '" data-ob="mode-both"><span class="radio"></span><div><b>هر دو</b><span>محل حضوری دارید و آنلاین هم می‌فروشید</span></div></button>' +
+        '</div>';
+      if (__lbOb.biz.mode === 'online' || __lbOb.biz.mode === 'both') {
+        html +=
+          '<div class="lb-ob-field" style="margin-top:14px"><label>آدرس اینترنتی کسب‌وکار (اختیاری)</label>' +
+          '<input id="lb-ob-url" type="text" placeholder="instagram.com/yourpage" value="' +
+          (__lbOb.biz.url || '').replace(/"/g, '&quot;') + '" /></div>';
+      }
+    } else if (step === 'region') {
+      html +=
+        '<div class="lb-ob-title">محدوده فعالیت کسب‌وکارتان کجاست؟</div>' +
+        '<p class="lb-ob-sub">به مشتری‌های کدام شهرها خدمت می‌دهید؟</p>' +
+        '<div class="lb-ob-opts">' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.biz.region === 'all' ? ' on' : '') + '" data-ob="region-all"><span class="radio"></span><div><b>سراسر ایران</b><span>بدون محدودیت جغرافیایی</span></div></button>' +
+        '<button type="button" class="lb-ob-opt' + (__lbOb.biz.region === 'cities' ? ' on' : '') + '" data-ob="region-cities"><span class="radio"></span><div><b>یک یا چند شهر</b><span>فعلاً می‌توانید بعداً شهرها را تکمیل کنید</span></div></button>' +
+        '</div>';
+    } else if (step === 'done') {
+      var letter = (__lbOb.biz.name || 'ک').slice(0, 1);
+      html +=
+        '<div class="lb-ob-success">' +
+        '<div class="check">✓</div>' +
+        '<div class="lb-ob-title">کسب‌وکارتان با موفقیت ثبت شد</div>' +
+        '<div class="lb-ob-biz-chip"><span class="ava">' + letter + '</span><div style="text-align:start"><b>' +
+        (__lbOb.biz.name || '') + '</b><div style="font-size:12px;color:#64748b">' +
+        (__lbOb.biz.category || '') + '</div></div></div>' +
+        '<p class="lb-ob-sub">از اینجا می‌توانید اطلاعات را کامل کنید و برای رشد و تبلیغات اقدام کنید.</p>' +
+        '</div>';
+    }
+
+    html += '</div><div class="lb-ob-foot">';
+    if (step === 'role') {
+      html += '';
+    } else if (step === 'done') {
+      html += '<button type="button" class="lb-ob-btn" data-ob="finish">شروع رشد و تبلیغات</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="finish">ورود به برنامه</button>';
+    } else {
+      var can = true;
+      if (step === 'name') can = !!(__lbOb.biz.name && __lbOb.biz.name.trim());
+      if (step === 'category') can = !!__lbOb.biz.category;
+      if (step === 'mode') can = !!__lbOb.biz.mode;
+      if (step === 'region') can = !!__lbOb.biz.region;
+      html += '<button type="button" class="lb-ob-btn" data-ob="next"' + (can ? '' : ' disabled') + '>ادامه</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="back">قبلی</button>';
+    }
+    html += '</div>';
+    root.innerHTML = html;
+
+    if (step === 'category') {
+      var box = document.getElementById('lb-ob-cats');
+      function paintCats(q) {
+        q = (q || '').trim();
+        box.innerHTML = '';
+        LB_OB_CATS.filter(function (c) { return !q || c.indexOf(q) >= 0; }).forEach(function (c) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = c;
+          if (c === __lbOb.biz.category) b.className = 'on';
+          b.onclick = function () {
+            __lbOb.biz.category = c;
+            lbObRender();
+          };
+          box.appendChild(b);
+        });
+      }
+      paintCats('');
+      var sq = document.getElementById('lb-ob-cat-q');
+      if (sq) sq.oninput = function () { paintCats(sq.value); };
+    }
+
+    root.onclick = function (e) {
+      var btn = e.target.closest('[data-ob]');
+      if (!btn) return;
+      var act = btn.getAttribute('data-ob');
+      if (act === 'role-customer') {
+        __lbOb.role = 'customer';
+        __lbOb.step = 'name';
+        lbObRender();
+      } else if (act === 'role-manager') {
+        __lbOb.role = 'manager';
+        __lbOb.biz = { name: '', category: '', mode: '', region: '', url: '' };
+        lbObSaveLocal();
+        lbObSaveServer();
+        lbObClose();
+      } else if (act.indexOf('mode-') === 0) {
+        __lbOb.biz.mode = act.slice(5);
+        lbObRender();
+      } else if (act.indexOf('region-') === 0) {
+        __lbOb.biz.region = act.slice(7);
+        lbObRender();
+      } else if (act === 'next') {
+        if (step === 'name') {
+          var inp = document.getElementById('lb-ob-name');
+          __lbOb.biz.name = (inp && inp.value || '').trim();
+          if (!__lbOb.biz.name) return;
+          __lbOb.step = 'category';
+        } else if (step === 'category') {
+          if (!__lbOb.biz.category) return;
+          __lbOb.step = 'mode';
+        } else if (step === 'mode') {
+          if (!__lbOb.biz.mode) return;
+          var u = document.getElementById('lb-ob-url');
+          if (u) __lbOb.biz.url = (u.value || '').trim();
+          __lbOb.step = 'region';
+        } else if (step === 'region') {
+          if (!__lbOb.biz.region) return;
+          __lbOb.step = 'done';
+          lbObSaveLocal();
+          lbObSaveServer();
+        }
+        lbObRender();
+      } else if (act === 'back') {
+        if (step === 'name') __lbOb.step = 'role';
+        else if (step === 'category') __lbOb.step = 'name';
+        else if (step === 'mode') __lbOb.step = 'category';
+        else if (step === 'region') __lbOb.step = 'mode';
+        lbObRender();
+      } else if (act === 'finish') {
+        lbObClose();
+      }
+    };
+  }
+
+  function ensureOnboarding() {
+    try {
+      if (lbObDone()) { lbObClose(); return; }
+      lbObRender();
+    } catch (e) {}
+  }
+
   /* جستجوی کاتالوگ: فقط کلاس */
   function enhanceCatSearch() {
     try {
@@ -2131,6 +2380,7 @@ var reset = document.getElementById("lb-theme-reset");
     try {
       wireDrafts();
       enhanceCatSearch();
+      ensureOnboarding();
       ensureCatalogToolbar();
       searchEmptyState();
       filterActiveCount();

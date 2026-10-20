@@ -346,7 +346,17 @@ def _read_prefs(user: User) -> Dict[str, Any]:
         for role in ('customer', 'manager', 'operator')
         if onboarded.get(role) is True
     }
-    return {'theme': theme, 'onboarded': clean}
+    business = raw.get('business') if isinstance(raw.get('business'), dict) else None
+    out = {'theme': theme, 'onboarded': clean}
+    if business and str(business.get('name') or '').strip():
+        out['business'] = {
+            'name': str(business.get('name') or '').strip()[:120],
+            'category': str(business.get('category') or '').strip()[:80],
+            'mode': str(business.get('mode') or '').strip()[:20],
+            'region': str(business.get('region') or '').strip()[:20],
+            'url': str(business.get('url') or '').strip()[:200],
+        }
+    return out
 
 
 @csrf_exempt
@@ -381,6 +391,16 @@ def api_me_prefs(request: HttpRequest) -> JsonResponse:
                 if onboarded_in.get(role) is True:
                     onboarded[role] = True
             prefs['onboarded'] = onboarded
+        if 'business' in body and isinstance(body.get('business'), dict):
+            b = body['business']
+            name = str(b.get('name') or '').strip()[:120]
+            prefs['business'] = {
+                'name': name,
+                'category': str(b.get('category') or '').strip()[:80],
+                'mode': str(b.get('mode') or '').strip()[:20],  # online|offline|both
+                'region': str(b.get('region') or '').strip()[:20],  # all|cities
+                'url': str(b.get('url') or '').strip()[:200],
+            }
         data['prefs'] = prefs
         sess.data = data
         sess.save(update_fields=['data', 'updated_at'])
