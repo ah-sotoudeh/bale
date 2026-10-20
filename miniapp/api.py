@@ -189,7 +189,12 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
     if not uid:
         from miniapp.auth import allow_debug_auth
         if allow_debug_auth():
-            debug_id = request.GET.get('debug_bale_id') or body.get('debug_bale_id')
+            debug_id = (
+                request.GET.get('debug_bale_id')
+                or body.get('debug_bale_id')
+                or request.headers.get('X-Debug-Bale-Id')
+                or request.META.get('HTTP_X_DEBUG_BALE_ID')
+            )
             if debug_id:
                 user, _ = User.objects.get_or_create(
                     bale_user_id=str(debug_id),
