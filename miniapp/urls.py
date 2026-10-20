@@ -71,6 +71,7 @@ urlpatterns = [
     path('api/operator/assignments', api.api_operator_assignments),
     path('api/operator/unassign', api.api_operator_unassign),
     path('api/operator/test-publish', api.api_operator_test_publish),
+    path('api/operator/test-matrix', api.api_operator_test_matrix),
     path('api/operator/test-banners', api.api_operator_test_banners),
     path('api/operator/test-delete', api.api_operator_test_delete),
 ]

@@ -1367,6 +1367,308 @@ def test_publish_to_channel(
     return result
 
 
+
+def test_send_capability_matrix(
+    channel: Channel,
+    from_chat_id: str = '',
+    message_id: int = 0,
+    caption: str = '',
+    banner_id: int | None = None,
+    delete_after_minutes: int = 1,
+) -> Dict[str, Any]:
+    """یک‌مرحله‌ای: مقایسه قابلیت ارسال بازو و لینک‌یار.
+
+    هر حساب با متدهای موجودش تست می‌شود (فوروارد، کپی، متن خام، آپلود فایل).
+    خروجی برای تصمیم‌گیری نهایی است — بدون آزمون‌وخطای دستی.
+    """
+    import time as _time
+    from orders.banner_media import stored_banner_file
+    from orders.banner_publish import linkbank_channel
+
+    ref = channel_ref(channel)
+    lb = linkbank_channel()
+    src = _resolve_linkbank_forward_source(
+        str(from_chat_id or ''),
+        int(message_id or 0),
+        caption or '',
+        banner_id=banner_id,
+    )
+    bot_from = str(src.get('bot_from_chat_id') or from_chat_id or lb or '')
+    try:
+        bot_mid = int(src.get('bot_message_id') or message_id or 0)
+    except (TypeError, ValueError):
+        bot_mid = int(message_id or 0)
+    try:
+        ly_peer = int(src.get('ly_peer_id') or 0)
+    except (TypeError, ValueError):
+        ly_peer = 0
+    try:
+        ly_mid = int(src.get('ly_message_id') or 0)
+    except (TypeError, ValueError):
+        ly_mid = 0
+    try:
+        ly_date = int(src.get('ly_message_date') or 0)
+    except (TypeError, ValueError):
+        ly_date = 0
+    cap = str(src.get('caption') or caption or '')[:500]
+    src_ref = str(src.get('source_channel_ref') or bot_from or lb or '')
+    marker = f'[lb-matrix-{int(_time.time())}]'
+
+    file_path = None
+    if banner_id:
+        try:
+            p = stored_banner_file(int(banner_id))
+            if p is not None and p.is_file():
+                file_path = str(p)
+        except Exception:
+            file_path = None
+
+    probes: Dict[str, Any] = {
+        'channel_ref': ref,
+        'channel_name': channel.name,
+        'channel_id': channel.id,
+        'linkbank': lb,
+        'bot_from': bot_from,
+        'bot_mid': bot_mid,
+        'ly_peer': ly_peer,
+        'ly_mid': ly_mid,
+        'ly_date': ly_date,
+        'has_local_file': bool(file_path),
+        'bot_admin': None,
+        'linkyar_admin': None,
+        'bot_me': None,
+        'linkyar_me': None,
+    }
+    try:
+        probes['bot_admin'] = check_bot_admin(channel)
+    except Exception as e:
+        probes['bot_admin'] = f'err:{type(e).__name__}'
+    try:
+        probes['linkyar_admin'] = check_linkyar_admin(channel)
+    except Exception as e:
+        probes['linkyar_admin'] = f'err:{type(e).__name__}'
+    try:
+        me = bc.get_me()
+        res = me.get('result') or me
+        probes['bot_me'] = res.get('username') or res.get('id')
+    except Exception as e:
+        probes['bot_me'] = f'err:{type(e).__name__}'
+    try:
+        ly_me = ly.get_me()
+        if isinstance(ly_me, dict):
+            probes['linkyar_me'] = ly_me.get('user_id') or ly_me.get('username') or ly_me
+        else:
+            probes['linkyar_me'] = str(ly_me)[:80]
+    except Exception as e:
+        probes['linkyar_me'] = f'err:{type(e).__name__}'
+
+    trials: List[Dict[str, Any]] = []
+
+    def _trial(account: str, method: str, fn) -> None:
+        started = _time.time()
+        row: Dict[str, Any] = {
+            'account': account,
+            'method': method,
+            'ok': False,
+            'error': '',
+            'message_id': None,
+            'message_date': None,
+            'ms': 0,
+            'raw': '',
+        }
+        try:
+            out = fn()
+            if not isinstance(out, dict):
+                out = {'ok': False, 'error': str(out)[:200]}
+            row['ok'] = bool(out.get('ok'))
+            row['error'] = str(out.get('error') or out.get('description') or '')[:240]
+            # extract message id from various shapes
+            mid = out.get('message_id') or out.get('bot_message_id') or out.get('linkyar_rid')
+            if mid is None:
+                result = out.get('result')
+                if isinstance(result, dict):
+                    mid = result.get('message_id')
+                    if mid is None and isinstance(result.get('message'), dict):
+                        mid = result['message'].get('message_id')
+            try:
+                row['message_id'] = int(mid) if mid is not None else None
+            except (TypeError, ValueError):
+                row['message_id'] = None
+            if out.get('message_date') is not None:
+                try:
+                    row['message_date'] = int(out.get('message_date'))
+                except (TypeError, ValueError):
+                    pass
+            # short raw for debug (no secrets)
+            row['raw'] = str({k: out.get(k) for k in ('ok', 'error', 'method', 'description') if k in out})[:180]
+        except Exception as e:
+            logger.exception('matrix trial %s/%s', account, method)
+            row['ok'] = False
+            row['error'] = f'{type(e).__name__}: {e}'[:240]
+        row['ms'] = int((_time.time() - started) * 1000)
+        trials.append(row)
+
+    # ── BOT ──────────────────────────────────────────────
+    def bot_forward():
+        if not bot_from or not bot_mid:
+            return {'ok': False, 'error': 'no_bot_source (from_chat/message_id)'}
+        return bc.forward_message(ref, str(bot_from), int(bot_mid))
+
+    def bot_copy():
+        if not bot_from or not bot_mid:
+            return {'ok': False, 'error': 'no_bot_source'}
+        return bc.copy_message(ref, str(bot_from), int(bot_mid), caption=cap or None)
+
+    def bot_text():
+        return bc.send_message(ref, f'{marker} bot-text')
+
+    def bot_upload():
+        if not file_path:
+            return {'ok': False, 'error': 'no_local_file'}
+        # photo vs document by extension
+        low = file_path.lower()
+        if low.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+            return bc.send_photo(ref, file_path, caption=f'{marker} bot-upload')
+        if hasattr(bc, 'send_video') and low.endswith(('.mp4', '.webm')):
+            return bc.send_video(ref, file_path, caption=f'{marker} bot-upload')
+        if hasattr(bc, 'send_document'):
+            return bc.send_document(ref, file_path, caption=f'{marker} bot-upload')
+        return {'ok': False, 'error': 'no_upload_method'}
+
+    _trial('bot', 'forwardMessage', bot_forward)
+    _trial('bot', 'copyMessage', bot_copy)
+    _trial('bot', 'sendMessage(text)', bot_text)
+    _trial('bot', 'sendMedia(upload)', bot_upload)
+
+    # ── LINKYAR ──────────────────────────────────────────
+    def ly_forward():
+        kwargs = {
+            'target_channel_ref': ref,
+            'source_channel_ref': str(src_ref or bot_from or lb or ''),
+            'caption_match': cap,
+            'bot_from_chat_id': str(bot_from or ''),
+            'bot_message_id': int(bot_mid or 0),
+            'message_date': int(ly_date or 0),
+        }
+        if banner_id:
+            try:
+                from orders.models import CustomerBanner
+                bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+                if bn is not None:
+                    for attr, key in (
+                        ('linkyar_rid', 'linkyar_rid'),
+                        ('linkyar_date', 'linkyar_date'),
+                        ('linkyar_seq', 'linkyar_seq'),
+                    ):
+                        val = getattr(bn, attr, None)
+                        if val not in (None, '', 0, '0'):
+                            kwargs[key] = val
+            except Exception:
+                pass
+        try:
+            return ly.forward_banner_from_linkbank(**kwargs)
+        except TypeError as e:
+            return {'ok': False, 'error': f'signature:{e}'}
+
+    def ly_text():
+        return ly.send_text_to_channel(ref, f'{marker} ly-text')
+
+    def ly_upload():
+        if not file_path:
+            return {'ok': False, 'error': 'no_local_file'}
+        if hasattr(ly, 'send_local_file_to_channel'):
+            return ly.send_local_file_to_channel(ref, file_path, caption=f'{marker} ly-upload')
+        if hasattr(ly, 'send_existing_file_to_channel'):
+            return ly.send_existing_file_to_channel(ref, file_path, caption=f'{marker} ly-upload')
+        return {'ok': False, 'error': 'no_upload_method'}
+
+    def ly_copy():
+        # برخی کلاینت‌ها copy را alias فوروارد می‌دانند
+        if hasattr(ly, 'copy_message') and bot_from and bot_mid:
+            try:
+                return ly.copy_message(ref, str(bot_from), int(bot_mid), message_date=int(ly_date or 0))
+            except TypeError:
+                return ly.copy_message(ref, str(bot_from), int(bot_mid))
+        return {'ok': False, 'error': 'copy_not_available'}
+
+    _trial('linkyar', 'forward_from_linkbank', ly_forward)
+    _trial('linkyar', 'sendText', ly_text)
+    _trial('linkyar', 'sendMedia(upload)', ly_upload)
+    _trial('linkyar', 'copyMessage', ly_copy)
+
+    # حذف خودکار پیام‌های موفق
+    mins = max(0, int(delete_after_minutes or 0))
+    scheduled = 0
+    if mins > 0:
+        for row in trials:
+            if not row.get('ok') or not row.get('message_id'):
+                continue
+            try:
+                if row['account'] == 'bot':
+                    _schedule_test_delete(
+                        ref=ref,
+                        mode=Channel.PUBLISH_BOT,
+                        bot_message_id=int(row['message_id']),
+                        ly_message_id=None,
+                        ly_message_date=0,
+                        minutes=mins,
+                    )
+                    scheduled += 1
+                elif row['account'] == 'linkyar':
+                    _schedule_test_delete(
+                        ref=ref,
+                        mode=Channel.PUBLISH_LINKYAR,
+                        bot_message_id=None,
+                        ly_message_id=int(row['message_id']),
+                        ly_message_date=int(row.get('message_date') or 0),
+                        minutes=mins,
+                    )
+                    scheduled += 1
+            except Exception:
+                logger.exception('matrix schedule delete')
+
+    bot_ok = [t for t in trials if t['account'] == 'bot' and t['ok']]
+    ly_ok = [t for t in trials if t['account'] == 'linkyar' and t['ok']]
+    summary_lines = [
+        f'کانال: {channel.name} ({ref})',
+        f'ادمین بازو: {probes["bot_admin"]} | ادمین لینک‌یار: {probes["linkyar_admin"]}',
+        f'منبع بنر بات: {bot_from} / mid={bot_mid} | فایل محلی: {"بله" if file_path else "خیر"}',
+        '— بازو —',
+    ]
+    for t in trials:
+        if t['account'] != 'bot':
+            continue
+        mark = '✓' if t['ok'] else '✗'
+        summary_lines.append(f'{mark} {t["method"]} ({t["ms"]}ms) {t["error"] or ("mid="+str(t["message_id"]) if t["message_id"] else "ok")}')
+    summary_lines.append('— لینک‌یار —')
+    for t in trials:
+        if t['account'] != 'linkyar':
+            continue
+        mark = '✓' if t['ok'] else '✗'
+        summary_lines.append(f'{mark} {t["method"]} ({t["ms"]}ms) {t["error"] or ("mid="+str(t["message_id"]) if t["message_id"] else "ok")}')
+    if bot_ok or ly_ok:
+        summary_lines.append(
+            f'پایدارتر برای این کانال: '
+            + ('هر دو' if bot_ok and ly_ok else ('بازو' if bot_ok else 'لینک‌یار'))
+            + f' | حذف خودکار: {scheduled} پیام تا {mins} دقیقه'
+        )
+    else:
+        summary_lines.append('هیچ متدی موفق نشد — دسترسی ادمین یا منبع بنر را چک کنید.')
+
+    return {
+        'ok': True,
+        'matrix': True,
+        'probes': probes,
+        'trials': trials,
+        'bot_success_count': len(bot_ok),
+        'linkyar_success_count': len(ly_ok),
+        'delete_after_minutes': mins,
+        'scheduled_deletes': scheduled,
+        'message': '\n'.join(summary_lines),
+    }
+
+
+
 def _pending_deletes_path():
     from pathlib import Path
     from django.conf import settings

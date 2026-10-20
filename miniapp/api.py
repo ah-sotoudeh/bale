@@ -2084,6 +2084,96 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
     return JsonResponse(result)
 
 
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_test_matrix(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: ماتریس یک‌مرحله‌ای قابلیت ارسال (بازو + لینک‌یار × همه متدها)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
+    body = _json_body(request) or {}
+    ch_raw = body.get('channel') or body.get('channel_id') or body.get('link') or ''
+    ch = None
+    if str(ch_raw).isdigit():
+        ch = Channel.objects.filter(id=int(ch_raw)).first()
+    if ch is None:
+        key = _channel_ref_key(str(ch_raw))
+        if key:
+            ch = (
+                Channel.objects.filter(link__icontains=key).order_by('-id').first()
+                or Channel.objects.filter(name__iexact=key).first()
+            )
+    if ch is None:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
+
+    from_chat = str(body.get('from_chat_id') or '').strip()
+    msg_id = body.get('message_id') or 0
+    caption = str(body.get('caption') or '')
+    banner_id = body.get('banner_id')
+    try:
+        delete_after = int(body.get('delete_after_minutes') if body.get('delete_after_minutes') is not None else 1)
+    except (TypeError, ValueError):
+        delete_after = 1
+
+    if banner_id not in (None, '', 0, '0'):
+        from orders.models import CustomerBanner
+        try:
+            bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+        except (TypeError, ValueError):
+            bn = None
+        if not bn:
+            return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'بنر پیدا نشد.'}, status=200)
+        if bn.linkbank_message_id:
+            from_chat = str(bn.linkbank_chat_id or from_chat)
+            msg_id = bn.linkbank_message_id
+        caption = caption or (bn.caption or '')
+        banner_id = bn.id
+    else:
+        banner_id = None
+        if not from_chat or not msg_id:
+            from orders.models import CustomerBanner
+            bn = (
+                CustomerBanner.objects.filter(from_linkbank=True)
+                .exclude(linkbank_message_id='')
+                .order_by('-id')
+                .first()
+            )
+            if bn:
+                from_chat = str(bn.linkbank_chat_id or '')
+                msg_id = bn.linkbank_message_id
+                caption = caption or (bn.caption or '')
+                banner_id = bn.id
+
+    try:
+        msg_id_int = int(msg_id or 0)
+    except (TypeError, ValueError):
+        msg_id_int = 0
+
+    from orders.publish import test_send_capability_matrix
+    try:
+        result = test_send_capability_matrix(
+            ch,
+            from_chat_id=from_chat,
+            message_id=msg_id_int,
+            caption=caption,
+            banner_id=int(banner_id) if banner_id else None,
+            delete_after_minutes=delete_after,
+        )
+    except Exception as exc:
+        logger.exception('test_matrix')
+        return JsonResponse({
+            'ok': False,
+            'error': 'server',
+            'message': 'ماتریس اجرا نشد: ' + type(exc).__name__,
+            'detail': str(exc)[:300],
+        }, status=200)
+    return JsonResponse(result if isinstance(result, dict) else {'ok': False, 'error': str(result)})
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_test_delete(request: HttpRequest) -> JsonResponse:
