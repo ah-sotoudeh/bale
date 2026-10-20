@@ -588,6 +588,26 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
             status=200,
         )
 
+    # حداقل تعداد عضو (موقت: ۱۰۰۰)
+    members = 0
+    for key in ('members_count', 'members', 'participant_count', 'subscribers_count'):
+        try:
+            v = int(info.get(key) or 0)
+            if v > members:
+                members = v
+        except (TypeError, ValueError):
+            pass
+    MIN_MEMBERS = 1000
+    if looked_up and members and members < MIN_MEMBERS and not owner:
+        msg = (
+            f'کانال {name or link} کمتر از {MIN_MEMBERS} عضو دارد '
+            f'(الان حدود {members} عضو). فعلاً حداقل {MIN_MEMBERS} عضو لازم است.'
+        )
+        return JsonResponse(
+            {'ok': False, 'error': msg, 'message': msg, 'code': 'min_members', 'members': members},
+            status=200,
+        )
+
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
         taken = 'این کانال برای کانال‌دار دیگری ثبت شده. اگر مال شماست، به پشتیبانی بگویید.'
         return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=200)

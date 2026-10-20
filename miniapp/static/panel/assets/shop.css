@@ -5280,7 +5280,7 @@ main .lb-sort-row {
 .lb-ob-progress > i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #005088, #00A8A0);
+  background: #00A8A0;
   border-radius: 0 2px 2px 0;
   transition: width .25s ease;
 }
@@ -5435,22 +5435,71 @@ main .lb-sort-row {
   position: sticky;
   bottom: 0;
   padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
-  background: linear-gradient(transparent, #f4f7f9 30%);
+  background: #f4f7f9;
 }
 [data-theme="dark"] .lb-ob-foot {
-  background: linear-gradient(transparent, #0f1419 30%);
+  background: #0f1419;
 }
 .lb-ob-btn {
   width: 100%;
   min-height: 50px;
   border: 0;
   border-radius: 14px;
-  background: linear-gradient(90deg, #005088, #00A8A0);
+  background: #005088;
   color: #fff;
   font-size: 15px;
   font-weight: 800;
   cursor: pointer;
 }
+.lb-ob-logo {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 18px;
+}
+.lb-ob-logo img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+  border-radius: 20px;
+}
+.lb-ob-hint {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #eef6f8;
+  border: 1px solid #d5e6ec;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #334155;
+  text-align: start;
+}
+[data-theme="dark"] .lb-ob-hint {
+  background: #1a2330;
+  border-color: #2a3544;
+  color: #cbd5e1;
+}
+.lb-ob-hint ul {
+  margin: 8px 0 0;
+  padding-inline-start: 18px;
+}
+.lb-ob-hint li { margin-bottom: 4px; }
+.lb-ob-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+.lb-ob-err {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12.5px;
+  line-height: 1.6;
+  text-align: start;
+}
+
 .lb-ob-btn:disabled {
   opacity: .45;
   cursor: default;
@@ -5470,8 +5519,8 @@ main .lb-sort-row {
   width: 72px; height: 72px;
   margin: 0 auto 16px;
   border-radius: 50%;
-  background: rgba(0,168,160,.15);
-  color: #00A8A0;
+  background: #00A8A0;
+  color: #fff;
   display: grid; place-items: center;
   font-size: 36px;
   font-weight: 800;

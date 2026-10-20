@@ -1615,8 +1615,14 @@ var reset = document.getElementById("lb-theme-reset");
   };
 
 
-  /* ─── آنبوردینگ: نقش + ثبت کسب‌وکار (منطق چاوش/پنجره، تم لینک‌بان) ─── */
-  var __lbOb = { step: 'role', role: '', biz: { name: '', category: '', mode: '', region: '', url: '' } };
+  /* ─── آنبوردینگ: نقش + مالک کانال + کسب‌وکار ─── */
+  var __lbOb = {
+    step: 'role',
+    role: '',
+    biz: { name: '', category: '', mode: '', region: '', url: '' },
+    ch: { link: '', error: '', loading: false },
+    painted: false
+  };
 
   var LB_OB_CATS = [
     'آموزش زبان خارجی', 'آموزش فنی و حرفه‌ای', 'آموزش کامپیوتر و فناوری',
@@ -1625,39 +1631,7 @@ var reset = document.getElementById("lb-theme-reset");
     'غذا و رستوران', 'پوشاک و مد', 'مسافرت و گردشگری', 'سایر'
   ];
 
-  function lbObDone() {
-    try {
-      if (localStorage.getItem('lb_role_chosen') === '1') {
-        var biz = null;
-        try { biz = JSON.parse(localStorage.getItem('lb_business') || 'null'); } catch (e) {}
-        var role = localStorage.getItem('lb_role') || '';
-        if (role === 'manager' || role === 'operator') return true;
-        if (role === 'customer' && biz && biz.name) return true;
-        if (role === 'customer' && !biz) return false;
-      }
-    } catch (e) {}
-    return false;
-  }
-
-  function lbObSaveLocal() {
-    try {
-      localStorage.setItem('lb_role', __lbOb.role);
-      localStorage.setItem('lb_role_chosen', '1');
-      if (__lbOb.role === 'customer' && __lbOb.biz.name) {
-        localStorage.setItem('lb_business', JSON.stringify(__lbOb.biz));
-      }
-    } catch (e) {}
-    try {
-      if (typeof window.__lbSetRole === 'function') window.__lbSetRole(__lbOb.role);
-    } catch (e) {}
-  }
-
-  function lbObSaveServer() {
-    var payload = { onboarded: {} };
-    payload.onboarded[__lbOb.role] = true;
-    if (__lbOb.role === 'customer' && __lbOb.biz.name) {
-      payload.business = __lbOb.biz;
-    }
+  function lbObHeaders() {
     var headers = { 'Content-Type': 'application/json' };
     try {
       if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
@@ -1668,9 +1642,44 @@ var reset = document.getElementById("lb-theme-reset");
       var q = new URLSearchParams(location.search);
       if (q.get('debug_bale_id')) headers['X-Debug-Bale-Id'] = q.get('debug_bale_id');
     } catch (e) {}
+    return headers;
+  }
+
+  function lbObDone() {
+    try {
+      if (localStorage.getItem('lb_role_chosen') !== '1') return false;
+      var role = localStorage.getItem('lb_role') || '';
+      if (role === 'manager' || role === 'operator') {
+        return localStorage.getItem('lb_manager_onboarded') === '1';
+      }
+      if (role === 'customer') {
+        var biz = null;
+        try { biz = JSON.parse(localStorage.getItem('lb_business') || 'null'); } catch (e) {}
+        return !!(biz && biz.name);
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function lbObSaveRole(role) {
+    try {
+      localStorage.setItem('lb_role', role);
+      localStorage.setItem('lb_role_chosen', '1');
+    } catch (e) {}
+    try {
+      if (typeof window.__lbSetRole === 'function') window.__lbSetRole(role);
+    } catch (e) {}
+  }
+
+  function lbObSaveServer(extra) {
+    var payload = Object.assign({ onboarded: {} }, extra || {});
+    payload.onboarded[__lbOb.role] = true;
+    if (__lbOb.role === 'customer' && __lbOb.biz.name) {
+      payload.business = __lbOb.biz;
+    }
     fetch('/miniapp/api/me/prefs', {
       method: 'POST',
-      headers: headers,
+      headers: lbObHeaders(),
       credentials: 'same-origin',
       body: JSON.stringify(payload)
     }).catch(function () {});
@@ -1680,9 +1689,19 @@ var reset = document.getElementById("lb-theme-reset");
     var el = document.getElementById('lb-ob-root');
     if (el) el.remove();
     document.documentElement.classList.remove('lb-ob-lock');
+    __lbOb.painted = false;
   }
 
-  function lbObRender() {
+  function lbObHandle() {
+    try {
+      var me = window.__lbMe || {};
+      var h = (me.handle || me.username || '').replace(/^@/, '').trim();
+      if (h) return h;
+    } catch (e) {}
+    return '';
+  }
+
+  function lbObRender(force) {
     if (lbObDone()) { lbObClose(); return; }
     document.documentElement.classList.add('lb-ob-lock');
     var root = document.getElementById('lb-ob-root');
@@ -1691,42 +1710,76 @@ var reset = document.getElementById("lb-theme-reset");
       root.id = 'lb-ob-root';
       root.className = 'lb-ob-root';
       document.body.appendChild(root);
+      __lbOb.painted = false;
     }
+    /* فقط وقتی step عوض شده یا force — تا تایپ در input از بین نرود */
+    if (__lbOb.painted && !force) return;
+
     var step = __lbOb.step;
-    var progress = 10;
-    if (step === 'role') progress = 15;
-    else if (step === 'name') progress = 35;
-    else if (step === 'category') progress = 55;
-    else if (step === 'mode') progress = 75;
-    else if (step === 'region') progress = 90;
-    else if (step === 'done') progress = 100;
+    var progress = 12;
+    if (step === 'role') progress = 12;
+    else if (step === 'ch_link' || step === 'name') progress = 40;
+    else if (step === 'ch_verify' || step === 'category') progress = 65;
+    else if (step === 'mode' || step === 'ch_done') progress = 85;
+    else if (step === 'region' || step === 'done') progress = 100;
+
+    var logo =
+      '<div class="lb-ob-logo"><img src="/miniapp/static/panel/assets/logo-linkban.jpg" alt="لینک‌بان" /></div>';
 
     var html = '<div class="lb-ob-progress"><i style="width:' + progress + '%"></i></div><div class="lb-ob-body">';
 
     if (step === 'role') {
+      html += logo;
       html +=
         '<div class="lb-ob-title">چطور می‌خواهید از لینک‌بان استفاده کنید؟</div>' +
-        '<p class="lb-ob-sub">نقش خود را انتخاب کنید. هر وقت بخواهید می‌توانید بین نقش‌ها جابه‌جا شوید.</p>' +
+        '<p class="lb-ob-sub">نقش خود را انتخاب کنید. بعداً می‌توانید بین نقش‌ها جابه‌جا شوید.</p>' +
         '<div class="lb-ob-cards">' +
+        '<button type="button" class="lb-ob-card" data-ob="role-manager">' +
+        '<div class="ico">📡</div><h3>مالک کانال (ناشر)</h3>' +
+        '<p>اگر کانال بله دارید و می‌خواهید با انتشار تبلیغ درآمد بگیرید، این نقش را انتخاب کنید.</p></button>' +
         '<button type="button" class="lb-ob-card" data-ob="role-customer">' +
         '<div class="ico">📣</div><h3>آگهی‌دهنده (کسب‌وکار)</h3>' +
-        '<p>اگر محصول یا خدمتی دارید و می‌خواهید در کانال‌های بله دیده شوید، این نقش را انتخاب کنید.</p></button>' +
-        '<button type="button" class="lb-ob-card" data-ob="role-manager">' +
-        '<div class="ico">📡</div><h3>مدیر کانال (ناشر)</h3>' +
-        '<p>اگر کانال بله دارید و می‌خواهید با انتشار تبلیغ درآمد بگیرید، این نقش مناسب شماست.</p></button>' +
+        '<p>اگر محصول یا خدمتی دارید و می‌خواهید در کانال‌های بله دیده شوید، این نقش مناسب شماست.</p></button>' +
+        '</div>';
+    } else if (step === 'ch_link') {
+      var handle = lbObHandle();
+      html +=
+        '<div class="lb-ob-title">افزودن کانال</div>' +
+        '<p class="lb-ob-sub">نام کاربری یا لینک کانال بله خود را وارد کنید.</p>' +
+        '<div class="lb-ob-field"><label>نام کاربری یا لینک کانال</label>' +
+        '<input id="lb-ob-ch-link" type="text" maxlength="120" placeholder="@mychannel یا ble.ir/mychannel" value="' +
+        (__lbOb.ch.link || '').replace(/"/g, '&quot;') + '" autocomplete="off" /></div>' +
+        '<div class="lb-ob-hint">' +
+        '<b>برای شروع همکاری لازم است:</b>' +
+        '<ul>' +
+        '<li>کانال شما بیشتر از <b>۱۰۰۰</b> عضو داشته باشد.</li>' +
+        '<li>کانال در حالت عمومی (پابلیک) باشد.</li>' +
+        (handle
+          ? '<li>شناسه شما (<b>@' + handle + '</b>) را در بخش «درباره» کانال بنویسید.</li>'
+          : '<li>نام کاربری بله خود را در بخش «درباره» کانال بنویسید.</li>') +
+        '</ul>' +
+        '<p class="lb-ob-note">پس از تأیید می‌توانید شناسه را از درباره کانال حذف کنید.</p>' +
+        '</div>' +
+        (__lbOb.ch.error ? '<div class="lb-ob-err">' + __lbOb.ch.error + '</div>' : '');
+    } else if (step === 'ch_done') {
+      html +=
+        '<div class="lb-ob-success">' +
+        '<div class="check">✓</div>' +
+        '<div class="lb-ob-title">کانال با موفقیت وصل شد</div>' +
+        '<p class="lb-ob-sub">حالا می‌توانید تعرفه بگذارید و پیشنهاد تبلیغ دریافت کنید. در صورت تمایل شناسه را از درباره کانال بردارید.</p>' +
         '</div>';
     } else if (step === 'name') {
       html +=
         '<div class="lb-ob-title">نام کسب‌وکارتان چیست؟</div>' +
         '<p class="lb-ob-sub">نامی وارد کنید که مشتری‌ها شما را با آن می‌شناسند.</p>' +
         '<div class="lb-ob-field"><label>نام کسب‌وکار</label>' +
-        '<input id="lb-ob-name" type="text" maxlength="80" placeholder="مثلاً طیبستان" value="' +
-        (__lbOb.biz.name || '').replace(/"/g, '&quot;') + '" /></div>';
+        '<input id="lb-ob-name" type="text" maxlength="80" placeholder="مثلاً لینک بانک" value="' +
+        (__lbOb.biz.name || '').replace(/"/g, '&quot;') + '" autocomplete="off" /></div>';
     } else if (step === 'category') {
       html +=
         '<div class="lb-ob-title">صنف فعالیت‌تان چیست؟</div>' +
         '<p class="lb-ob-sub">نزدیک‌ترین صنف به کسب‌وکارتان را انتخاب کنید.</p>' +
-        '<div class="lb-ob-field lb-ob-search"><input id="lb-ob-cat-q" type="search" placeholder="جستجوی صنف…" /></div>' +
+        '<div class="lb-ob-field lb-ob-search"><input id="lb-ob-cat-q" type="search" placeholder="جستجوی صنف…" autocomplete="off" /></div>' +
         '<div class="lb-ob-cats" id="lb-ob-cats"></div>';
     } else if (step === 'mode') {
       html +=
@@ -1741,7 +1794,7 @@ var reset = document.getElementById("lb-theme-reset");
         html +=
           '<div class="lb-ob-field" style="margin-top:14px"><label>آدرس اینترنتی کسب‌وکار (اختیاری)</label>' +
           '<input id="lb-ob-url" type="text" placeholder="instagram.com/yourpage" value="' +
-          (__lbOb.biz.url || '').replace(/"/g, '&quot;') + '" /></div>';
+          (__lbOb.biz.url || '').replace(/"/g, '&quot;') + '" autocomplete="off" /></div>';
       }
     } else if (step === 'region') {
       html +=
@@ -1760,27 +1813,29 @@ var reset = document.getElementById("lb-theme-reset");
         '<div class="lb-ob-biz-chip"><span class="ava">' + letter + '</span><div style="text-align:start"><b>' +
         (__lbOb.biz.name || '') + '</b><div style="font-size:12px;color:#64748b">' +
         (__lbOb.biz.category || '') + '</div></div></div>' +
-        '<p class="lb-ob-sub">از اینجا می‌توانید اطلاعات را کامل کنید و برای رشد و تبلیغات اقدام کنید.</p>' +
+        '<p class="lb-ob-sub">از اینجا می‌توانید برای رشد و تبلیغات اقدام کنید.</p>' +
         '</div>';
     }
 
     html += '</div><div class="lb-ob-foot">';
     if (step === 'role') {
       html += '';
-    } else if (step === 'done') {
-      html += '<button type="button" class="lb-ob-btn" data-ob="finish">شروع رشد و تبلیغات</button>';
-      html += '<button type="button" class="lb-ob-btn ghost" data-ob="finish">ورود به برنامه</button>';
+    } else if (step === 'ch_done' || step === 'done') {
+      html += '<button type="button" class="lb-ob-btn" data-ob="finish">ورود به برنامه</button>';
+    } else if (step === 'ch_link') {
+      html +=
+        '<button type="button" class="lb-ob-btn" data-ob="ch-check"' +
+        (__lbOb.ch.loading ? ' disabled' : '') + '>' +
+        (__lbOb.ch.loading ? 'در حال بررسی…' : 'بررسی کانال') +
+        '</button>';
+      html += '<button type="button" class="lb-ob-btn ghost" data-ob="back">قبلی</button>';
     } else {
-      var can = true;
-      if (step === 'name') can = !!(__lbOb.biz.name && __lbOb.biz.name.trim());
-      if (step === 'category') can = !!__lbOb.biz.category;
-      if (step === 'mode') can = !!__lbOb.biz.mode;
-      if (step === 'region') can = !!__lbOb.biz.region;
-      html += '<button type="button" class="lb-ob-btn" data-ob="next"' + (can ? '' : ' disabled') + '>ادامه</button>';
+      html += '<button type="button" class="lb-ob-btn" data-ob="next">ادامه</button>';
       html += '<button type="button" class="lb-ob-btn ghost" data-ob="back">قبلی</button>';
     }
     html += '</div>';
     root.innerHTML = html;
+    __lbOb.painted = true;
 
     if (step === 'category') {
       var box = document.getElementById('lb-ob-cats');
@@ -1794,7 +1849,8 @@ var reset = document.getElementById("lb-theme-reset");
           if (c === __lbOb.biz.category) b.className = 'on';
           b.onclick = function () {
             __lbOb.biz.category = c;
-            lbObRender();
+            __lbOb.painted = false;
+            lbObRender(true);
           };
           box.appendChild(b);
         });
@@ -1804,31 +1860,93 @@ var reset = document.getElementById("lb-theme-reset");
       if (sq) sq.oninput = function () { paintCats(sq.value); };
     }
 
+    /* فوکوس روی فیلد متن */
+    setTimeout(function () {
+      var focusId =
+        step === 'name' ? 'lb-ob-name' :
+        step === 'ch_link' ? 'lb-ob-ch-link' : null;
+      if (focusId) {
+        var el = document.getElementById(focusId);
+        if (el) el.focus();
+      }
+    }, 50);
+
     root.onclick = function (e) {
       var btn = e.target.closest('[data-ob]');
       if (!btn) return;
       var act = btn.getAttribute('data-ob');
+
       if (act === 'role-customer') {
         __lbOb.role = 'customer';
         __lbOb.step = 'name';
-        lbObRender();
+        __lbOb.painted = false;
+        lbObRender(true);
       } else if (act === 'role-manager') {
         __lbOb.role = 'manager';
-        __lbOb.biz = { name: '', category: '', mode: '', region: '', url: '' };
-        lbObSaveLocal();
-        lbObSaveServer();
-        lbObClose();
+        __lbOb.step = 'ch_link';
+        __lbOb.ch = { link: '', error: '', loading: false };
+        __lbOb.painted = false;
+        lbObRender(true);
       } else if (act.indexOf('mode-') === 0) {
         __lbOb.biz.mode = act.slice(5);
-        lbObRender();
+        __lbOb.painted = false;
+        lbObRender(true);
       } else if (act.indexOf('region-') === 0) {
         __lbOb.biz.region = act.slice(7);
-        lbObRender();
+        __lbOb.painted = false;
+        lbObRender(true);
+      } else if (act === 'ch-check') {
+        var inp = document.getElementById('lb-ob-ch-link');
+        var link = (inp && inp.value || '').trim();
+        if (!link) {
+          __lbOb.ch.error = 'نام کاربری یا لینک کانال را وارد کنید.';
+          __lbOb.painted = false;
+          lbObRender(true);
+          return;
+        }
+        __lbOb.ch.link = link;
+        __lbOb.ch.loading = true;
+        __lbOb.ch.error = '';
+        __lbOb.painted = false;
+        lbObRender(true);
+        fetch('/miniapp/api/channels/add', {
+          method: 'POST',
+          headers: lbObHeaders(),
+          credentials: 'same-origin',
+          body: JSON.stringify({ link: link })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            __lbOb.ch.loading = false;
+            if (data && data.ok) {
+              __lbOb.step = 'ch_done';
+              __lbOb.ch.error = '';
+              try { localStorage.setItem('lb_manager_onboarded', '1'); } catch (e) {}
+              lbObSaveRole('manager');
+              lbObSaveServer({});
+              if (typeof window.__lbHydrate === 'function') {
+                try { window.__lbHydrate(); } catch (e) {}
+              }
+            } else {
+              __lbOb.ch.error = (data && (data.message || data.error)) || 'بررسی کانال انجام نشد.';
+            }
+            __lbOb.painted = false;
+            lbObRender(true);
+          })
+          .catch(function () {
+            __lbOb.ch.loading = false;
+            __lbOb.ch.error = 'ارتباط برقرار نشد. دوباره تلاش کنید.';
+            __lbOb.painted = false;
+            lbObRender(true);
+          });
       } else if (act === 'next') {
         if (step === 'name') {
-          var inp = document.getElementById('lb-ob-name');
-          __lbOb.biz.name = (inp && inp.value || '').trim();
-          if (!__lbOb.biz.name) return;
+          var n = document.getElementById('lb-ob-name');
+          __lbOb.biz.name = (n && n.value || '').trim();
+          if (!__lbOb.biz.name) {
+            if (n) n.focus();
+            return;
+          }
           __lbOb.step = 'category';
         } else if (step === 'category') {
           if (!__lbOb.biz.category) return;
@@ -1841,17 +1959,24 @@ var reset = document.getElementById("lb-theme-reset");
         } else if (step === 'region') {
           if (!__lbOb.biz.region) return;
           __lbOb.step = 'done';
-          lbObSaveLocal();
-          lbObSaveServer();
+          lbObSaveRole('customer');
+          try { localStorage.setItem('lb_business', JSON.stringify(__lbOb.biz)); } catch (e) {}
+          lbObSaveServer({});
         }
-        lbObRender();
+        __lbOb.painted = false;
+        lbObRender(true);
       } else if (act === 'back') {
-        if (step === 'name') __lbOb.step = 'role';
+        if (step === 'name' || step === 'ch_link') __lbOb.step = 'role';
         else if (step === 'category') __lbOb.step = 'name';
         else if (step === 'mode') __lbOb.step = 'category';
         else if (step === 'region') __lbOb.step = 'mode';
-        lbObRender();
+        __lbOb.painted = false;
+        lbObRender(true);
       } else if (act === 'finish') {
+        if (__lbOb.role === 'manager') {
+          try { localStorage.setItem('lb_manager_onboarded', '1'); } catch (e) {}
+          lbObSaveRole('manager');
+        }
         lbObClose();
       }
     };
@@ -1860,7 +1985,7 @@ var reset = document.getElementById("lb-theme-reset");
   function ensureOnboarding() {
     try {
       if (lbObDone()) { lbObClose(); return; }
-      lbObRender();
+      lbObRender(false);
     } catch (e) {}
   }
 
