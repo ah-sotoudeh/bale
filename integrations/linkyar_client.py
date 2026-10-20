@@ -847,17 +847,18 @@ def send_local_file_to_channel(
             errors.append(f'upload_or_raw: {e}')
 
         try:
+            # امضای رسمی baleclient: photo=/video=/document= نه positional اول
             if kind == 'photo':
                 msg = await client.send_photo(
-                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                    photo=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
                 )
             elif kind == 'video':
                 msg = await client.send_video(
-                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                    video=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
                 )
             else:
                 msg = await client.send_document(
-                    fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
+                    document=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=caption or None
                 )
             return {
                 'ok': True,

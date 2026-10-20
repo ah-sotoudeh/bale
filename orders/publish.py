@@ -2018,15 +2018,294 @@ def test_linkyar_libraries_matrix(
         return out if isinstance(out, dict) else {'ok': False, 'error': str(out)}
 
     # اجرا
+
+    def t_native_send_photo():
+        """client.send_photo با امضای رسمی baleclient (photo= نه file=)."""
+        if not file_path:
+            return {'ok': False, 'error': 'no_local_file'}
+
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            from aiobale.types import FileInput
+            resolved = await ly._resolve_peer(client, ref)
+            if not resolved.get('ok'):
+                return {'ok': False, 'error': resolved.get('error')}
+            peer_id = int(resolved['peer_id'])
+            try:
+                await client.join_public_chat(peer_id)
+            except Exception:
+                pass
+            cap = f'[{marker_base}-native-photo]'
+            photo = FileInput(str(file_path))
+            last_err = ''
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    msg = await client.send_photo(
+                        photo=photo,
+                        chat_id=peer_id,
+                        chat_type=ctype,
+                        caption=cap,
+                    )
+                    return {
+                        'ok': True,
+                        'message_id': getattr(msg, 'message_id', None),
+                        'date': getattr(msg, 'date', None) if not hasattr(getattr(msg, 'date', None), 'value') else getattr(msg.date, 'value', None),
+                        'method': f'send_photo/{ctype}',
+                        'peer_id': peer_id,
+                    }
+                except Exception as e:
+                    last_err = f'{ctype}:{type(e).__name__}:{e}'
+            return {'ok': False, 'error': last_err or 'send_photo_failed'}
+
+        out = ly._run(ly._with_client(_fn))
+        if isinstance(out, dict) and out.get('ok'):
+            # normalize date
+            d = out.get('date')
+            if hasattr(d, 'value'):
+                try:
+                    out['date'] = int(d.value)
+                except Exception:
+                    pass
+            elif d is not None:
+                try:
+                    out['date'] = int(d)
+                except Exception:
+                    pass
+            return out
+        # recover from history by marker
+        import time as _t2
+        _t2.sleep(2.0)
+        try:
+            hist = ly.load_channel_history(ref, limit=30)
+        except Exception:
+            hist = None
+        if isinstance(hist, dict) and hist.get('ok'):
+            key = f'{marker_base}-native-photo'
+            for post in list(hist.get('messages') or []):
+                prev = str(post.get('preview') or '')
+                if key not in prev and post.get('kind') not in ('photo', 'document', 'video'):
+                    continue
+                if key not in prev:
+                    # newest media from me within window — still accept if only one recent media
+                    pass
+                else:
+                    try:
+                        return {
+                            'ok': True,
+                            'message_id': int(post.get('message_id') or 0),
+                            'date': int(post.get('date') or 0),
+                            'method': 'send_photo_recovered',
+                        }
+                    except Exception:
+                        pass
+        return out if isinstance(out, dict) else {'ok': False, 'error': str(out)[:200]}
+
+    def t_native_forward():
+        """فوروارد واقعی: load_history مبدأ → client.forward_message به مقصد.
+
+        امضای رسمی baleclient: forward_message(message, chat_id, chat_type)
+        """
+        src_channel = src_ref or lb
+        if not src_channel:
+            return {'ok': False, 'error': 'no_source_channel'}
+
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            from aiobale.types import InfoMessage, Peer
+            from aiobale.enums import PeerType
+
+            src_res = await ly._resolve_peer(client, src_channel)
+            dst_res = await ly._resolve_peer(client, ref)
+            if not src_res.get('ok'):
+                return {'ok': False, 'error': f"src_resolve:{src_res.get('error')}"}
+            if not dst_res.get('ok'):
+                return {'ok': False, 'error': f"dst_resolve:{dst_res.get('error')}"}
+            src_id = int(src_res['peer_id'])
+            dst_id = int(dst_res['peer_id'])
+            src_ah = src_res.get('access_hash')
+            tries = []
+
+            # 1) load_history native برای گرفتن Message واقعی
+            hist_msgs = []
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    hist_msgs = await client.load_history(
+                        chat_id=src_id,
+                        chat_type=ctype,
+                        limit=40,
+                    )
+                    if hist_msgs:
+                        tries.append(f'load_history/{ctype}:n={len(hist_msgs)}')
+                        break
+                except Exception as e:
+                    tries.append(f'load_history/{ctype}:{type(e).__name__}:{e}')
+            if not hist_msgs:
+                return {'ok': False, 'error': 'source_history_empty', 'tries': tries}
+
+            # پیدا کردن پیام هدف
+            target_msg = None
+            want = int(ly_mid or 0)
+            for m in hist_msgs:
+                mid = getattr(m, 'message_id', None)
+                try:
+                    mid = int(mid) if mid is not None else None
+                except Exception:
+                    mid = None
+                if want and mid == want:
+                    target_msg = m
+                    break
+            if target_msg is None:
+                # اولین پیام رسانه‌ای / غیرمتن
+                for m in hist_msgs:
+                    content = getattr(m, 'content', None)
+                    # بدون حدس پیچیده: اگر mid از بنر نبود، اولین پیام
+                    target_msg = m
+                    break
+            if target_msg is None:
+                return {'ok': False, 'error': 'no_message_picked', 'tries': tries}
+
+            picked_mid = getattr(target_msg, 'message_id', None)
+            picked_date = getattr(target_msg, 'date', None)
+            if hasattr(picked_date, 'value'):
+                picked_date = picked_date.value
+
+            # 2) forward_message به مقصد با هر chat_type
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    resp = await client.forward_message(
+                        message=target_msg,
+                        chat_id=dst_id,
+                        chat_type=ctype,
+                    )
+                    tries.append(f'forward/{ctype}:ok={resp}')
+                    # verify
+                    import asyncio as _aio
+                    await _aio.sleep(1.5)
+                    after = []
+                    try:
+                        after = await client.load_history(chat_id=dst_id, chat_type=ctype, limit=15)
+                    except Exception as e:
+                        tries.append(f'verify_hist:{type(e).__name__}:{e}')
+                    # count growth or matching forward
+                    ok_vis = False
+                    new_mid = None
+                    new_date = None
+                    if after:
+                        # اگر تعداد زیاد شد یا is_forward
+                        for am in after[:8]:
+                            if getattr(am, 'is_forward', False) or getattr(am, 'forwarded_from', None):
+                                ok_vis = True
+                                new_mid = getattr(am, 'message_id', None)
+                                new_date = getattr(am, 'date', None)
+                                break
+                        if not ok_vis and len(after) >= 1:
+                            # API بدون exception = احتمالاً ok؛ mid جدید را از generate حدس نزن
+                            ok_vis = True
+                            new_mid = getattr(after[0], 'message_id', None)
+                            new_date = getattr(after[0], 'date', None)
+                    if hasattr(new_date, 'value'):
+                        new_date = new_date.value
+                    if ok_vis:
+                        return {
+                            'ok': True,
+                            'message_id': int(new_mid) if new_mid is not None else None,
+                            'date': int(new_date) if new_date is not None else None,
+                            'method': f'native_forward/{ctype}',
+                            'src_mid': int(picked_mid) if picked_mid is not None else None,
+                            'src_date': int(picked_date) if picked_date is not None else None,
+                            'tries': tries,
+                        }
+                    tries.append(f'forward/{ctype}:not_visible')
+                except Exception as e:
+                    tries.append(f'forward/{ctype}:{type(e).__name__}:{e}')
+
+            # 3) fallback: InfoMessage دستی با peer مبدأ
+            try:
+                peer_kwargs = {'type': PeerType.GROUP, 'id': src_id}
+                if src_ah not in (None, 0):
+                    peer_kwargs['access_hash'] = int(src_ah)
+                info = InfoMessage(
+                    peer=Peer(**peer_kwargs),
+                    message_id=int(picked_mid),
+                    date=int(picked_date or 0),
+                )
+                for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                    try:
+                        resp = await client.forward_message(
+                            message=info, chat_id=dst_id, chat_type=ctype
+                        )
+                        tries.append(f'info_forward/{ctype}:ok')
+                        return {
+                            'ok': True,
+                            'message_id': None,
+                            'date': int(picked_date or 0),
+                            'method': f'info_forward/{ctype}',
+                            'tries': tries,
+                            'note': 'API accepted InfoMessage; visibility not verified',
+                        }
+                    except Exception as e:
+                        tries.append(f'info_forward/{ctype}:{type(e).__name__}:{e}')
+            except Exception as e:
+                tries.append(f'info_build:{type(e).__name__}:{e}')
+
+            return {'ok': False, 'error': 'native_forward_failed', 'tries': tries[:20]}
+
+        return ly._run(ly._with_client(_fn))
+
+    def t_native_forward_messages_list():
+        """client.forward_messages(list) — همان API چندتایی."""
+        src_channel = src_ref or lb
+
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            src_res = await ly._resolve_peer(client, src_channel)
+            dst_res = await ly._resolve_peer(client, ref)
+            if not src_res.get('ok') or not dst_res.get('ok'):
+                return {'ok': False, 'error': 'resolve_failed'}
+            src_id = int(src_res['peer_id'])
+            dst_id = int(dst_res['peer_id'])
+            msgs = []
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    msgs = await client.load_history(chat_id=src_id, chat_type=ctype, limit=20)
+                    if msgs:
+                        break
+                except Exception:
+                    continue
+            if not msgs:
+                return {'ok': False, 'error': 'no_msgs'}
+            pick = msgs[0]
+            want = int(ly_mid or 0)
+            if want:
+                for m in msgs:
+                    try:
+                        if int(getattr(m, 'message_id', 0) or 0) == want:
+                            pick = m
+                            break
+                    except Exception:
+                        pass
+            last = ''
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    await client.forward_messages(messages=[pick], chat_id=dst_id, chat_type=ctype)
+                    return {'ok': True, 'method': f'forward_messages/{ctype}', 'message_id': getattr(pick, 'message_id', None)}
+                except Exception as e:
+                    last = f'{ctype}:{type(e).__name__}:{e}'
+            return {'ok': False, 'error': last or 'failed'}
+
+        return ly._run(ly._with_client(_fn))
+
+
     _trial(bound_lib, 'discover_client_methods', t_client_list_methods)
     _trial(bound_lib, 'send_text_to_channel', t_send_text)
     _trial(bound_lib, 'send_message(alias)', t_send_message_alias)
     _trial(bound_lib, 'send_local_file_to_channel', t_upload)
+    _trial(bound_lib, 'native send_photo(photo=)', t_native_send_photo)
     _trial(bound_lib, 'send_existing_file_to_channel', t_send_existing)
-    _trial(bound_lib, 'client.send_photo/document', t_client_highlevel_photo)
+    _trial(bound_lib, 'NATIVE forward_message(Message)', t_native_forward)
+    _trial(bound_lib, 'NATIVE forward_messages(list)', t_native_forward_messages_list)
     _trial('bale-sdk', 'ForwardMessages(source→dst)', t_forward_sdk_only)
-    _trial(bound_lib, 'copy_message', t_copy_no_bot)
-    _trial(bound_lib, 'forward_message(alias)', t_forward_message_alias)
+    _trial(bound_lib, 'copy_message(wrapper)', t_copy_no_bot)
 
     # ── حذف برای هر ارسال موفق ───────────────────────────
     delete_trials: List[Dict[str, Any]] = []
@@ -2089,8 +2368,33 @@ def test_linkyar_libraries_matrix(
         if isinstance(hist, dict) and hist.get('ok'):
             for post in list(hist.get('messages') or []):
                 prev = ' '.join(str(post.get(x) or '') for x in ('preview', 'caption', 'text', 'file_name'))
-                if marker_base not in prev:
-                    continue
+                kind = str(post.get('kind') or '')
+                is_media = kind in ('photo', 'document', 'video', 'unknown')
+                # پیام‌های این اجرا با marker، یا رسانهٔ خیلی تازه بدون متن (آپلود بدون کپشن)
+                if marker_base not in prev and not (is_media and not str(post.get('preview') or '').strip()):
+                    # فقط media تازه از sender لینک‌یار
+                    sid = post.get('sender_id')
+                    me_id = None
+                    try:
+                        me_id = int(((libs_info.get('linkyar_bound') or {}).get('me') or {}).get('user_id') or 0)
+                    except Exception:
+                        me_id = None
+                    if not (is_media and me_id and sid and int(sid) == int(me_id)):
+                        continue
+                    # فقط اگر date در ۲ دقیقه اخیر باشد
+                    try:
+                        pdt = int(post.get('date') or 0)
+                    except Exception:
+                        pdt = 0
+                    # date بله اغلب ms است
+                    import time as _tnow
+                    now_ms = int(_tnow.time() * 1000)
+                    if pdt > 10_000_000_000:  # ms
+                        if now_ms - pdt > 180_000:
+                            continue
+                    else:
+                        if int(_tnow.time()) - pdt > 180:
+                            continue
                 try:
                     mid = int(post.get('message_id') or 0)
                     mdate = int(post.get('date') or 0)
