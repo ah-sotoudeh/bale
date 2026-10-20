@@ -877,7 +877,40 @@ def send_local_file_to_channel(
             'hint': 'use load_channel_history after send to recover real ids',
         }
 
-    return _run(_with_client(_fn))
+    out = _run(_with_client(_fn))
+    if isinstance(out, dict) and out.get('ok'):
+        return out
+    # تشخیص تأخیری: پیام رفته ولی API خطا برگردانده
+    marker = (caption or '').strip()
+    if marker and len(marker) >= 8:
+        import time as _t
+        _t.sleep(1.5)
+        try:
+            hist = load_channel_history(channel_ref, limit=20)
+        except Exception:
+            hist = None
+        if isinstance(hist, dict) and hist.get('ok'):
+            key = marker[:24]
+            for post in list(hist.get('messages') or hist.get('posts') or []):
+                prev = str(post.get('preview') or post.get('caption') or post.get('text') or '')
+                if key and key in prev:
+                    try:
+                        mid = int(post.get('message_id') or 0)
+                        dt = int(post.get('date') or 0)
+                    except (TypeError, ValueError):
+                        mid, dt = 0, 0
+                    if mid:
+                        recovered = {
+                            'ok': True,
+                            'message_id': mid,
+                            'date': dt,
+                            'peer_id': (out or {}).get('peer_id') if isinstance(out, dict) else None,
+                            'method': 'upload_recovered_from_history',
+                            'prev_error': (out or {}).get('error') if isinstance(out, dict) else None,
+                            'tries': (out or {}).get('tries') if isinstance(out, dict) else None,
+                        }
+                        return recovered
+    return out if isinstance(out, dict) else {'ok': False, 'error': str(out)[:200]}
 
 
 def publish_to_linkbank_and_capture(
@@ -2230,21 +2263,49 @@ def copy_message(
             'message_id': int(message_id),
         }
 
-    last: Dict[str, Any] = {'ok': False, 'error': 'forward_failed'}
-    for ptype in (2, 1):
-        result = forward_to_channel(
-            str(to_chat_id),
-            from_peer_id=from_peer,
-            message_id=int(resolved_mid),
+    # forward_to_channel حذف شده بود → از مسیر پایدار SDK استفاده کن
+    try:
+        result = _forward_via_bale_sdk_from_self_or_source(
+            target_channel_ref=str(to_chat_id),
+            source_channel_ref=str(from_chat_id),
+            caption_match='',
+            bot_message_id=0,
             message_date=int(md),
-            from_peer_type=ptype,
+            dst_peer_id=None,
+            prefer_self_inbox=False,
+            me_id=None,
+            force_rid=int(resolved_mid),
+            force_date=int(md),
+            force_seq=0,
         )
-        last = result if isinstance(result, dict) else last
-        if result.get('ok'):
+        if isinstance(result, dict) and result.get('ok'):
             result['message_date'] = int(md)
             result['from_peer_id'] = from_peer
             result['resolved_message_id'] = int(resolved_mid)
+            result['method'] = result.get('method') or 'sdk_forward'
             return result
+        last = result if isinstance(result, dict) else {'ok': False, 'error': str(result)[:200]}
+    except TypeError:
+        # signature mismatch — fallback
+        try:
+            result = forward_banner_from_linkbank(
+                target_channel_ref=str(to_chat_id),
+                source_channel_ref=str(from_chat_id),
+                caption_match='',
+                bot_message_id=0,
+                message_date=int(md),
+            )
+            if isinstance(result, dict):
+                return result
+            last = {'ok': False, 'error': str(result)[:200]}
+        except Exception as e:
+            last = {'ok': False, 'error': f'copy_fallback:{type(e).__name__}:{e}'}
+    except Exception as e:
+        last = {'ok': False, 'error': f'copy_sdk:{type(e).__name__}:{e}'}
+    if not isinstance(last, dict):
+        last = {'ok': False, 'error': 'forward_failed'}
+    last.setdefault('ok', False)
+    last.setdefault('error', last.get('error') or 'forward_failed')
     return last
 
 

@@ -1647,9 +1647,19 @@ def test_send_capability_matrix(
         mark = '✓' if t['ok'] else '✗'
         summary_lines.append(f'{mark} {t["method"]} ({t["ms"]}ms) {t["error"] or ("mid="+str(t["message_id"]) if t["message_id"] else "ok")}')
     if bot_ok or ly_ok:
+        bot_fwd = any(t['method'] == 'forwardMessage' and t['ok'] for t in trials if t['account'] == 'bot')
+        ly_fwd = any('forward' in t['method'] and t['ok'] for t in trials if t['account'] == 'linkyar')
+        if bot_fwd:
+            rec = 'توصیه تولید: بازو + forwardMessage از لینک‌بانک (پایدار + پیش‌نمایش تصویر)'
+        elif bot_ok:
+            rec = 'توصیه: بازو (فوروارد در این کانال نشد؛ از copy/upload بات استفاده شود)'
+        elif ly_fwd:
+            rec = 'توصیه: لینک‌یار فوروارد (بازو در این کانال موفق نبود)'
+        else:
+            rec = 'توصیه: فقط ارسال خام لینک‌یار (فوروارد لینک‌یار پایدار نیست)'
+        summary_lines.append(rec)
         summary_lines.append(
-            f'پایدارتر برای این کانال: '
-            + ('هر دو' if bot_ok and ly_ok else ('بازو' if bot_ok else 'لینک‌یار'))
+            f'موفق: بازو {len(bot_ok)} متد / لینک‌یار {len(ly_ok)} متد'
             + f' | حذف خودکار: {scheduled} پیام تا {mins} دقیقه'
         )
     else:
