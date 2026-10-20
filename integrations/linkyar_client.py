@@ -880,36 +880,63 @@ def send_local_file_to_channel(
     out = _run(_with_client(_fn))
     if isinstance(out, dict) and out.get('ok'):
         return out
-    # تشخیص تأخیری: پیام رفته ولی API خطا برگردانده
+    # تشخیص تأخیری: پیام رفته ولی API خطا برگردانده (رایج در بله)
     marker = (caption or '').strip()
-    if marker and len(marker) >= 8:
+    keys = []
+    if marker:
+        keys.append(marker[:40])
+        keys.append(marker[:24])
+        # بخش پایدار مثل ly-lib-123456 یا [ly-lib-123
+        import re as _re
+        m = _re.search(r'ly-lib-\d+', marker)
+        if m:
+            keys.append(m.group(0))
+        m2 = _re.search(r'\[[^\]]{6,40}\]', marker)
+        if m2:
+            keys.append(m2.group(0))
+    keys = [k for k in keys if k and len(k) >= 6]
+    if keys:
         import time as _t
-        _t.sleep(1.5)
+        _t.sleep(2.5)
+        hist = None
+        hist_err = ''
         try:
-            hist = load_channel_history(channel_ref, limit=20)
-        except Exception:
-            hist = None
+            hist = load_channel_history(channel_ref, limit=40)
+        except Exception as e:
+            hist_err = f'{type(e).__name__}:{e}'
         if isinstance(hist, dict) and hist.get('ok'):
-            key = marker[:24]
-            for post in list(hist.get('messages') or hist.get('posts') or []):
-                prev = str(post.get('preview') or post.get('caption') or post.get('text') or '')
-                if key and key in prev:
-                    try:
-                        mid = int(post.get('message_id') or 0)
-                        dt = int(post.get('date') or 0)
-                    except (TypeError, ValueError):
-                        mid, dt = 0, 0
-                    if mid:
-                        recovered = {
-                            'ok': True,
-                            'message_id': mid,
-                            'date': dt,
-                            'peer_id': (out or {}).get('peer_id') if isinstance(out, dict) else None,
-                            'method': 'upload_recovered_from_history',
-                            'prev_error': (out or {}).get('error') if isinstance(out, dict) else None,
-                            'tries': (out or {}).get('tries') if isinstance(out, dict) else None,
-                        }
-                        return recovered
+            posts = list(hist.get('messages') or hist.get('posts') or [])
+            for post in posts:
+                prev = ' '.join(
+                    str(post.get(x) or '')
+                    for x in ('preview', 'caption', 'text', 'file_name')
+                )
+                if not any(k in prev for k in keys):
+                    continue
+                try:
+                    mid = int(post.get('message_id') or 0)
+                    dt = int(post.get('date') or 0)
+                except (TypeError, ValueError):
+                    mid, dt = 0, 0
+                if mid:
+                    return {
+                        'ok': True,
+                        'message_id': mid,
+                        'date': dt,
+                        'peer_id': (out or {}).get('peer_id') if isinstance(out, dict) else None,
+                        'method': 'upload_recovered_from_history',
+                        'prev_error': (out or {}).get('error') if isinstance(out, dict) else None,
+                        'tries': (out or {}).get('tries') if isinstance(out, dict) else None,
+                        'matched_preview': prev[:80],
+                    }
+        elif isinstance(hist, dict):
+            hist_err = str(hist.get('error') or hist_err or 'history_not_ok')
+        if isinstance(out, dict):
+            out = dict(out)
+            out['recover_attempted'] = True
+            out['recover_keys'] = keys[:4]
+            if hist_err:
+                out['recover_hist_error'] = hist_err[:120]
     return out if isinstance(out, dict) else {'ok': False, 'error': str(out)[:200]}
 
 

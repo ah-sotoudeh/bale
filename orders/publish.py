@@ -1910,13 +1910,16 @@ def test_linkyar_libraries_matrix(
         return ly.forward_message(ref, str(src_ref or lb), int(ly_mid), message_date=int(ly_date or 0))
 
     def t_client_highlevel_photo():
-        """مستقیم client.send_photo از کتابخانهٔ bind شده."""
+        """مستقیم متدهای media روی client (امضاهای رایج baleclient)."""
         if not file_path:
             return {'ok': False, 'error': 'no_local_file'}
 
         async def _fn(client):
             from aiobale.enums import ChatType
-            from aiobale.types import FileInput
+            try:
+                from aiobale.types import FileInput
+            except Exception:
+                FileInput = None
             resolved = await ly._resolve_peer(client, ref)
             if not resolved.get('ok'):
                 return {'ok': False, 'error': resolved.get('error')}
@@ -1925,43 +1928,78 @@ def test_linkyar_libraries_matrix(
                 await client.join_public_chat(peer_id)
             except Exception:
                 pass
-            fin = FileInput(str(file_path))
+            cap = f'[{marker_base}-hl-photo]'
+            fin = FileInput(str(file_path)) if FileInput else str(file_path)
             methods_tried = []
-            # فقط متدهایی که واقعاً روی client هستند
-            for name, kwargs in (
-                ('send_photo', dict(file=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl-photo]')),
-                ('send_document', dict(file=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl-doc]')),
-            ):
-                if not hasattr(client, name):
-                    methods_tried.append(f'{name}:missing')
-                    continue
+            # ترتیب: photo بعد document — فقط اگر متد روی client باشد
+            candidates = []
+            for name in ('send_photo', 'send_document', 'send_gif'):
+                if hasattr(client, name):
+                    candidates.append(name)
+            for name in candidates:
+                fn = getattr(client, name)
+                attempts = [
+                    dict(file=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=cap),
+                    dict(file=str(file_path), chat_id=peer_id, chat_type=ChatType.GROUP, caption=cap),
+                    dict(path=str(file_path), chat_id=peer_id, chat_type=ChatType.GROUP, caption=cap),
+                ]
+                for kwargs in attempts:
+                    try:
+                        msg = await fn(**kwargs)
+                        return {
+                            'ok': True,
+                            'message_id': getattr(msg, 'message_id', None) or getattr(msg, 'id', None),
+                            'date': getattr(msg, 'date', None),
+                            'method': name,
+                            'kwargs': list(kwargs.keys()),
+                        }
+                    except TypeError as e:
+                        methods_tried.append(f'{name}{list(kwargs.keys())}:TypeError:{e}')
+                    except Exception as e:
+                        methods_tried.append(f'{name}{list(kwargs.keys())}:{type(e).__name__}:{e}')
+                        break  # همین متد با خطای غیر امضا — برو بعدی
+                # positional
                 try:
-                    msg = await getattr(client, name)(**kwargs)
+                    msg = await fn(fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=cap)
                     return {
                         'ok': True,
                         'message_id': getattr(msg, 'message_id', None),
                         'date': getattr(msg, 'date', None),
-                        'method': name,
-                        'tried': methods_tried,
+                        'method': name + '_pos',
                     }
-                except TypeError as e:
-                    # signature alternate
-                    methods_tried.append(f'{name}:TypeError:{e}')
+                except Exception as e:
+                    methods_tried.append(f'{name}_pos:{type(e).__name__}:{e}')
+            return {'ok': False, 'error': 'highlevel_failed', 'tries': methods_tried[:12]}
+
+        out = ly._run(ly._with_client(_fn))
+        # بازیابی از تاریخچه اگر API خطا داد ولی پیام رفت
+        if isinstance(out, dict) and not out.get('ok'):
+            import time as _t2
+            _t2.sleep(2.0)
+            try:
+                hist = ly.load_channel_history(ref, limit=30)
+            except Exception:
+                hist = None
+            if isinstance(hist, dict) and hist.get('ok'):
+                key = f'{marker_base}-hl'
+                for post in list(hist.get('messages') or []):
+                    prev = str(post.get('preview') or '')
+                    if key not in prev:
+                        continue
                     try:
-                        msg = await getattr(client, name)(fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl]')
+                        mid = int(post.get('message_id') or 0)
+                        dt = int(post.get('date') or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if mid:
                         return {
                             'ok': True,
-                            'message_id': getattr(msg, 'message_id', None),
-                            'date': getattr(msg, 'date', None),
-                            'method': name + '_alt',
+                            'message_id': mid,
+                            'date': dt,
+                            'method': 'highlevel_recovered',
+                            'prev_error': out.get('error'),
                         }
-                    except Exception as e2:
-                        methods_tried.append(f'{name}_alt:{type(e2).__name__}:{e2}')
-                except Exception as e:
-                    methods_tried.append(f'{name}:{type(e).__name__}:{e}')
-            return {'ok': False, 'error': 'highlevel_failed', 'tries': methods_tried}
-
-        return ly._run(ly._with_client(_fn))
+        return out if isinstance(out, dict) else {'ok': False, 'error': str(out)[:200]}
 
     def t_client_list_methods():
         """فقط کشف متدهای messaging روی client — ارسال نیست."""
@@ -2043,6 +2081,51 @@ def test_linkyar_libraries_matrix(
             scheduled += 1
         except Exception:
             logger.exception('ly-lib schedule delete')
+
+    # جارو: هر پیام با marker این اجرا که هنوز مانده را حذف کن
+    try:
+        _time.sleep(1.0)
+        hist = ly.load_channel_history(ref, limit=40)
+        if isinstance(hist, dict) and hist.get('ok'):
+            for post in list(hist.get('messages') or []):
+                prev = ' '.join(str(post.get(x) or '') for x in ('preview', 'caption', 'text', 'file_name'))
+                if marker_base not in prev:
+                    continue
+                try:
+                    mid = int(post.get('message_id') or 0)
+                    mdate = int(post.get('date') or 0)
+                except (TypeError, ValueError):
+                    continue
+                if not mid:
+                    continue
+                # اگر همین mid قبلاً با موفقیت حذف شده، رد شو
+                already = any(
+                    d.get('ok') and d.get('message_id') == mid
+                    for d in trials
+                    if str(d.get('method') or '').startswith('delete_after:')
+                )
+                # delete trials don't store message_id of target - check method names only
+                started = _time.time()
+                row = {
+                    'lib': bound_lib,
+                    'method': f'sweep_delete:{mid}',
+                    'ok': False,
+                    'error': '',
+                    'message_id': mid,
+                    'message_date': mdate,
+                    'ms': 0,
+                    'detail': prev[:80],
+                }
+                try:
+                    r = ly.delete_message(ref, mid, message_date=mdate)
+                    row['ok'] = bool(isinstance(r, dict) and r.get('ok'))
+                    row['error'] = '' if row['ok'] else str((r or {}).get('error') or 'delete_failed')[:200]
+                except Exception as e:
+                    row['error'] = f'{type(e).__name__}:{e}'[:200]
+                row['ms'] = int((_time.time() - started) * 1000)
+                trials.append(row)
+    except Exception:
+        logger.exception('ly-lib sweep delete')
 
     # خلاصه
     lines = [
