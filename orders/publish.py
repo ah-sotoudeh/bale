@@ -1679,6 +1679,430 @@ def test_send_capability_matrix(
 
 
 
+
+def test_linkyar_libraries_matrix(
+    channel: Channel,
+    banner_id: int | None = None,
+    caption: str = '',
+    from_chat_id: str = '',
+    message_id: int = 0,
+    delete_after_seconds: int = 60,
+) -> Dict[str, Any]:
+    """ماتریس فقط حساب شخصی (لینک‌یار) — بدون هیچ فراخوانی بازو.
+
+    کتابخانه‌های موجود را در runtime کشف می‌کند و برای هر کدام
+    متدهای ارسال/حذف موجود را جداگانه تست می‌کند.
+    """
+    import time as _time
+    from orders.banner_media import stored_banner_file
+    from orders.banner_publish import linkbank_channel
+
+    ref = channel_ref(channel)
+    lb = linkbank_channel()
+    marker_base = f'ly-lib-{int(_time.time())}'
+    trials: List[Dict[str, Any]] = []
+    libs_info: Dict[str, Any] = {}
+
+    file_path = None
+    if banner_id:
+        try:
+            p = stored_banner_file(int(banner_id))
+            if p is not None and p.is_file():
+                file_path = str(p)
+        except Exception:
+            file_path = None
+
+    # منبع بنر فقط از تاریخچه لینک‌یار (نه بات)
+    src = _resolve_linkbank_forward_source(
+        str(from_chat_id or ''),
+        int(message_id or 0),
+        caption or '',
+        banner_id=banner_id,
+    )
+    ly_mid = int(src.get('ly_message_id') or 0)
+    ly_date = int(src.get('ly_message_date') or 0)
+    ly_peer = int(src.get('ly_peer_id') or 0)
+    cap = str(src.get('caption') or caption or '')[:400]
+    src_ref = str(src.get('source_channel_ref') or lb or '')
+
+    # ── کشف کتابخانه‌ها ─────────────────────────────────
+    def _probe_libs() -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        # baleclient
+        try:
+            import baleclient  # noqa: F401
+            out['baleclient'] = {
+                'available': True,
+                'version': getattr(baleclient, '__version__', None),
+                'file': getattr(baleclient, '__file__', None),
+            }
+        except Exception as e:
+            out['baleclient'] = {'available': False, 'error': f'{type(e).__name__}:{e}'}
+        # aiobale / aiobale-py
+        try:
+            import aiobale  # noqa: F401
+            out['aiobale'] = {
+                'available': True,
+                'version': getattr(aiobale, '__version__', None),
+                'file': getattr(aiobale, '__file__', None),
+            }
+        except Exception as e:
+            out['aiobale'] = {'available': False, 'error': f'{type(e).__name__}:{e}'}
+        # bale-sdk
+        try:
+            from bale import BaleClient, pb  # noqa: F401
+            out['bale-sdk'] = {
+                'available': True,
+                'has_BaleClient': True,
+                'pb_sample': [x for x in dir(pb) if 'Message' in x or 'Forward' in x or 'Delete' in x][:30],
+            }
+        except Exception as e:
+            out['bale-sdk'] = {'available': False, 'error': f'{type(e).__name__}:{e}'}
+        # balethon (اگر نصب باشد)
+        try:
+            import balethon  # noqa: F401
+            out['balethon'] = {
+                'available': True,
+                'version': getattr(balethon, '__version__', None),
+            }
+        except Exception as e:
+            out['balethon'] = {'available': False, 'error': f'{type(e).__name__}:{e}'}
+        # آنچه linkyar_client الان bind کرده
+        try:
+            from integrations import linkyar_client as ly_mod
+            out['linkyar_bound'] = {
+                'lib_name': getattr(ly_mod, '_BALE_LIB_NAME', None),
+                'token_present': bool(ly_mod.user_token()),
+                'me': ly_mod.get_me(),
+            }
+        except Exception as e:
+            out['linkyar_bound'] = {'error': f'{type(e).__name__}:{e}'}
+        return out
+
+    libs_info = _probe_libs()
+
+    def _trial(lib: str, method: str, fn) -> Dict[str, Any]:
+        started = _time.time()
+        row: Dict[str, Any] = {
+            'lib': lib,
+            'method': method,
+            'ok': False,
+            'error': '',
+            'message_id': None,
+            'message_date': None,
+            'ms': 0,
+            'detail': '',
+        }
+        try:
+            out = fn()
+            if not isinstance(out, dict):
+                out = {'ok': False, 'error': str(out)[:240]}
+            row['ok'] = bool(out.get('ok'))
+            row['error'] = str(out.get('error') or out.get('description') or '')[:300]
+            mid = out.get('message_id') or out.get('linkyar_rid') or out.get('rid')
+            if mid is None and isinstance(out.get('result'), dict):
+                mid = out['result'].get('message_id')
+            try:
+                row['message_id'] = int(mid) if mid is not None else None
+            except (TypeError, ValueError):
+                row['message_id'] = None
+            for dk in ('message_date', 'date', 'ly_message_date'):
+                if out.get(dk) is not None:
+                    try:
+                        row['message_date'] = int(out.get(dk))
+                        break
+                    except (TypeError, ValueError):
+                        pass
+            # detail keys useful for diagnosis
+            keep = {k: out.get(k) for k in (
+                'method', 'combo', 'lib', 'peer_id', 'tries', 'prev_error', 'hint', 'hist_error'
+            ) if k in out}
+            row['detail'] = str(keep)[:220]
+        except Exception as e:
+            logger.exception('ly-lib trial %s/%s', lib, method)
+            row['ok'] = False
+            row['error'] = f'{type(e).__name__}: {e}'[:300]
+        row['ms'] = int((_time.time() - started) * 1000)
+        trials.append(row)
+        return row
+
+    # ── لایهٔ مشترک linkyar_client (روی baleclient یا aiobale bind شده) ──
+    bound_lib = str((libs_info.get('linkyar_bound') or {}).get('lib_name') or 'linkyar_client')
+
+    def t_send_text():
+        return ly.send_text_to_channel(ref, f'[{marker_base}-text] send_text_to_channel')
+
+    def t_send_message_alias():
+        return ly.send_message(ref, f'[{marker_base}-alias] send_message')
+
+    def t_upload():
+        if not file_path:
+            return {'ok': False, 'error': 'no_local_file'}
+        return ly.send_local_file_to_channel(
+            ref, file_path, caption=f'[{marker_base}-upload] media', kind='photo'
+        )
+
+    def t_send_existing():
+        """ارسال همان file_id سرور بله (بدون دانلود) — از file_meta تاریخچه."""
+        if not hasattr(ly, 'send_existing_file_to_channel'):
+            return {'ok': False, 'error': 'method_missing'}
+        fm = src.get('file_meta') if isinstance(src.get('file_meta'), dict) else {}
+        if not fm or not fm.get('file_id') or not fm.get('file_access_hash'):
+            return {'ok': False, 'error': 'no_file_meta_from_linkbank_history'}
+        return ly.send_existing_file_to_channel(
+            ref,
+            file_id=fm.get('file_id'),
+            file_access_hash=int(fm.get('file_access_hash')),
+            file_size=int(fm.get('file_size') or 0),
+            file_name=str(fm.get('file_name') or 'banner.jpg'),
+            mime_type=str(fm.get('mime_type') or 'image/jpeg'),
+            caption=f'[{marker_base}-existing] ' + (cap[:80] if cap else 'media'),
+            kind=str(fm.get('kind') or 'photo'),
+        )
+
+    def t_forward_sdk_only():
+        """فوروارد فقط با حساب شخصی — بدون پل بازو."""
+        # اگر rid از تاریخچه لینک‌بانک داریم، مستقیم SDK
+        if ly_mid and ly_date:
+            try:
+                return ly._forward_via_bale_sdk_from_self_or_source(
+                    target_channel_ref=ref,
+                    source_channel_ref=src_ref or lb,
+                    caption_match=cap,
+                    bot_message_id=0,
+                    message_date=int(ly_date),
+                    dst_peer_id=None,
+                    prefer_self_inbox=False,
+                    me_id=None,
+                    force_rid=int(ly_mid),
+                    force_date=int(ly_date),
+                    force_seq=0,
+                )
+            except TypeError as e:
+                return {'ok': False, 'error': f'signature:{e}'}
+        # بدون mid: تلاش با caption match از لینک‌بانک (هنوز بدون بات)
+        try:
+            return ly._forward_via_bale_sdk(
+                target_channel_ref=ref,
+                source_channel_ref=src_ref or lb,
+                caption_match=cap[:40] if cap else marker_base,
+            )
+        except Exception as e:
+            return {'ok': False, 'error': f'{type(e).__name__}:{e}'}
+
+    def t_copy_no_bot():
+        """copy_message لینک‌یار بدون استفاده از بات."""
+        if not ly_mid:
+            return {'ok': False, 'error': 'no_ly_source_mid'}
+        try:
+            return ly.copy_message(
+                ref,
+                str(src_ref or lb),
+                int(ly_mid),
+                message_date=int(ly_date or 0),
+            )
+        except TypeError:
+            return ly.copy_message(ref, str(src_ref or lb), int(ly_mid))
+
+    def t_forward_message_alias():
+        if not ly_mid:
+            return {'ok': False, 'error': 'no_ly_source_mid'}
+        return ly.forward_message(ref, str(src_ref or lb), int(ly_mid), message_date=int(ly_date or 0))
+
+    def t_client_highlevel_photo():
+        """مستقیم client.send_photo از کتابخانهٔ bind شده."""
+        if not file_path:
+            return {'ok': False, 'error': 'no_local_file'}
+
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            from aiobale.types import FileInput
+            resolved = await ly._resolve_peer(client, ref)
+            if not resolved.get('ok'):
+                return {'ok': False, 'error': resolved.get('error')}
+            peer_id = int(resolved['peer_id'])
+            try:
+                await client.join_public_chat(peer_id)
+            except Exception:
+                pass
+            fin = FileInput(str(file_path))
+            methods_tried = []
+            # فقط متدهایی که واقعاً روی client هستند
+            for name, kwargs in (
+                ('send_photo', dict(file=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl-photo]')),
+                ('send_document', dict(file=fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl-doc]')),
+            ):
+                if not hasattr(client, name):
+                    methods_tried.append(f'{name}:missing')
+                    continue
+                try:
+                    msg = await getattr(client, name)(**kwargs)
+                    return {
+                        'ok': True,
+                        'message_id': getattr(msg, 'message_id', None),
+                        'date': getattr(msg, 'date', None),
+                        'method': name,
+                        'tried': methods_tried,
+                    }
+                except TypeError as e:
+                    # signature alternate
+                    methods_tried.append(f'{name}:TypeError:{e}')
+                    try:
+                        msg = await getattr(client, name)(fin, chat_id=peer_id, chat_type=ChatType.GROUP, caption=f'[{marker_base}-hl]')
+                        return {
+                            'ok': True,
+                            'message_id': getattr(msg, 'message_id', None),
+                            'date': getattr(msg, 'date', None),
+                            'method': name + '_alt',
+                        }
+                    except Exception as e2:
+                        methods_tried.append(f'{name}_alt:{type(e2).__name__}:{e2}')
+                except Exception as e:
+                    methods_tried.append(f'{name}:{type(e).__name__}:{e}')
+            return {'ok': False, 'error': 'highlevel_failed', 'tries': methods_tried}
+
+        return ly._run(ly._with_client(_fn))
+
+    def t_client_list_methods():
+        """فقط کشف متدهای messaging روی client — ارسال نیست."""
+        async def _fn(client):
+            names = sorted(
+                m for m in dir(client)
+                if not m.startswith('_') and any(
+                    k in m.lower()
+                    for k in ('send', 'forward', 'copy', 'delete', 'upload', 'history', 'message')
+                )
+            )
+            return {'ok': True, 'methods': names, 'message_id': None}
+        out = ly._run(ly._with_client(_fn))
+        if isinstance(out, dict) and out.get('methods'):
+            libs_info.setdefault('client_methods', out['methods'])
+        return out if isinstance(out, dict) else {'ok': False, 'error': str(out)}
+
+    # اجرا
+    _trial(bound_lib, 'discover_client_methods', t_client_list_methods)
+    _trial(bound_lib, 'send_text_to_channel', t_send_text)
+    _trial(bound_lib, 'send_message(alias)', t_send_message_alias)
+    _trial(bound_lib, 'send_local_file_to_channel', t_upload)
+    _trial(bound_lib, 'send_existing_file_to_channel', t_send_existing)
+    _trial(bound_lib, 'client.send_photo/document', t_client_highlevel_photo)
+    _trial('bale-sdk', 'ForwardMessages(source→dst)', t_forward_sdk_only)
+    _trial(bound_lib, 'copy_message', t_copy_no_bot)
+    _trial(bound_lib, 'forward_message(alias)', t_forward_message_alias)
+
+    # ── حذف برای هر ارسال موفق ───────────────────────────
+    delete_trials: List[Dict[str, Any]] = []
+    for row in list(trials):
+        if not row.get('ok') or not row.get('message_id'):
+            continue
+        if row['method'] == 'discover_client_methods':
+            continue
+        mid = int(row['message_id'])
+        mdate = int(row.get('message_date') or 0)
+
+        def _make_del(mid=mid, mdate=mdate, method=row['method']):
+            def _del():
+                r = ly.delete_message(ref, mid, message_date=mdate)
+                if isinstance(r, dict) and r.get('ok'):
+                    r['deleted_method'] = method
+                    r['deleted_mid'] = mid
+                return r if isinstance(r, dict) else {'ok': False, 'error': str(r)}
+            return _del
+
+        # کمی صبر تا پیام در سرور commit شود
+        _time.sleep(0.4)
+        drow = _trial(bound_lib, f'delete_after:{row["method"]}', _make_del())
+        delete_trials.append(drow)
+
+    # اگر delete_after_seconds و هنوز چیزی مانده — schedule
+    # (فقط برای مواردی که delete فوری شکست خورد)
+    scheduled = 0
+    mins = max(1, int(delete_after_seconds or 60) // 60)
+    for row in trials:
+        if not row.get('ok') or not row.get('message_id'):
+            continue
+        if row['method'] == 'discover_client_methods':
+            continue
+        # اگر حذف فوری برای این mid موفق بوده، schedule نکن
+        mid = row['message_id']
+        deleted = any(
+            d.get('ok') and f'delete_after:{row["method"]}' == d.get('method')
+            for d in delete_trials
+        )
+        if deleted:
+            continue
+        try:
+            _schedule_test_delete(
+                ref=ref,
+                mode=Channel.PUBLISH_LINKYAR,
+                bot_message_id=None,
+                ly_message_id=int(mid),
+                ly_message_date=int(row.get('message_date') or 0),
+                minutes=mins,
+            )
+            scheduled += 1
+        except Exception:
+            logger.exception('ly-lib schedule delete')
+
+    # خلاصه
+    lines = [
+        f'ماتریس فقط لینک‌یار | کانال: {channel.name} ({ref})',
+        f'کتابخانهٔ bind: {bound_lib} | فایل محلی: {"بله" if file_path else "خیر"}',
+        f'منبع تاریخچه لینک‌بانک: peer={ly_peer} mid={ly_mid} date={ly_date}',
+        '— کتابخانه‌ها —',
+    ]
+    for name, info in libs_info.items():
+        if name in ('client_methods',):
+            continue
+        if not isinstance(info, dict):
+            continue
+        if info.get('available') is True:
+            lines.append(f'✓ {name} available {info.get("version") or ""}')
+        elif info.get('available') is False:
+            lines.append(f'✗ {name} {info.get("error") or "missing"}')
+        elif name == 'linkyar_bound':
+            lines.append(f'· bound={info.get("lib_name")} token={info.get("token_present")} me={info.get("me")}')
+    if libs_info.get('client_methods'):
+        lines.append('· client methods: ' + ', '.join(libs_info['client_methods'][:25]))
+    lines.append('— ارسال —')
+    for t in trials:
+        if str(t['method']).startswith('delete_after:'):
+            continue
+        if t['method'] == 'discover_client_methods':
+            continue
+        mark = '✓' if t['ok'] else '✗'
+        extra = t['error'] or (f'mid={t["message_id"]}' if t['message_id'] else 'ok')
+        lines.append(f'{mark} [{t["lib"]}] {t["method"]} ({t["ms"]}ms) {extra}')
+    lines.append('— حذف —')
+    for t in trials:
+        if not str(t['method']).startswith('delete_after:'):
+            continue
+        mark = '✓' if t['ok'] else '✗'
+        extra = t['error'] or 'deleted'
+        lines.append(f'{mark} [{t["lib"]}] {t["method"]} ({t["ms"]}ms) {extra}')
+    if scheduled:
+        lines.append(f'حذف زمان‌بندی‌شده برای {scheduled} پیام (≈{mins} دقیقه)')
+    send_ok = [t for t in trials if t['ok'] and not str(t['method']).startswith('delete') and t['method'] != 'discover_client_methods']
+    lines.append(f'جمع ارسال موفق: {len(send_ok)} از متدهای تست‌شده')
+
+    return {
+        'ok': True,
+        'matrix': True,
+        'linkyar_only': True,
+        'no_bot': True,
+        'probes': {
+            'channel_ref': ref,
+            'channel_name': channel.name,
+            'ly_source': {'peer': ly_peer, 'mid': ly_mid, 'date': ly_date, 'src_ref': src_ref},
+            'has_local_file': bool(file_path),
+            'libs': libs_info,
+        },
+        'trials': trials,
+        'message': '\n'.join(lines),
+    }
+
+
+
 def _pending_deletes_path():
     from pathlib import Path
     from django.conf import settings

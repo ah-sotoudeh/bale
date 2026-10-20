@@ -2085,6 +2085,74 @@ def api_operator_test_publish(request: HttpRequest) -> JsonResponse:
 
 
 
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_test_linkyar_libs(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: ماتریس فقط لینک‌یار — همه کتابخانه‌ها و متدهای ارسال/حذف (بدون بازو)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
+    body = _json_body(request) or {}
+    ch_raw = body.get('channel') or body.get('channel_id') or body.get('link') or ''
+    ch = None
+    if str(ch_raw).isdigit():
+        ch = Channel.objects.filter(id=int(ch_raw)).first()
+    if ch is None:
+        key = _channel_ref_key(str(ch_raw))
+        if key:
+            ch = (
+                Channel.objects.filter(link__icontains=key).order_by('-id').first()
+                or Channel.objects.filter(name__iexact=key).first()
+            )
+    if ch is None:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
+
+    banner_id = body.get('banner_id')
+    caption = str(body.get('caption') or '')
+    from_chat = str(body.get('from_chat_id') or '')
+    msg_id = body.get('message_id') or 0
+    try:
+        bid = int(banner_id) if banner_id not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        bid = None
+    if bid:
+        from orders.models import CustomerBanner
+        bn = CustomerBanner.objects.filter(id=bid).first()
+        if bn:
+            caption = caption or (bn.caption or '')
+            if bn.linkbank_message_id:
+                from_chat = str(bn.linkbank_chat_id or from_chat)
+                msg_id = bn.linkbank_message_id
+    try:
+        msg_id_int = int(msg_id or 0)
+    except (TypeError, ValueError):
+        msg_id_int = 0
+
+    from orders.publish import test_linkyar_libraries_matrix
+    try:
+        result = test_linkyar_libraries_matrix(
+            ch,
+            banner_id=bid,
+            caption=caption,
+            from_chat_id=from_chat,
+            message_id=msg_id_int,
+            delete_after_seconds=60,
+        )
+    except Exception as exc:
+        logger.exception('test_linkyar_libs')
+        return JsonResponse({
+            'ok': False,
+            'error': 'server',
+            'message': 'ماتریس لینک‌یار اجرا نشد: ' + type(exc).__name__,
+            'detail': str(exc)[:400],
+        }, status=200)
+    return JsonResponse(result if isinstance(result, dict) else {'ok': False, 'error': str(result)})
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_test_matrix(request: HttpRequest) -> JsonResponse:
