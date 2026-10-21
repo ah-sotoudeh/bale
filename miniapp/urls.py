@@ -71,6 +71,8 @@ urlpatterns = [
     path('api/operator/assignments', api.api_operator_assignments),
     path('api/operator/unassign', api.api_operator_unassign),
     path('api/operator/test-publish', api.api_operator_test_publish),
+    path('api/operator/test-linkyar-fwd', api.api_operator_test_linkyar_fwd),
+    path('api/operator/validate-banner', api.api_operator_validate_banner),
     path('api/operator/test-matrix', api.api_operator_test_matrix),
     path('api/operator/test-linkyar-libs', api.api_operator_test_linkyar_libs),
     path('api/operator/test-banners', api.api_operator_test_banners),

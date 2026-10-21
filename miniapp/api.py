@@ -2242,6 +2242,74 @@ def api_operator_test_matrix(request: HttpRequest) -> JsonResponse:
     return JsonResponse(result if isinstance(result, dict) else {'ok': False, 'error': str(result)})
 
 
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_operator_test_linkyar_fwd(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: اعتبارسنجی منبع بنر + فوروارد/حذف لینک‌یار (بدون آپلود، بدون جارو)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
+    body = _json_body(request) or {}
+    ch_raw = body.get('channel') or body.get('channel_id') or ''
+    ch = None
+    if str(ch_raw).isdigit():
+        ch = Channel.objects.filter(id=int(ch_raw)).first()
+    if ch is None:
+        key = _channel_ref_key(str(ch_raw))
+        if key:
+            ch = Channel.objects.filter(link__icontains=key).order_by('-id').first()
+    if ch is None:
+        return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
+    try:
+        banner_id = int(body.get('banner_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'بنر را انتخاب کنید.'}, status=200)
+    do_delete = body.get('do_delete', True)
+    if isinstance(do_delete, str):
+        do_delete = do_delete.lower() not in ('0', 'false', 'no')
+    from orders.publish import test_linkyar_forward_copy_delete
+    try:
+        result = test_linkyar_forward_copy_delete(ch, banner_id, do_delete=bool(do_delete))
+    except Exception as exc:
+        logger.exception('test_linkyar_fwd')
+        return JsonResponse({
+            'ok': False, 'error': 'server',
+            'message': 'تست فوروارد اجرا نشد: ' + type(exc).__name__,
+            'detail': str(exc)[:300],
+        }, status=200)
+    return JsonResponse(result if isinstance(result, dict) else {'ok': False, 'error': str(result)})
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def api_operator_validate_banner(request: HttpRequest) -> JsonResponse:
+    """پشتیبان: فقط چک دادهٔ بنر در برابر تاریخچهٔ زندهٔ لینک‌بانک."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    if not ws.is_operator(user.bale_user_id or ''):
+        return JsonResponse({'ok': False, 'error': 'forbidden', 'message': 'فقط پشتیبان.'}, status=200)
+    body = _json_body(request) or {}
+    if request.method == 'GET':
+        body = {**body, **{k: request.GET.get(k) for k in request.GET}}
+    try:
+        banner_id = int(body.get('banner_id') or request.GET.get('banner_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'banner_id لازم است.'}, status=200)
+    from orders.publish import validate_banner_forward_source
+    try:
+        result = validate_banner_forward_source(banner_id)
+    except Exception as exc:
+        logger.exception('validate_banner')
+        return JsonResponse({'ok': False, 'error': 'server', 'message': str(exc)[:200]}, status=200)
+    return JsonResponse(result if isinstance(result, dict) else {'ok': False, 'error': str(result)})
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_test_delete(request: HttpRequest) -> JsonResponse:

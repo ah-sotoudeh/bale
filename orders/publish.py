@@ -2468,6 +2468,363 @@ def test_linkyar_libraries_matrix(
 
 
 
+
+def validate_banner_forward_source(banner_id: int) -> Dict[str, Any]:
+    """مقایسهٔ فیلدهای ذخیره‌شدهٔ بنر با تاریخچهٔ زندهٔ لینک‌بانک.
+
+    اگر rid/date ذخیره‌شده غلط یا خالی باشد، فوروارد با دادهٔ DB شکست می‌خورد
+    حتی وقتی API فوروارد سالم است.
+    """
+    from orders.models import CustomerBanner
+    from orders.banner_publish import linkbank_channel
+
+    bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
+    if not bn:
+        return {'ok': False, 'error': 'banner_not_found'}
+
+    lb = linkbank_channel()
+    db = {
+        'banner_id': bn.id,
+        'title': (bn.caption or '')[:80],
+        'from_linkbank': bool(bn.from_linkbank),
+        'linkbank_chat_id': str(bn.linkbank_chat_id or ''),
+        'linkbank_message_id': str(bn.linkbank_message_id or ''),  # اغلب mid بات
+        'linkyar_rid': str(getattr(bn, 'linkyar_rid', None) or ''),
+        'linkyar_date': str(getattr(bn, 'linkyar_date', None) or ''),
+        'linkyar_seq': str(getattr(bn, 'linkyar_seq', None) or ''),
+        'caption_head': (bn.caption or '')[:40],
+    }
+    warnings: List[str] = []
+    if not db['from_linkbank']:
+        warnings.append('from_linkbank=False — بنر در لینک‌بانک علامت نخورده')
+    if not db['linkyar_rid'] or not db['linkyar_date']:
+        warnings.append('linkyar_rid/date خالی است — فوروارد لینک‌یار به mid بات تکیه می‌کند که معمولاً غلط است')
+    if db['linkbank_message_id'] and db['linkyar_rid'] and db['linkbank_message_id'] == db['linkyar_rid']:
+        warnings.append('linkbank_message_id با linkyar_rid یکی است (غیرعادی)')
+
+    hist = ly.load_channel_history(db['linkbank_chat_id'] or lb, limit=60)
+    live: Dict[str, Any] = {
+        'ok': bool(isinstance(hist, dict) and hist.get('ok')),
+        'error': (hist or {}).get('error') if isinstance(hist, dict) else 'no_hist',
+        'peer_id': (hist or {}).get('peer_id') if isinstance(hist, dict) else None,
+        'count': (hist or {}).get('count') if isinstance(hist, dict) else 0,
+        'messages_sample': [],
+    }
+    posts = list((hist or {}).get('messages') or []) if isinstance(hist, dict) else []
+    for p in posts[:8]:
+        live['messages_sample'].append({
+            'mid': p.get('message_id'),
+            'date': p.get('date'),
+            'kind': p.get('kind'),
+            'preview': str(p.get('preview') or '')[:50],
+        })
+
+    # امتیاز تطبیق
+    best = None
+    best_score = -1
+    for p in posts:
+        score = 0
+        reasons = []
+        pmid = str(p.get('message_id') or '')
+        pdate = str(p.get('date') or '')
+        prev = str(p.get('preview') or '')
+        if db['linkyar_rid'] and pmid == db['linkyar_rid']:
+            score += 100
+            reasons.append('rid_match')
+        if db['linkyar_date'] and pdate == db['linkyar_date']:
+            score += 40
+            reasons.append('date_match')
+        if db['linkbank_message_id'] and pmid == db['linkbank_message_id']:
+            score += 20
+            reasons.append('bot_mid_equals_internal')
+        cap = db['caption_head']
+        if cap and len(cap) >= 8 and cap in prev:
+            score += 30
+            reasons.append('caption_match')
+        if score > best_score:
+            best_score = score
+            best = {
+                'message_id': p.get('message_id'),
+                'date': p.get('date'),
+                'kind': p.get('kind'),
+                'preview': prev[:60],
+                'score': score,
+                'reasons': reasons,
+                'file_id': p.get('file_id'),
+                'file_access_hash': p.get('file_access_hash'),
+            }
+
+    usable = bool(best and best_score >= 30)
+    if best and best_score < 30:
+        warnings.append(f'بهترین تطبیق ضعیف است (score={best_score}) — ممکن است پیام اشتباه فوروارد شود')
+    if not posts:
+        warnings.append('تاریخچهٔ لینک‌بانک خالی یا خوانده نشد')
+
+    return {
+        'ok': True,
+        'db': db,
+        'live': live,
+        'best_match': best,
+        'usable_for_forward': usable,
+        'warnings': warnings,
+        'hint': (
+            'برای فوروارد از best_match.message_id + date استفاده شود، نه لزوماً linkbank_message_id بات.'
+            if usable else
+            'منبع زنده پیدا نشد — بنر را دوباره در لینک‌بانک منتشر کنید تا rid ذخیره شود.'
+        ),
+    }
+
+
+def test_linkyar_forward_copy_delete(
+    channel: Channel,
+    banner_id: int,
+    *,
+    do_delete: bool = True,
+) -> Dict[str, Any]:
+    """فقط فوروارد / کپی / حذف — بدون آپلود، بدون جارو.
+
+    ۱) اعتبارسنجی دادهٔ بنر در DB در برابر تاریخچهٔ زنده
+    ۲) فوروارد با Message واقعی از load_history (امضای baleclient)
+    ۳) در صورت موفقیت، حذف همان پیام فورواردشده
+    """
+    import time as _time
+    from orders.banner_publish import linkbank_channel
+
+    ref = channel_ref(channel)
+    marker = f'ly-fwdchk-{int(_time.time())}'  # فقط برای لاگ
+    validation = validate_banner_forward_source(int(banner_id))
+    lines = [
+        f'تست فوروارد لینک‌یار | کانال: {channel.name} ({ref})',
+        f'بنر #{banner_id}',
+        '— اعتبارسنجی منبع —',
+    ]
+    db = validation.get('db') or {}
+    lines.append(
+        f"DB: from_lb={db.get('from_linkbank')} chat={db.get('linkbank_chat_id') or '—'} "
+        f"bot_mid={db.get('linkbank_message_id') or '—'} "
+        f"ly_rid={db.get('linkyar_rid') or '—'} ly_date={db.get('linkyar_date') or '—'}"
+    )
+    for w in validation.get('warnings') or []:
+        lines.append(f'⚠ {w}')
+    best = validation.get('best_match')
+    if best:
+        lines.append(
+            f"زنده: mid={best.get('message_id')} date={best.get('date')} "
+            f"score={best.get('score')} reasons={best.get('reasons')} "
+            f"prev={best.get('preview')!r}"
+        )
+    else:
+        lines.append('زنده: هیچ پیامی در تاریخچهٔ لینک‌بانک تطبیق نشد')
+    lines.append(validation.get('hint') or '')
+
+    trials: List[Dict[str, Any]] = []
+
+    def _trial(name: str, fn) -> Dict[str, Any]:
+        t0 = _time.time()
+        row: Dict[str, Any] = {
+            'method': name, 'ok': False, 'error': '', 'message_id': None,
+            'message_date': None, 'ms': 0, 'detail': '',
+        }
+        try:
+            out = fn()
+            if not isinstance(out, dict):
+                out = {'ok': False, 'error': str(out)[:200]}
+            row['ok'] = bool(out.get('ok'))
+            row['error'] = str(out.get('error') or '')[:300]
+            mid = out.get('message_id')
+            try:
+                row['message_id'] = int(mid) if mid is not None else None
+            except (TypeError, ValueError):
+                row['message_id'] = None
+            if out.get('date') is not None:
+                try:
+                    row['message_date'] = int(out.get('date'))
+                except (TypeError, ValueError):
+                    pass
+            row['detail'] = str({k: out.get(k) for k in ('method', 'tries', 'combo', 'note') if k in out})[:200]
+        except Exception as e:
+            logger.exception('fwdchk %s', name)
+            row['error'] = f'{type(e).__name__}:{e}'[:300]
+        row['ms'] = int((_time.time() - t0) * 1000)
+        trials.append(row)
+        return row
+
+    if not validation.get('usable_for_forward') or not best:
+        lines.append('— ارسال —')
+        lines.append('✗ فوروارد انجام نشد: منبع بنر قابل‌اعتماد نیست (اول داده را درست کنید)')
+        return {
+            'ok': False,
+            'validation': validation,
+            'trials': trials,
+            'message': '\n'.join(lines),
+            'error': 'bad_banner_source',
+        }
+
+    src_ref = db.get('linkbank_chat_id') or linkbank_channel()
+    want_mid = int(best['message_id'])
+    want_date = int(best.get('date') or 0)
+
+    def t_native_forward():
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            src_res = await ly._resolve_peer(client, src_ref)
+            dst_res = await ly._resolve_peer(client, ref)
+            if not src_res.get('ok'):
+                return {'ok': False, 'error': f"src:{src_res.get('error')}"}
+            if not dst_res.get('ok'):
+                return {'ok': False, 'error': f"dst:{dst_res.get('error')}"}
+            src_id = int(src_res['peer_id'])
+            dst_id = int(dst_res['peer_id'])
+            tries = []
+            hist_msgs = []
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    hist_msgs = await client.load_history(chat_id=src_id, chat_type=ctype, limit=50)
+                    if hist_msgs:
+                        tries.append(f'hist/{ctype}:n={len(hist_msgs)}')
+                        break
+                except Exception as e:
+                    tries.append(f'hist/{ctype}:{type(e).__name__}:{e}')
+            if not hist_msgs:
+                return {'ok': False, 'error': 'source_history_empty', 'tries': tries}
+            target = None
+            for m in hist_msgs:
+                try:
+                    if int(getattr(m, 'message_id', 0) or 0) == want_mid:
+                        target = m
+                        break
+                except Exception:
+                    continue
+            if target is None:
+                return {
+                    'ok': False,
+                    'error': f'source_mid_not_in_history want={want_mid}',
+                    'tries': tries,
+                    'available': [getattr(m, 'message_id', None) for m in hist_msgs[:10]],
+                }
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    await client.forward_message(message=target, chat_id=dst_id, chat_type=ctype)
+                    # verify: history dst
+                    import asyncio as _aio
+                    await _aio.sleep(1.2)
+                    after = []
+                    try:
+                        after = await client.load_history(chat_id=dst_id, chat_type=ctype, limit=12)
+                    except Exception as e:
+                        tries.append(f'verify/{ctype}:{type(e).__name__}:{e}')
+                    # pick newest
+                    new_mid = None
+                    new_date = None
+                    if after:
+                        top = after[0]
+                        new_mid = getattr(top, 'message_id', None)
+                        new_date = getattr(top, 'date', None)
+                        if hasattr(new_date, 'value'):
+                            new_date = new_date.value
+                    return {
+                        'ok': True,
+                        'method': f'forward/{ctype}',
+                        'message_id': int(new_mid) if new_mid is not None else None,
+                        'date': int(new_date) if new_date is not None else None,
+                        'src_mid': want_mid,
+                        'tries': tries,
+                    }
+                except Exception as e:
+                    tries.append(f'forward/{ctype}:{type(e).__name__}:{e}')
+            return {'ok': False, 'error': 'forward_all_types_failed', 'tries': tries}
+
+        return ly._run(ly._with_client(_fn))
+
+    def t_forward_messages_list():
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            src_res = await ly._resolve_peer(client, src_ref)
+            dst_res = await ly._resolve_peer(client, ref)
+            if not src_res.get('ok') or not dst_res.get('ok'):
+                return {'ok': False, 'error': 'resolve_failed'}
+            src_id = int(src_res['peer_id'])
+            dst_id = int(dst_res['peer_id'])
+            msgs = []
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    msgs = await client.load_history(chat_id=src_id, chat_type=ctype, limit=50)
+                    if msgs:
+                        break
+                except Exception:
+                    continue
+            target = None
+            for m in msgs:
+                try:
+                    if int(getattr(m, 'message_id', 0) or 0) == want_mid:
+                        target = m
+                        break
+                except Exception:
+                    continue
+            if target is None:
+                return {'ok': False, 'error': 'mid_not_found'}
+            last = ''
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    await client.forward_messages(messages=[target], chat_id=dst_id, chat_type=ctype)
+                    return {'ok': True, 'method': f'forward_messages/{ctype}', 'message_id': want_mid}
+                except Exception as e:
+                    last = f'{ctype}:{type(e).__name__}:{e}'
+            return {'ok': False, 'error': last}
+
+        return ly._run(ly._with_client(_fn))
+
+    lines.append('— فوروارد / کپی —')
+    r1 = _trial('native forward_message', t_native_forward)
+    lines.append(('✓' if r1['ok'] else '✗') + f" forward_message ({r1['ms']}ms) " + (r1['error'] or f"mid={r1['message_id']}"))
+    r2 = _trial('native forward_messages', t_forward_messages_list)
+    lines.append(('✓' if r2['ok'] else '✗') + f" forward_messages ({r2['ms']}ms) " + (r2['error'] or f"mid={r2['message_id']}"))
+
+    # حذف فقط mid فورواردشده (نه جارو)
+    lines.append('— حذف (فقط پیام فوروارد این تست) —')
+    deleted_any = False
+    if do_delete:
+        for row in (r1, r2):
+            if not row.get('ok') or not row.get('message_id'):
+                continue
+            mid = int(row['message_id'])
+            mdate = int(row.get('message_date') or 0)
+            # اگر mid همان src باشد، حذف نکن — اشتباه است
+            if mid == want_mid:
+                lines.append(f'⊘ حذف نشد mid={mid} (همان مبدأ است، فوروارد mid جدید نداد)')
+                continue
+            t0 = _time.time()
+            try:
+                dr = ly.delete_message(ref, mid, message_date=mdate)
+                ok = bool(isinstance(dr, dict) and dr.get('ok'))
+                err = '' if ok else str((dr or {}).get('error') or 'fail')[:160]
+            except Exception as e:
+                ok = False
+                err = f'{type(e).__name__}:{e}'[:160]
+            ms = int((_time.time() - t0) * 1000)
+            trials.append({
+                'method': f'delete:{mid}', 'ok': ok, 'error': err,
+                'message_id': mid, 'message_date': mdate, 'ms': ms, 'detail': '',
+            })
+            lines.append(('✓' if ok else '✗') + f' delete mid={mid} ({ms}ms) {err}')
+            if ok:
+                deleted_any = True
+    if not deleted_any and not any(t.get('ok') for t in trials if t['method'].startswith('native')):
+        lines.append('حذفی انجام نشد (فوروارد موفق نبود یا mid جدید نداشت)')
+
+    lines.append(f'marker={marker} (فقط لاگ — جارو غیرفعال)')
+    any_fwd = any(t.get('ok') for t in trials if 'forward' in t['method'])
+    return {
+        'ok': any_fwd,
+        'validation': validation,
+        'trials': trials,
+        'message': '\n'.join(lines),
+        'source_mid': want_mid,
+        'source_date': want_date,
+    }
+
+
+
 def _pending_deletes_path():
     from pathlib import Path
     from django.conf import settings
