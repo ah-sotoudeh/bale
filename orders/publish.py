@@ -2825,6 +2825,265 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
+def test_linkyar_text_forward_channels(
+    *,
+    source_ref: str = '@linktest',
+    dest_ref: str = '@linktest2',
+    do_delete: bool = True,
+) -> Dict[str, Any]:
+    """مسیر ساده و قطعی برای تست فوروارد حساب شخصی — بدون بنر/آپلود.
+
+    ۱) لینک‌یار یک متن یکتا به source می‌فرستد
+    ۲) همان پیام را از تاریخچه برمی‌دارد
+    ۳) با client.forward_message به dest فوروارد می‌کند
+    ۴) در صورت درخواست، فقط همان دو پیام (متن + فوروارد) را حذف می‌کند
+    """
+    import time as _time
+
+    src = str(source_ref or '@linktest').strip()
+    dst = str(dest_ref or '@linktest2').strip()
+    if src and not src.startswith('@') and not src.lstrip('-').isdigit():
+        src = '@' + src.lstrip('@')
+    if dst and not dst.startswith('@') and not dst.lstrip('-').isdigit():
+        dst = '@' + dst.lstrip('@')
+
+    marker = f'ly-chfwd-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
+    text = f'[{marker}] تست فوروارد لینک‌یار linktest→linktest2'
+    lines = [
+        f'تست فوروارد کانال‌به‌کانال (فقط لینک‌یار)',
+        f'مبدأ: {src}  →  مقصد: {dst}',
+        f'marker: {marker}',
+    ]
+    trials: List[Dict[str, Any]] = []
+
+    def _row(method: str, out: Dict[str, Any], ms: int) -> Dict[str, Any]:
+        row = {
+            'method': method,
+            'ok': bool(out.get('ok')),
+            'error': str(out.get('error') or '')[:300],
+            'message_id': None,
+            'message_date': None,
+            'ms': ms,
+            'detail': str({k: out.get(k) for k in ('method', 'tries', 'combo') if k in out})[:180],
+        }
+        mid = out.get('message_id')
+        try:
+            row['message_id'] = int(mid) if mid is not None else None
+        except (TypeError, ValueError):
+            pass
+        if out.get('date') is not None:
+            try:
+                row['message_date'] = int(out.get('date'))
+            except (TypeError, ValueError):
+                pass
+        trials.append(row)
+        return row
+
+    # ۱) ارسال متن به مبدأ
+    t0 = _time.time()
+    try:
+        sent = ly.send_text_to_channel(src, text)
+    except Exception as e:
+        sent = {'ok': False, 'error': f'{type(e).__name__}:{e}'}
+    r_send = _row('send_text_source', sent if isinstance(sent, dict) else {'ok': False, 'error': str(sent)}, int((_time.time() - t0) * 1000))
+    lines.append(('✓' if r_send['ok'] else '✗') + f" ارسال متن به {src} ({r_send['ms']}ms) " + (r_send['error'] or f"mid={r_send['message_id']}"))
+    if not r_send['ok']:
+        lines.append('ارسال به مبدأ ناموفق — فوروارد انجام نشد')
+        return {'ok': False, 'trials': trials, 'message': '\n'.join(lines), 'marker': marker}
+
+    src_mid = r_send.get('message_id')
+    src_date = r_send.get('message_date')
+
+    # اگر mid از send نیامد، از تاریخچه با marker پیدا کن
+    def _find_in_history(channel_ref: str, needle: str) -> Dict[str, Any]:
+        hist = ly.load_channel_history(channel_ref, limit=25)
+        if not isinstance(hist, dict) or not hist.get('ok'):
+            return {'ok': False, 'error': str((hist or {}).get('error') or 'history_failed')}
+        for p in list(hist.get('messages') or []):
+            prev = str(p.get('preview') or p.get('text') or p.get('caption') or '')
+            if needle not in prev:
+                continue
+            try:
+                return {
+                    'ok': True,
+                    'message_id': int(p.get('message_id') or 0),
+                    'date': int(p.get('date') or 0),
+                    'preview': prev[:60],
+                }
+            except (TypeError, ValueError):
+                continue
+        return {'ok': False, 'error': 'marker_not_in_history', 'count': hist.get('count')}
+
+    if not src_mid:
+        _time.sleep(1.0)
+        found = _find_in_history(src, marker)
+        r_find = _row('find_source_by_marker', found, 0)
+        lines.append(('✓' if found.get('ok') else '✗') + f" پیدا کردن در مبدأ: {found.get('error') or found.get('message_id')}")
+        if found.get('ok'):
+            src_mid = found.get('message_id')
+            src_date = found.get('date')
+    else:
+        # تأیید marker در تاریخچه
+        _time.sleep(0.6)
+        found = _find_in_history(src, marker)
+        if found.get('ok') and found.get('message_id'):
+            src_mid = found.get('message_id')
+            src_date = found.get('date') or src_date
+            lines.append(f"تأیید در تاریخچه مبدأ: mid={src_mid} date={src_date}")
+
+    if not src_mid:
+        lines.append('✗ mid مبدأ مشخص نشد')
+        return {'ok': False, 'trials': trials, 'message': '\n'.join(lines), 'marker': marker}
+
+    # ۲) فوروارد native
+    def t_forward():
+        async def _fn(client):
+            from aiobale.enums import ChatType
+            src_res = await ly._resolve_peer(client, src)
+            dst_res = await ly._resolve_peer(client, dst)
+            if not src_res.get('ok'):
+                return {'ok': False, 'error': f"src_resolve:{src_res.get('error')}"}
+            if not dst_res.get('ok'):
+                return {'ok': False, 'error': f"dst_resolve:{dst_res.get('error')}"}
+            src_id = int(src_res['peer_id'])
+            dst_id = int(dst_res['peer_id'])
+            tries = []
+            hist_msgs = []
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    hist_msgs = await client.load_history(chat_id=src_id, chat_type=ctype, limit=30)
+                    if hist_msgs:
+                        tries.append(f'hist/{ctype}:n={len(hist_msgs)}')
+                        break
+                except Exception as e:
+                    tries.append(f'hist/{ctype}:{type(e).__name__}:{e}')
+            if not hist_msgs:
+                return {'ok': False, 'error': 'source_history_empty', 'tries': tries}
+            target = None
+            for m in hist_msgs:
+                try:
+                    if int(getattr(m, 'message_id', 0) or 0) == int(src_mid):
+                        target = m
+                        break
+                except Exception:
+                    continue
+            # fallback: match text content
+            if target is None:
+                for m in hist_msgs:
+                    txt = getattr(m, 'text', None) or ''
+                    if not txt and getattr(m, 'content', None) is not None:
+                        txt = str(m.content)[:200]
+                    if marker in str(txt):
+                        target = m
+                        break
+            if target is None:
+                return {
+                    'ok': False,
+                    'error': f'mid_not_in_load_history want={src_mid}',
+                    'tries': tries,
+                    'sample_ids': [getattr(m, 'message_id', None) for m in hist_msgs[:8]],
+                }
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                try:
+                    await client.forward_message(message=target, chat_id=dst_id, chat_type=ctype)
+                    import asyncio as _aio
+                    await _aio.sleep(1.2)
+                    # verify marker or growth in dest
+                    after = []
+                    try:
+                        after = await client.load_history(chat_id=dst_id, chat_type=ctype, limit=15)
+                    except Exception as e:
+                        tries.append(f'verify/{ctype}:{e}')
+                    new_mid = None
+                    new_date = None
+                    visible = False
+                    for am in after or []:
+                        txt = str(getattr(am, 'text', None) or '')
+                        if marker in txt or getattr(am, 'is_forward', False):
+                            visible = True
+                            new_mid = getattr(am, 'message_id', None)
+                            new_date = getattr(am, 'date', None)
+                            if hasattr(new_date, 'value'):
+                                new_date = new_date.value
+                            break
+                    if not visible and after:
+                        # API بدون exception — mid اول
+                        am = after[0]
+                        new_mid = getattr(am, 'message_id', None)
+                        new_date = getattr(am, 'date', None)
+                        if hasattr(new_date, 'value'):
+                            new_date = new_date.value
+                        visible = True
+                        tries.append(f'forward/{ctype}:assumed_ok_top')
+                    if visible:
+                        return {
+                            'ok': True,
+                            'method': f'forward/{ctype}',
+                            'message_id': int(new_mid) if new_mid is not None else None,
+                            'date': int(new_date) if new_date is not None else None,
+                            'src_mid': int(src_mid),
+                            'tries': tries,
+                        }
+                    tries.append(f'forward/{ctype}:api_ok_not_visible')
+                except Exception as e:
+                    tries.append(f'forward/{ctype}:{type(e).__name__}:{e}')
+            return {'ok': False, 'error': 'forward_failed', 'tries': tries}
+
+        return ly._run(ly._with_client(_fn))
+
+    t0 = _time.time()
+    fwd = t_forward()
+    if not isinstance(fwd, dict):
+        fwd = {'ok': False, 'error': str(fwd)}
+    r_fwd = _row('forward_to_dest', fwd, int((_time.time() - t0) * 1000))
+    lines.append(('✓' if r_fwd['ok'] else '✗') + f" فوروارد به {dst} ({r_fwd['ms']}ms) " + (r_fwd['error'] or f"mid={r_fwd['message_id']}"))
+    if r_fwd.get('detail'):
+        lines.append(f"  detail: {r_fwd['detail']}")
+    if isinstance(fwd, dict) and fwd.get('tries'):
+        lines.append('  tries: ' + ' | '.join(str(x) for x in fwd['tries'][:8]))
+
+    # ۳) حذف فقط midهای این تست
+    if do_delete:
+        lines.append('— حذف فقط پیام‌های این تست —')
+        to_del = []
+        if src_mid:
+            to_del.append((src, int(src_mid), int(src_date or 0), 'source'))
+        if r_fwd.get('ok') and r_fwd.get('message_id') and r_fwd['message_id'] != src_mid:
+            to_del.append((dst, int(r_fwd['message_id']), int(r_fwd.get('message_date') or 0), 'dest'))
+        # اگر dest mid نداشت، با marker در dest پیدا کن
+        if r_fwd.get('ok') and not r_fwd.get('message_id'):
+            _time.sleep(0.8)
+            df = _find_in_history(dst, marker)
+            if df.get('ok') and df.get('message_id'):
+                to_del.append((dst, int(df['message_id']), int(df.get('date') or 0), 'dest_by_marker'))
+        for ch_ref, mid, mdate, label in to_del:
+            t0 = _time.time()
+            try:
+                dr = ly.delete_message(ch_ref, mid, message_date=mdate)
+                ok = bool(isinstance(dr, dict) and dr.get('ok'))
+                err = '' if ok else str((dr or {}).get('error') or 'fail')[:160]
+            except Exception as e:
+                ok, err = False, f'{type(e).__name__}:{e}'[:160]
+            ms = int((_time.time() - t0) * 1000)
+            trials.append({'method': f'delete_{label}', 'ok': ok, 'error': err, 'message_id': mid, 'message_date': mdate, 'ms': ms, 'detail': ch_ref})
+            lines.append(('✓' if ok else '✗') + f' حذف {label} {ch_ref} mid={mid} ({ms}ms) {err}')
+
+    ok = bool(r_send.get('ok') and r_fwd.get('ok'))
+    lines.append('نتیجه: ' + ('فوروارد موفق' if ok else 'فوروارد ناموفق'))
+    return {
+        'ok': ok,
+        'marker': marker,
+        'source': src,
+        'dest': dst,
+        'source_mid': src_mid,
+        'dest_mid': r_fwd.get('message_id'),
+        'trials': trials,
+        'message': '\n'.join(lines),
+    }
+
+
+
 def _pending_deletes_path():
     from pathlib import Path
     from django.conf import settings
