@@ -2827,245 +2827,439 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
 def test_balelink_text_forward_channels(
     *,
     source_ref: str = '@linktest',
     dest_ref: str = '@linktest2',
     do_delete: bool = True,
 ) -> Dict[str, Any]:
-    """تست فوروارد با سشن واقعی Balelink (نه JWT تزریقی).
+    """یک‌مرحله‌ای: همه روش‌های فوروارد/کپی/نقل‌قول با سشن واقعی Balelink.
 
-    نیاز: ``balelink login me`` روی سرور → ~/.balelink/me.bale
-    مسیر: متن → مبدأ → فوروارد → مقصد → حذف فقط همین پیام‌ها
+    ارسال متن به مبدأ، سپس پشت‌سرهم:
+      A) balelink.forward_messages
+      B) message.forward
+      C) aiobale client.forward_message (raw Message)
+      D) ForwardMessages خام با ترکیب access_hash/date
+      E) hop: فوروارد به Saved/خود → بعد به مقصد
+      F) نقل‌قول: send_text به مقصد با reply_to=پیام مبدأ
+      G) نقل‌قول با متن خالی/نقطه
+    حذف فقط پیام‌های این تست.
     """
     import os
     import time as _time
+    import asyncio as _aio
 
     src_ref = str(source_ref or '@linktest').strip()
     dst_ref = str(dest_ref or '@linktest2').strip()
     marker = f'ly-bl-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
-    text = f'[{marker}] تست فوروارد balelink {src_ref}→{dst_ref}'
-    lines = [
-        f'تست فوروارد با Balelink | {src_ref} → {dst_ref}',
+    text = f'[{marker}] multi-method balelink forward test'
+    lines: List[str] = [
+        f'ماتریس فوروارد Balelink | {src_ref} → {dst_ref}',
         f'marker: {marker}',
     ]
     trials: List[Dict[str, Any]] = []
-
-    # peer idهای شناخته‌شده از تست‌های قبلی (در صورت نبود در dialogs)
     known_ids = {
-        '@linktest': 1497133952,
-        'linktest': 1497133952,
-        '@linktest2': 781346644,
-        'linktest2': 781346644,
+        '@linktest': 1497133952, 'linktest': 1497133952,
+        '@linktest2': 781346644, 'linktest2': 781346644,
     }
 
-    def _row(method: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> Dict[str, Any]:
-        r = {
-            'method': method, 'ok': ok, 'error': (err or '')[:300],
+    def _exc(e: BaseException) -> str:
+        parts = [f'{type(e).__name__}:{e}']
+        c = getattr(e, '__cause__', None)
+        if c is not None:
+            parts.append(f'cause={type(c).__name__}:{c}')
+        return ' | '.join(parts)[:280]
+
+    def _trial(name: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> None:
+        trials.append({
+            'method': name, 'ok': bool(ok), 'error': (err or '')[:300],
             'message_id': int(mid) if mid is not None else None,
-            'message_date': None, 'ms': ms, 'detail': detail[:200],
-        }
-        trials.append(r)
-        return r
+            'ms': ms, 'detail': (detail or '')[:200],
+        })
+        mark = '✓' if ok else '✗'
+        extra = err or (f'mid={mid}' if mid is not None else '')
+        lines.append(f'{mark} [{name}] ({ms}ms) {extra}')
 
     try:
         from balelink import BaleClient
         from balelink.models import Chat, ChatKind
     except Exception as e:
-        lines.append(f'✗ balelink نصب نیست: {type(e).__name__}: {e}')
-        return {
-            'ok': False, 'error': 'balelink_missing', 'message': '\n'.join(lines),
-            'trials': trials, 'marker': marker,
-            'hint': 'روی سرور: pip install balelink && balelink login me',
-        }
+        lines.append(f'✗ balelink missing: {_exc(e)}')
+        return {'ok': False, 'error': 'balelink_missing', 'message': '\n'.join(lines), 'trials': trials, 'marker': marker}
 
     home = os.environ.get('BALELINK_HOME') or os.path.expanduser('~/.balelink')
     session_path = os.path.join(home, 'me.bale')
     lines.append(f'session: {session_path} exists={os.path.isfile(session_path)}')
 
     async def _run():
+        results: Dict[str, Any] = {'ok': False, 'methods': [], 'sent_id': None, 'cleanup_ids': []}
         async with BaleClient('me', directory=home) as bale:
-            if not getattr(bale, 'is_logged_in', False):
-                # بعضی نسخه‌ها is_logged_in بعد از enter ست می‌شود
-                me = getattr(bale, 'me', None)
-                if me is None:
-                    return {'ok': False, 'error': 'not_logged_in', 'detail': f'no session at {session_path}'}
-
             me = getattr(bale, 'me', None)
             me_id = getattr(me, 'id', None) if me else None
-            lines_local = [f'me={me_id}']
+            lines.append(f'me={me_id}')
 
-            # dialogs برای تشخیص kind
+            # ---- resolve chats ----
             dialogs = []
             try:
-                dialogs = await bale.dialogs(limit=100)
-                lines_local.append(f'dialogs={len(dialogs)}')
+                dialogs = await bale.dialogs(limit=80)
             except Exception as e:
-                lines_local.append(f'dialogs_err:{type(e).__name__}:{e}')
+                lines.append(f'dialogs: {_exc(e)}')
 
-            def _pick_chat(ref: str) -> Optional[Any]:
+            def pick(ref: str) -> Chat:
                 key = ref.lstrip('@').lower()
-                # 1) از dialogs با username در group_info — فقط id
-                want_id = known_ids.get(ref) or known_ids.get(key)
-                if want_id:
+                wid = known_ids.get(ref) or known_ids.get(key)
+                if wid:
                     for d in dialogs:
-                        if int(getattr(d, 'id', 0) or 0) == int(want_id):
+                        if int(d.id) == int(wid):
                             return d
-                    # kind را حدس بزن
-                    for kind in (ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
-                        return Chat(int(want_id), kind)
-                # 2) اگر ref عددی است
+                    return Chat(int(wid), ChatKind.GROUP)
                 if ref.lstrip('-').isdigit():
-                    for d in dialogs:
-                        if int(d.id) == int(ref):
-                            return d
                     return Chat(int(ref), ChatKind.GROUP)
-                return None
+                raise ValueError(f'cannot resolve {ref}')
 
-            src_chat = _pick_chat(src_ref)
-            dst_chat = _pick_chat(dst_ref)
-            if src_chat is None or dst_chat is None:
-                return {
-                    'ok': False,
-                    'error': f'resolve_failed src={src_chat} dst={dst_chat}',
-                    'lines': lines_local,
-                    'dialog_ids': [getattr(d, 'id', None) for d in dialogs[:20]],
-                }
-            lines_local.append(f'src_chat={src_chat.id}/{getattr(src_chat.kind, "value", src_chat.kind)}')
-            lines_local.append(f'dst_chat={dst_chat.id}/{getattr(dst_chat.kind, "value", dst_chat.kind)}')
+            src_chat = pick(src_ref)
+            dst_chat = pick(dst_ref)
+            lines.append(f'src={src_chat.id}/{src_chat.kind} dst={dst_chat.id}/{dst_chat.kind}')
 
-            # ارسال متن — اگر kind غلط بود، چند kind را امتحان کن
+            # ---- send once ----
             sent = None
+            t0 = _time.time()
             send_err = ''
-            for kind in (
-                getattr(src_chat, 'kind', ChatKind.GROUP),
-                ChatKind.GROUP,
-                ChatKind.CHANNEL,
-                ChatKind.SUPER_GROUP,
-            ):
-                try_chat = Chat(int(src_chat.id), kind)
+            for kind in (src_chat.kind, ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
                 try:
-                    sent = await bale.send_text(try_chat, text)
-                    src_chat = try_chat
+                    sc = Chat(int(src_chat.id), kind)
+                    sent = await bale.send_text(sc, text)
+                    src_chat = sc
                     send_err = ''
                     break
                 except Exception as e:
-                    send_err = f'{kind}:{type(e).__name__}:{e}'
+                    send_err = _exc(e)
+            ms = int((_time.time() - t0) * 1000)
             if sent is None:
-                return {'ok': False, 'error': f'send_failed:{send_err}', 'lines': lines_local}
+                _trial('send_text', False, send_err, ms=ms)
+                results['error'] = 'send_failed'
+                return results
+            results['sent_id'] = getattr(sent, 'id', None)
+            results['cleanup_ids'].append(('src', sent))
+            _trial('send_text', True, mid=results['sent_id'], ms=ms, detail=f'chat={src_chat.id}')
 
-            sent_id = getattr(sent, 'id', None)
-            lines_local.append(f'sent id={sent_id} chat={src_chat.id}')
+            # underlying aiobale client (same live session)
+            transport = getattr(bale, '_transport', None)
+            client = getattr(transport, '_client', None) if transport else None
+            if client is None:
+                lines.append('⚠ underlying aiobale client not exposed')
 
-            # فوروارد
-            fwd_err = ''
-            fwd_ok = False
-            for kind in (
-                getattr(dst_chat, 'kind', ChatKind.GROUP),
-                ChatKind.GROUP,
-                ChatKind.CHANNEL,
-                ChatKind.SUPER_GROUP,
-            ):
-                try_dst = Chat(int(dst_chat.id), kind)
+            async def _verify_dest(label: str) -> Optional[int]:
+                await _aio.sleep(0.9)
+                for kind in (dst_chat.kind, ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
+                    try:
+                        hist = await bale.history(Chat(int(dst_chat.id), kind), limit=12)
+                    except Exception:
+                        continue
+                    for m in hist:
+                        if marker in str(getattr(m, 'text', None) or ''):
+                            return getattr(m, 'id', None)
+                    # is_forward without text
+                    for m in hist[:3]:
+                        raw = getattr(m, 'raw', None)
+                        if raw is not None and (getattr(raw, 'is_forward', False) or getattr(m, 'id', None)):
+                            # only accept if very new
+                            pass
+                return None
+
+            # ========== A) balelink.forward_messages ==========
+            t0 = _time.time()
+            ok_a = False
+            err_a = ''
+            for kind in (ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
                 try:
-                    await bale.forward_messages([sent], try_dst)
-                    dst_chat = try_dst
-                    fwd_ok = True
-                    fwd_err = ''
+                    await bale.forward_messages([sent], Chat(int(dst_chat.id), kind))
+                    ok_a = True
+                    dst_chat = Chat(int(dst_chat.id), kind)
+                    err_a = ''
                     break
                 except Exception as e:
-                    fwd_err = f'{kind}:{type(e).__name__}:{e}'
-                    # جایگزین: message.forward
-                    try:
-                        await sent.forward(try_dst)
-                        dst_chat = try_dst
-                        fwd_ok = True
-                        fwd_err = ''
-                        break
-                    except Exception as e2:
-                        fwd_err = f'{kind}:fwd={type(e).__name__}:{e}|msg.fwd={type(e2).__name__}:{e2}'
+                    err_a = _exc(e)
+            _trial('A_balelink.forward_messages', ok_a, err_a, ms=int((_time.time() - t0) * 1000))
+            if ok_a:
+                mid = await _verify_dest('A')
+                if mid:
+                    results['ok'] = True
+                    results['dest_mid'] = mid
+                    results['winning'] = 'A_balelink.forward_messages'
 
-            # تأیید در مقصد
-            dest_mid = None
-            if fwd_ok:
-                import asyncio as _aio
-                await _aio.sleep(1.2)
+            # ========== B) message.forward ==========
+            t0 = _time.time()
+            ok_b = False
+            err_b = ''
+            for kind in (ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
+                try:
+                    await sent.forward(Chat(int(dst_chat.id), kind))
+                    ok_b = True
+                    err_b = ''
+                    break
+                except Exception as e:
+                    err_b = _exc(e)
+            _trial('B_message.forward', ok_b, err_b, ms=int((_time.time() - t0) * 1000))
+            if ok_b and not results.get('ok'):
+                mid = await _verify_dest('B')
+                if mid:
+                    results['ok'] = True
+                    results['dest_mid'] = mid
+                    results['winning'] = 'B_message.forward'
+
+            # ========== C/D raw aiobale ==========
+            if client is not None:
+                try:
+                    from aiobale.enums import ChatType, PeerType
+                    from aiobale.types import Peer, InfoMessage
+                    from aiobale.types.values import IntValue
+                    from aiobale.methods.messaging.forward_message import ForwardMessages
+                    from aiobale.utils import generate_id
+                except Exception as e:
+                    _trial('import_aiobale', False, _exc(e))
+                else:
+                    raw_msg = getattr(sent, 'raw', None)
+                    # C) high-level forward_message on raw
+                    t0 = _time.time()
+                    ok_c = False
+                    err_c = ''
+                    if raw_msg is not None:
+                        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+                            try:
+                                await client.forward_message(
+                                    message=raw_msg,
+                                    chat_id=int(dst_chat.id),
+                                    chat_type=ctype,
+                                )
+                                ok_c = True
+                                err_c = ''
+                                break
+                            except Exception as e:
+                                err_c = _exc(e)
+                    else:
+                        err_c = 'no raw on sent message'
+                    _trial('C_client.forward_message(raw)', ok_c, err_c, ms=int((_time.time() - t0) * 1000))
+                    if ok_c and not results.get('ok'):
+                        mid = await _verify_dest('C')
+                        if mid:
+                            results['ok'] = True
+                            results['dest_mid'] = mid
+                            results['winning'] = 'C_client.forward_message'
+
+                    # D) ForwardMessages با InfoMessage ساخته‌شده
+                    t0 = _time.time()
+                    ok_d = False
+                    err_d = ''
+                    mid_i = int(getattr(sent, 'id', 0) or 0)
+                    date_i = 0
+                    try:
+                        date_i = int(getattr(sent, 'date').timestamp() * 1000)
+                    except Exception:
+                        d = getattr(raw_msg, 'date', None) if raw_msg else None
+                        if hasattr(d, 'value'):
+                            d = d.value
+                        try:
+                            date_i = int(d or 0)
+                        except Exception:
+                            date_i = 0
+                    for with_ah in (False,):  # ah ناشناخته
+                        for date_mode in ('int', 'IntValue'):
+                            try:
+                                src_peer = Peer(type=PeerType.GROUP, id=int(src_chat.id))
+                                dst_peer = Peer(type=PeerType.GROUP, id=int(dst_chat.id))
+                                dval = date_i if date_mode == 'int' else IntValue(value=date_i)
+                                info = InfoMessage(peer=src_peer, message_id=mid_i, date=dval)
+                                call = ForwardMessages(
+                                    peer=dst_peer,
+                                    message_ids=[generate_id()],
+                                    forwarded_messages=[info],
+                                )
+                                await client(call)
+                                ok_d = True
+                                err_d = f'ok date={date_mode}'
+                                break
+                            except Exception as e:
+                                err_d = _exc(e)
+                        if ok_d:
+                            break
+                    _trial('D_ForwardMessages_InfoMessage', ok_d, err_d, ms=int((_time.time() - t0) * 1000))
+                    if ok_d and not results.get('ok'):
+                        mid = await _verify_dest('D')
+                        if mid:
+                            results['ok'] = True
+                            results['dest_mid'] = mid
+                            results['winning'] = 'D_ForwardMessages'
+
+                    # E) hop: self first then dest
+                    t0 = _time.time()
+                    ok_e = False
+                    err_e = ''
+                    hop_msg = None
+                    if me_id and raw_msg is not None:
+                        try:
+                            await client.forward_message(
+                                message=raw_msg,
+                                chat_id=int(me_id),
+                                chat_type=ChatType.PRIVATE,
+                            )
+                            await _aio.sleep(0.8)
+                            # load history from self
+                            self_hist = await client.load_history(
+                                chat_id=int(me_id), chat_type=ChatType.PRIVATE, limit=10
+                            )
+                            for m in self_hist or []:
+                                txt = str(getattr(m, 'text', None) or '')
+                                if marker in txt:
+                                    hop_msg = m
+                                    break
+                            if hop_msg is None and self_hist:
+                                hop_msg = self_hist[0]
+                            if hop_msg is not None:
+                                results['cleanup_ids'].append(('self', hop_msg))
+                                for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                                    try:
+                                        await client.forward_message(
+                                            message=hop_msg,
+                                            chat_id=int(dst_chat.id),
+                                            chat_type=ctype,
+                                        )
+                                        ok_e = True
+                                        err_e = f'hop via me then {ctype}'
+                                        break
+                                    except Exception as e:
+                                        err_e = _exc(e)
+                            else:
+                                err_e = 'hop_self_ok_but_msg_not_found'
+                        except Exception as e:
+                            err_e = f'self_fwd:{_exc(e)}'
+                    else:
+                        err_e = 'no me_id or raw'
+                    _trial('E_hop_self_then_dest', ok_e, err_e, ms=int((_time.time() - t0) * 1000))
+                    if ok_e and not results.get('ok'):
+                        mid = await _verify_dest('E')
+                        if mid:
+                            results['ok'] = True
+                            results['dest_mid'] = mid
+                            results['winning'] = 'E_hop_self_then_dest'
+
+                    # F) نقل‌قول: send to dest with reply_to=source (cross-chat quote)
+                    t0 = _time.time()
+                    ok_f = False
+                    err_f = ''
+                    quote_mid = None
+                    if raw_msg is not None:
+                        for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                            try:
+                                q = await client.send_message(
+                                    text=f'↪️ {marker} quote',
+                                    chat_id=int(dst_chat.id),
+                                    chat_type=ctype,
+                                    reply_to=raw_msg,
+                                )
+                                ok_f = True
+                                quote_mid = getattr(q, 'message_id', None)
+                                err_f = f'quote/{ctype}'
+                                results['cleanup_ids'].append(('quote', q))
+                                break
+                            except Exception as e:
+                                err_f = _exc(e)
+                    else:
+                        err_f = 'no raw'
+                    _trial('F_quote_reply_to_src', ok_f, err_f, mid=quote_mid, ms=int((_time.time() - t0) * 1000))
+                    if ok_f and not results.get('ok'):
+                        results['ok'] = True
+                        results['dest_mid'] = quote_mid
+                        results['winning'] = 'F_quote_reply_to_src'
+                        results['note'] = 'quote is not true forward but may show linked content'
+
+                    # G) empty/dot quote
+                    t0 = _time.time()
+                    ok_g = False
+                    err_g = ''
+                    if raw_msg is not None:
+                        for payload in ('.', ' ', '‌'):  # ZWNJ
+                            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                                try:
+                                    q = await client.send_message(
+                                        text=payload,
+                                        chat_id=int(dst_chat.id),
+                                        chat_type=ctype,
+                                        reply_to=raw_msg,
+                                    )
+                                    ok_g = True
+                                    err_g = f'payload={payload!r}/{ctype}'
+                                    results['cleanup_ids'].append(('quote2', q))
+                                    break
+                                except Exception as e:
+                                    err_g = _exc(e)
+                            if ok_g:
+                                break
+                    _trial('G_minimal_quote', ok_g, err_g, ms=int((_time.time() - t0) * 1000))
+                    if ok_g and not results.get('ok'):
+                        results['ok'] = True
+                        results['winning'] = 'G_minimal_quote'
+
+            # ---- cleanup ----
+            if do_delete:
+                lines.append('— حذف پیام‌های این تست —')
+                # balelink Message objects
+                for label, obj in list(results.get('cleanup_ids') or []):
+                    try:
+                        if hasattr(obj, 'delete'):
+                            await obj.delete(just_me=False)
+                            lines.append(f'✓ delete {label} (balelink Message)')
+                        elif client is not None and hasattr(obj, 'message_id'):
+                            from aiobale.enums import ChatType
+                            chat_id = int(src_chat.id) if label == 'src' else int(dst_chat.id)
+                            if label == 'self' and me_id:
+                                chat_id = int(me_id)
+                            await client.delete_message(
+                                message_id=int(obj.message_id),
+                                message_date=int(getattr(getattr(obj, 'date', 0), 'value', getattr(obj, 'date', 0)) or 0),
+                                chat_id=chat_id,
+                                chat_type=ChatType.PRIVATE if label == 'self' else ChatType.GROUP,
+                            )
+                            lines.append(f'✓ delete {label} mid={obj.message_id}')
+                        else:
+                            lines.append(f'⊘ skip delete {label}')
+                    except Exception as e:
+                        lines.append(f'✗ delete {label}: {_exc(e)}')
+                # also try dest by marker
                 try:
                     hist = await bale.history(dst_chat, limit=15)
                     for m in hist:
                         if marker in str(getattr(m, 'text', None) or ''):
-                            dest_mid = getattr(m, 'id', None)
-                            break
-                    if dest_mid is None and hist:
-                        dest_mid = getattr(hist[0], 'id', None)
-                        lines_local.append('dest_marker_not_found_using_top')
+                            try:
+                                await m.delete(just_me=False)
+                                lines.append(f'✓ delete dest-by-marker mid={m.id}')
+                            except Exception as e:
+                                lines.append(f'✗ delete dest-marker: {_exc(e)}')
                 except Exception as e:
-                    lines_local.append(f'dest_hist:{type(e).__name__}:{e}')
+                    lines.append(f'dest cleanup hist: {_exc(e)}')
 
-            # حذف
-            deleted = []
-            if do_delete:
-                try:
-                    await sent.delete(just_me=False)
-                    deleted.append(f'src:{sent_id}:ok')
-                except Exception as e:
-                    deleted.append(f'src:{sent_id}:{type(e).__name__}:{e}')
-                if dest_mid:
-                    try:
-                        # پیدا کردن Message در تاریخچه برای delete
-                        hist = await bale.history(dst_chat, limit=20)
-                        target_m = None
-                        for m in hist:
-                            if getattr(m, 'id', None) == dest_mid or marker in str(getattr(m, 'text', None) or ''):
-                                target_m = m
-                                break
-                        if target_m:
-                            await target_m.delete(just_me=False)
-                            deleted.append(f'dst:{dest_mid}:ok')
-                        else:
-                            deleted.append(f'dst:{dest_mid}:not_found')
-                    except Exception as e:
-                        deleted.append(f'dst:{dest_mid}:{type(e).__name__}:{e}')
-
-            return {
-                'ok': bool(fwd_ok),
-                'sent_id': sent_id,
-                'dest_mid': dest_mid,
-                'fwd_error': fwd_err,
-                'deleted': deleted,
-                'lines': lines_local,
-                'src': f'{src_chat.id}/{src_chat.kind}',
-                'dst': f'{dst_chat.id}/{dst_chat.kind}',
-            }
+        return results
 
     t0 = _time.time()
     try:
         out = ly._run(_run())
     except Exception as e:
-        logger.exception('balelink test')
-        out = {'ok': False, 'error': f'{type(e).__name__}:{e}'}
-    ms = int((_time.time() - t0) * 1000)
+        logger.exception('balelink multi')
+        out = {'ok': False, 'error': _exc(e)}
+    total_ms = int((_time.time() - t0) * 1000)
 
     if not isinstance(out, dict):
         out = {'ok': False, 'error': str(out)}
 
-    for ln in out.get('lines') or []:
-        lines.append(str(ln))
+    win = out.get('winning')
+    lines.append(f'— جمع — total={total_ms}ms winning={win or "—"}')
+    lines.append('نتیجه: ' + ('حداقل یک روش موفق بود' if out.get('ok') else 'همه روش‌های فوروارد ناموفق'))
+    if out.get('note'):
+        lines.append(f'note: {out["note"]}')
     if out.get('error') and not out.get('sent_id'):
-        lines.append(f'✗ {out.get("error")}')
-    else:
-        lines.append(('✓' if out.get('sent_id') else '✗') + f" ارسال ({ms}ms) mid={out.get('sent_id')}")
-        if out.get('ok'):
-            lines.append(f"✓ فوروارد به {dst_ref} dest_mid={out.get('dest_mid')}")
-        else:
-            lines.append(f"✗ فوروارد: {out.get('fwd_error') or out.get('error') or 'failed'}")
-        for d in out.get('deleted') or []:
-            lines.append(f'حذف: {d}')
+        lines.append(f'fatal: {out["error"]}')
 
-    _row('balelink_send', bool(out.get('sent_id')), out.get('error') or '', out.get('sent_id'), ms)
-    _row('balelink_forward', bool(out.get('ok')), out.get('fwd_error') or out.get('error') or '', out.get('dest_mid'), 0)
-
-    lines.append('نتیجه: ' + ('فوروارد موفق (balelink)' if out.get('ok') else 'فوروارد ناموفق'))
     return {
         'ok': bool(out.get('ok')),
         'marker': marker,
@@ -3073,10 +3267,10 @@ def test_balelink_text_forward_channels(
         'dest': dst_ref,
         'source_mid': out.get('sent_id'),
         'dest_mid': out.get('dest_mid'),
+        'winning': win,
         'trials': trials,
         'message': '\n'.join(lines),
-        'lib': 'balelink',
-        'raw': {k: out.get(k) for k in ('src', 'dst', 'fwd_error', 'deleted', 'error')},
+        'lib': 'balelink+aiobale-raw',
     }
 
 
