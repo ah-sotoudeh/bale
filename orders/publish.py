@@ -2361,40 +2361,24 @@ def test_linkyar_libraries_matrix(
         except Exception:
             logger.exception('ly-lib schedule delete')
 
-    # جارو: هر پیام با marker این اجرا که هنوز مانده را حذف کن
+    # جارو — فقط پیام‌هایی که دقیقاً marker همین اجرا را دارند (هرگز رسانهٔ قدیمی/بدون کپشن)
+    # marker_base مثل ly-lib-1791... یکتا برای این run است
     try:
-        _time.sleep(1.0)
-        hist = ly.load_channel_history(ref, limit=40)
+        _time.sleep(0.8)
+        hist = ly.load_channel_history(ref, limit=25)
+        sweep_count = 0
+        max_sweep = 8  # سقف ایمنی
         if isinstance(hist, dict) and hist.get('ok'):
             for post in list(hist.get('messages') or []):
-                prev = ' '.join(str(post.get(x) or '') for x in ('preview', 'caption', 'text', 'file_name'))
-                kind = str(post.get('kind') or '')
-                is_media = kind in ('photo', 'document', 'video', 'unknown')
-                # پیام‌های این اجرا با marker، یا رسانهٔ خیلی تازه بدون متن (آپلود بدون کپشن)
-                if marker_base not in prev and not (is_media and not str(post.get('preview') or '').strip()):
-                    # فقط media تازه از sender لینک‌یار
-                    sid = post.get('sender_id')
-                    me_id = None
-                    try:
-                        me_id = int(((libs_info.get('linkyar_bound') or {}).get('me') or {}).get('user_id') or 0)
-                    except Exception:
-                        me_id = None
-                    if not (is_media and me_id and sid and int(sid) == int(me_id)):
-                        continue
-                    # فقط اگر date در ۲ دقیقه اخیر باشد
-                    try:
-                        pdt = int(post.get('date') or 0)
-                    except Exception:
-                        pdt = 0
-                    # date بله اغلب ms است
-                    import time as _tnow
-                    now_ms = int(_tnow.time() * 1000)
-                    if pdt > 10_000_000_000:  # ms
-                        if now_ms - pdt > 180_000:
-                            continue
-                    else:
-                        if int(_tnow.time()) - pdt > 180:
-                            continue
+                if sweep_count >= max_sweep:
+                    break
+                prev = ' '.join(
+                    str(post.get(x) or '')
+                    for x in ('preview', 'caption', 'text', 'file_name')
+                )
+                # شرط سخت: فقط اگر marker همین تست در متن/کپشن باشد
+                if marker_base not in prev:
+                    continue
                 try:
                     mid = int(post.get('message_id') or 0)
                     mdate = int(post.get('date') or 0)
@@ -2402,13 +2386,6 @@ def test_linkyar_libraries_matrix(
                     continue
                 if not mid:
                     continue
-                # اگر همین mid قبلاً با موفقیت حذف شده، رد شو
-                already = any(
-                    d.get('ok') and d.get('message_id') == mid
-                    for d in trials
-                    if str(d.get('method') or '').startswith('delete_after:')
-                )
-                # delete trials don't store message_id of target - check method names only
                 started = _time.time()
                 row = {
                     'lib': bound_lib,
@@ -2418,7 +2395,7 @@ def test_linkyar_libraries_matrix(
                     'message_id': mid,
                     'message_date': mdate,
                     'ms': 0,
-                    'detail': prev[:80],
+                    'detail': (prev[:60] if prev else '') ,
                 }
                 try:
                     r = ly.delete_message(ref, mid, message_date=mdate)
@@ -2428,6 +2405,7 @@ def test_linkyar_libraries_matrix(
                     row['error'] = f'{type(e).__name__}:{e}'[:200]
                 row['ms'] = int((_time.time() - started) * 1000)
                 trials.append(row)
+                sweep_count += 1
     except Exception:
         logger.exception('ly-lib sweep delete')
 
