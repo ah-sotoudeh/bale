@@ -2939,7 +2939,14 @@ def test_linkyar_text_forward_channels(
     # ۲) فوروارد native
     def t_forward():
         async def _fn(client):
-            from aiobale.enums import ChatType
+            """فوروارد با Peer کامل (access_hash) و date صحیح — نه فقط API سطح بالا بدون hash."""
+            from aiobale.enums import ChatType, PeerType
+            from aiobale.types import Peer, InfoMessage
+            from aiobale.types.values import IntValue
+            from aiobale.methods.messaging.forward_message import ForwardMessages
+            from aiobale.utils import generate_id
+            import asyncio as _aio
+
             src_res = await ly._resolve_peer(client, src)
             dst_res = await ly._resolve_peer(client, dst)
             if not src_res.get('ok'):
@@ -2948,18 +2955,32 @@ def test_linkyar_text_forward_channels(
                 return {'ok': False, 'error': f"dst_resolve:{dst_res.get('error')}"}
             src_id = int(src_res['peer_id'])
             dst_id = int(dst_res['peer_id'])
-            tries = []
+            src_ah = src_res.get('access_hash')
+            dst_ah = dst_res.get('access_hash')
+            try:
+                src_ah_i = int(src_ah) if src_ah not in (None, '', 0, '0') else None
+            except (TypeError, ValueError):
+                src_ah_i = None
+            try:
+                dst_ah_i = int(dst_ah) if dst_ah not in (None, '', 0, '0') else None
+            except (TypeError, ValueError):
+                dst_ah_i = None
+
+            tries = [f'src={src_id} ah={src_ah_i} dst={dst_id} ah={dst_ah_i} want_mid={src_mid}']
             hist_msgs = []
+            hist_ctype = None
             for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
                 try:
                     hist_msgs = await client.load_history(chat_id=src_id, chat_type=ctype, limit=30)
                     if hist_msgs:
+                        hist_ctype = ctype
                         tries.append(f'hist/{ctype}:n={len(hist_msgs)}')
                         break
                 except Exception as e:
                     tries.append(f'hist/{ctype}:{type(e).__name__}:{e}')
             if not hist_msgs:
                 return {'ok': False, 'error': 'source_history_empty', 'tries': tries}
+
             target = None
             for m in hist_msgs:
                 try:
@@ -2968,13 +2989,10 @@ def test_linkyar_text_forward_channels(
                         break
                 except Exception:
                     continue
-            # fallback: match text content
             if target is None:
                 for m in hist_msgs:
-                    txt = getattr(m, 'text', None) or ''
-                    if not txt and getattr(m, 'content', None) is not None:
-                        txt = str(m.content)[:200]
-                    if marker in str(txt):
+                    txt = str(getattr(m, 'text', None) or '')
+                    if marker in txt:
                         target = m
                         break
             if target is None:
@@ -2984,50 +3002,121 @@ def test_linkyar_text_forward_channels(
                     'tries': tries,
                     'sample_ids': [getattr(m, 'message_id', None) for m in hist_msgs[:8]],
                 }
-            for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+
+            # date را همیشه به int خام تبدیل کن (IntValue تو در تو = InvalidArgument)
+            raw_date = getattr(target, 'date', None)
+            if hasattr(raw_date, 'value'):
+                raw_date = raw_date.value
+            try:
+                date_i = int(raw_date) if raw_date is not None else int(src_date or 0)
+            except (TypeError, ValueError):
+                date_i = int(src_date or 0)
+            mid_i = int(getattr(target, 'message_id', src_mid) or src_mid)
+            tries.append(f'target mid={mid_i} date={date_i} hist_ctype={hist_ctype}')
+
+            def _src_peer(with_ah: bool) -> Peer:
+                kw = {'type': PeerType.GROUP, 'id': src_id}
+                if with_ah and src_ah_i is not None:
+                    kw['access_hash'] = src_ah_i
+                return Peer(**kw)
+
+            def _dst_peer(with_ah: bool) -> Peer:
+                kw = {'type': PeerType.GROUP, 'id': dst_id}
+                if with_ah and dst_ah_i is not None:
+                    kw['access_hash'] = dst_ah_i
+                return Peer(**kw)
+
+            async def _try_fwd(label, info, dst_peer):
+                new_id = generate_id()
+                call = ForwardMessages(
+                    peer=dst_peer,
+                    message_ids=[new_id],
+                    forwarded_messages=[info],
+                )
                 try:
-                    await client.forward_message(message=target, chat_id=dst_id, chat_type=ctype)
-                    import asyncio as _aio
-                    await _aio.sleep(1.2)
-                    # verify marker or growth in dest
-                    after = []
+                    await client(call)
+                    return True, new_id, ''
+                except Exception as e:
+                    return False, None, f'{label}:{type(e).__name__}:{e}'
+
+            # ترکیب‌های محتمل که InvalidArgument را پوشش می‌دهند
+            combos = []
+            for with_src_ah in (True, False):
+                for with_dst_ah in (True, False):
+                    for date_mode in ('int', 'IntValue'):
+                        combos.append((with_src_ah, with_dst_ah, date_mode))
+
+            for with_src_ah, with_dst_ah, date_mode in combos:
+                if date_mode == 'int':
+                    date_val = date_i
+                else:
+                    date_val = IntValue(value=date_i)
+                info = InfoMessage(
+                    peer=_src_peer(with_src_ah),
+                    message_id=mid_i,
+                    date=date_val,
+                )
+                dst_peer = _dst_peer(with_dst_ah)
+                label = f'ah_src={with_src_ah}/ah_dst={with_dst_ah}/date={date_mode}'
+                ok_call, new_id, err = await _try_fwd(label, info, dst_peer)
+                if not ok_call:
+                    tries.append(err[:180])
+                    continue
+                tries.append(f'{label}:api_ok new_id={new_id}')
+                await _aio.sleep(1.2)
+                # verify در مقصد
+                for ctype in (ChatType.GROUP, ChatType.CHANNEL, hist_ctype or ChatType.GROUP):
+                    if ctype is None:
+                        continue
                     try:
                         after = await client.load_history(chat_id=dst_id, chat_type=ctype, limit=15)
                     except Exception as e:
-                        tries.append(f'verify/{ctype}:{e}')
-                    new_mid = None
-                    new_date = None
-                    visible = False
+                        tries.append(f'verify/{ctype}:{type(e).__name__}:{e}')
+                        continue
                     for am in after or []:
                         txt = str(getattr(am, 'text', None) or '')
-                        if marker in txt or getattr(am, 'is_forward', False):
-                            visible = True
-                            new_mid = getattr(am, 'message_id', None)
-                            new_date = getattr(am, 'date', None)
-                            if hasattr(new_date, 'value'):
-                                new_date = new_date.value
-                            break
-                    if not visible and after:
-                        # API بدون exception — mid اول
-                        am = after[0]
-                        new_mid = getattr(am, 'message_id', None)
-                        new_date = getattr(am, 'date', None)
-                        if hasattr(new_date, 'value'):
-                            new_date = new_date.value
-                        visible = True
-                        tries.append(f'forward/{ctype}:assumed_ok_top')
-                    if visible:
-                        return {
-                            'ok': True,
-                            'method': f'forward/{ctype}',
-                            'message_id': int(new_mid) if new_mid is not None else None,
-                            'date': int(new_date) if new_date is not None else None,
-                            'src_mid': int(src_mid),
-                            'tries': tries,
-                        }
-                    tries.append(f'forward/{ctype}:api_ok_not_visible')
+                        am_mid = getattr(am, 'message_id', None)
+                        am_date = getattr(am, 'date', None)
+                        if hasattr(am_date, 'value'):
+                            am_date = am_date.value
+                        if marker in txt or (new_id and am_mid == new_id):
+                            return {
+                                'ok': True,
+                                'method': label,
+                                'message_id': int(am_mid) if am_mid is not None else int(new_id),
+                                'date': int(am_date) if am_date is not None else None,
+                                'src_mid': mid_i,
+                                'tries': tries,
+                            }
+                # API پذیرفت ولی در تاریخچه ندیدیم
+                tries.append(f'{label}:accepted_not_visible')
+                # اگر API پذیرفت، mid تولیدشده را برگردان (حذف ممکن شود)
+                return {
+                    'ok': True,
+                    'method': label + '/unverified',
+                    'message_id': int(new_id) if new_id else None,
+                    'date': None,
+                    'src_mid': mid_i,
+                    'tries': tries,
+                    'note': 'API accepted ForwardMessages; visibility not confirmed in history',
+                }
+
+            # آخرین تلاش: API سطح‌بالای کتابخانه (برای مقایسه)
+            for ctype in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    await client.forward_message(message=target, chat_id=dst_id, chat_type=ctype)
+                    tries.append(f'highlevel/{ctype}:ok')
+                    return {
+                        'ok': True,
+                        'method': f'highlevel/{ctype}',
+                        'message_id': None,
+                        'date': None,
+                        'src_mid': mid_i,
+                        'tries': tries,
+                    }
                 except Exception as e:
-                    tries.append(f'forward/{ctype}:{type(e).__name__}:{e}')
+                    tries.append(f'highlevel/{ctype}:{type(e).__name__}:{e}')
+
             return {'ok': False, 'error': 'forward_failed', 'tries': tries}
 
         return ly._run(ly._with_client(_fn))
