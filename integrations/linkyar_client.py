@@ -460,8 +460,9 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     content_keys = list(content.keys())[:12] if isinstance(content, dict) else None
 
     if isinstance(content, dict):
-        text = g(content, 1, '1', 'text', 'textMessage')
-        doc = g(content, 2, '2', 'document', 'documentMessage')
+        # MessageContent در baleclient: text=alias 15 ، document=alias 4
+        text = g(content, 15, '15', 1, '1', 'text', 'textMessage')
+        doc = g(content, 4, '4', 2, '2', 'document', 'documentMessage')
         if isinstance(text, dict):
             kind = 'text'
             preview = str(g(text, 1, '1', 'text', 'value') or '')[:120]
@@ -2228,6 +2229,37 @@ def send_existing_file_to_channel(
         )
         content = MessageContent(document=document)
         errors = []
+        # 1) high-level send_photo / send_document با همان DocumentMessage
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                if kind == 'photo':
+                    msg = await client.send_photo(
+                        photo=document,
+                        chat_id=peer_id,
+                        chat_type=ctype,
+                        caption=caption or None,
+                    )
+                else:
+                    msg = await client.send_document(
+                        document=document,
+                        chat_id=peer_id,
+                        chat_type=ctype,
+                        caption=caption or None,
+                    )
+                mid = getattr(msg, 'message_id', None)
+                date = getattr(msg, 'date', None)
+                if hasattr(date, 'value'):
+                    date = date.value
+                return {
+                    'ok': True,
+                    'message_id': mid,
+                    'date': date,
+                    'method': f'send_{kind}_highlevel/{ctype}',
+                }
+            except Exception as e:
+                errors.append(f'hl/{ctype}: {type(e).__name__}: {e}')
+
+        # 2) SendMessage خام
         for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
             peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
             if access_hash not in (None, 0):
@@ -2243,12 +2275,46 @@ def send_existing_file_to_channel(
                     'ok': True,
                     'message_id': getattr(msg, 'message_id', mid),
                     'date': getattr(msg, 'date', None),
-                    'method': 'send_existing_file',
+                    'method': f'send_existing_raw/{ctype}',
                     'chat_type': str(ctype),
                 }
             except Exception as e:
-                errors.append(f'{ctype}: {type(e).__name__}: {e}')
-        return {'ok': False, 'error': 'send_existing_failed', 'tries': errors}
+                errors.append(f'raw/{ctype}: {type(e).__name__}: {e}')
+
+        # 3) با وجود خطا، گاهی پیام می‌رسد — با caption در تاریخچه پیدا کن
+        if caption:
+            import asyncio as _aio
+            await _aio.sleep(1.5)
+            try:
+                hist = await _load_history_raw(client, peer_id, access_hash, limit=20)
+                if hist.get('ok'):
+                    uname = str(channel_ref).lstrip('@')
+                    for it in hist.get('items') or []:
+                        parsed = _parse_raw_message_item(it, uname)
+                        if not parsed:
+                            continue
+                        prev = str(parsed.get('preview') or '')
+                        if caption[:24] in prev or (caption and caption in prev):
+                            return {
+                                'ok': True,
+                                'message_id': parsed.get('message_id'),
+                                'date': parsed.get('date'),
+                                'method': 'send_existing_recovered',
+                                'recovered': True,
+                                'tries': errors[:6],
+                            }
+            except Exception as e:
+                errors.append(f'recover: {type(e).__name__}: {e}')
+
+        return {
+            'ok': False,
+            'error': 'send_existing_failed',
+            'tries': errors[:10],
+            'file_id': file_id,
+            'file_access_hash': file_access_hash,
+            'mime_type': mime_type,
+            'file_name': file_name,
+        }
 
     return _run(_with_client(_fn))
 

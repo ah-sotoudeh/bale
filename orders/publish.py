@@ -2969,15 +2969,32 @@ def test_copy_message_matrix(
             )
             ok = bool(isinstance(r, dict) and r.get('ok'))
             mid = (r or {}).get('message_id') if isinstance(r, dict) else None
+            err = ''
+            if not ok:
+                err = str((r or {}).get('error') or r)[:120]
+                tries = (r or {}).get('tries') or []
+                if tries:
+                    err += ' | ' + ' ; '.join(str(x)[:80] for x in tries[:4])
             _trial(
                 'copy_by_file_id',
                 ok,
-                '' if ok else str((r or {}).get('error') or r)[:220],
+                err,
                 mid=mid,
                 ms=int((_time.time() - t0) * 1000),
+                detail=str((r or {}).get('method') or ''),
             )
             if ok and mid:
                 cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
+            # اگر API خطا داد ولی با marker در مقصد چیزی هست، حذفش کن
+            elif marker:
+                try:
+                    h2 = ly.load_channel_history(dst_ref, limit=15)
+                    for p in list((h2 or {}).get('messages') or []):
+                        if marker in str(p.get('preview') or ''):
+                            cleanup.append((dst_ref, int(p['message_id']), int(p.get('date') or 0)))
+                            lines.append(f'⚠ orphan media by marker mid={p.get("message_id")} scheduled delete')
+                except Exception:
+                    pass
         except Exception as e:
             _trial('copy_by_file_id', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
     else:
