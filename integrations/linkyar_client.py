@@ -375,52 +375,65 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
         try:
             if v is None:
                 return None
-            if isinstance(v, dict) and ('1' in v or 1 in v):
-                v = v.get('1', v.get(1))
+            if isinstance(v, bool):
+                return None
+            if isinstance(v, dict):
+                v = v.get('1', v.get(1, v.get('value')))
             return int(v)
         except (TypeError, ValueError):
             return None
 
+    def _looks_like_document(obj: dict) -> Optional[Dict[str, Any]]:
+        """فقط وقتی mime یا نام فایل رسانه‌ای مشخص باشد — نه message_id/user_id."""
+        if not isinstance(obj, dict):
+            return None
+        mime = g(obj, 5, '5', 'mime_type', 'mimeType')
+        name = g(obj, 4, '4', 'name', 'file_name', 'fileName')
+        if isinstance(name, dict):
+            name = g(name, 1, '1') or ''
+        mime_s = str(mime).strip() if mime is not None and not isinstance(mime, (dict, list)) else ''
+        name_s = str(name).strip() if name is not None and not isinstance(name, (dict, list)) else ''
+        # شرط سخت: mime شبیه type/subtype یا پسوند فایل رسانه‌ای
+        mime_ok = ('/' in mime_s) and not mime_s.startswith('{')
+        name_ok = bool(name_s) and any(
+            name_s.lower().endswith(ext)
+            for ext in (
+                '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.mov',
+                '.pdf', '.zip', '.webm', '.mkv', '.doc', '.docx',
+            )
+        )
+        if not mime_ok and not name_ok:
+            return None
+        fid = _as_int(g(obj, 1, '1', 'file_id', 'fileId'))
+        ah = _as_int(g(obj, 2, '2', 'access_hash', 'accessHash'))
+        size = _as_int(g(obj, 3, '3', 'size', 'file_size'))
+        if fid is None or ah is None:
+            return None
+        # رد کردن شناسه‌های واضح پیام/کاربر (معمولاً کوچک‌تر از file_id واقعی بله نیستند،
+        # ولی user_id لینک‌یار را صریح رد می‌کنیم)
+        if fid in (0, 1, -1):
+            return None
+        return {
+            'file_id': fid,
+            'file_access_hash': ah,
+            'file_size': size or 0,
+            'file_name': name_s or 'banner.jpg',
+            'mime_type': mime_s or 'application/octet-stream',
+        }
+
     def _find_document(obj: Any, depth: int = 0) -> Optional[Dict[str, Any]]:
-        """جست‌وجوی بازگشتی DocumentMessage در ساختار خام protobuf-json."""
-        if depth > 8 or obj is None:
+        if depth > 6 or obj is None:
             return None
         if isinstance(obj, dict):
-            # شکل رایج DocumentMessage: 1=file_id, 2=access_hash, 3=size, 4=name, 5=mime
-            fid = g(obj, 1, '1', 'file_id', 'fileId')
-            ah = g(obj, 2, '2', 'access_hash', 'accessHash')
-            mime = g(obj, 5, '5', 'mime_type', 'mimeType')
-            name = g(obj, 4, '4', 'name', 'file_name')
-            size = g(obj, 3, '3', 'size', 'file_size')
-            # file_id در بله اغلب int خیلی بزرگ یا str است
-            fid_i = _as_int(fid)
-            ah_i = _as_int(ah)
-            mime_s = str(mime) if mime is not None and not isinstance(mime, dict) else ''
-            name_s = ''
-            if isinstance(name, str):
-                name_s = name
-            elif isinstance(name, dict):
-                name_s = str(g(name, 1, '1') or '')
-            # اگر mime/image یا name پسوند تصویر دارد و file_id داریم
-            looks_doc = fid_i is not None and ah_i is not None and (
-                bool(mime_s) or bool(name_s) or size is not None
-            )
-            # بعضی وقت‌ها فقط file_id + access_hash بدون mime
-            if fid_i is not None and ah_i is not None and (looks_doc or depth >= 1):
-                if mime_s or name_s or (size is not None) or depth >= 2:
-                    return {
-                        'file_id': fid_i,
-                        'file_access_hash': ah_i,
-                        'file_size': _as_int(size) or 0,
-                        'file_name': name_s or 'banner.jpg',
-                        'mime_type': mime_s or 'application/octet-stream',
-                    }
+            hit = _looks_like_document(obj)
+            if hit:
+                return hit
             for v in obj.values():
                 found = _find_document(v, depth + 1)
                 if found:
                     return found
         elif isinstance(obj, list):
-            for v in obj:
+            for v in obj[:30]:
                 found = _find_document(v, depth + 1)
                 if found:
                     return found
@@ -430,12 +443,11 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     mid = g(item, 2, '2', 'message_id', 'rid')
     date = g(item, 3, '3', 'date')
     content = g(item, 4, '4', 'message', 'content')
-
-    # بعضی پاسخ‌ها message را زیر 5 می‌گذارند
     if content is None:
         content = g(item, 5, '5')
 
-    if mid is None:
+    mid_i = _as_int(mid)
+    if mid_i is None:
         return None
 
     kind = 'unknown'
@@ -457,61 +469,56 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
             kind = 'text'
             preview = text[:120]
         if isinstance(doc, dict):
-            mime = str(g(doc, 5, '5') or '')
-            file_id = _as_int(g(doc, 1, '1'))
-            file_access_hash = _as_int(g(doc, 2, '2'))
-            file_size = _as_int(g(doc, 3, '3'))
-            name = g(doc, 4, '4')
-            if isinstance(name, dict):
-                name = str(g(name, 1, '1') or '')
-            file_name = name if isinstance(name, str) else None
-            cap = g(doc, 8, '8', 7, '7')
-            cap_text = ''
-            if isinstance(cap, dict):
-                cap_text = str(g(cap, 1, '1') or '')
-            if (mime or '').startswith('image/') or (
-                isinstance(file_name, str) and file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))
-            ):
-                kind = 'photo'
-            elif (mime or '').startswith('video/'):
-                kind = 'video'
-            else:
-                kind = 'document'
-            preview = (cap_text or file_name or mime or '')[:120]
-        if file_id is None:
-            found = _find_document(content)
-            if found:
-                file_id = found['file_id']
-                file_access_hash = found['file_access_hash']
-                file_size = found.get('file_size')
-                file_name = found.get('file_name')
-                mime = found.get('mime_type') or mime
-                if kind in ('unknown', 'text') and file_id:
+            hit = _looks_like_document(doc)
+            if hit:
+                file_id = hit['file_id']
+                file_access_hash = hit['file_access_hash']
+                file_size = hit.get('file_size')
+                file_name = hit.get('file_name')
+                mime = hit.get('mime_type')
+                if (mime or '').startswith('image/') or (
+                    file_name and str(file_name).lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
+                ):
+                    kind = 'photo'
+                elif (mime or '').startswith('video/'):
+                    kind = 'video'
+                else:
                     kind = 'document'
-                    if (mime or '').startswith('image/'):
-                        kind = 'photo'
+                cap = g(doc, 8, '8', 7, '7')
+                cap_text = str(g(cap, 1, '1') or '') if isinstance(cap, dict) else ''
+                preview = (cap_text or file_name or mime or '')[:120]
+        if file_id is None and kind != 'text':
+            hit = _find_document(content)
+            if hit:
+                file_id = hit['file_id']
+                file_access_hash = hit['file_access_hash']
+                file_size = hit.get('file_size')
+                file_name = hit.get('file_name')
+                mime = hit.get('mime_type')
+                kind = 'photo' if (mime or '').startswith('image/') else 'document'
 
-    # کل item را هم در صورت نیاز بگرد
-    if file_id is None:
-        found = _find_document(item)
-        if found:
-            file_id = found['file_id']
-            file_access_hash = found['file_access_hash']
-            file_size = found.get('file_size')
-            file_name = found.get('file_name')
-            mime = found.get('mime_type') or mime
-            if kind == 'unknown':
-                kind = 'document'
+    # اگر هنوز text است، دیگر کل item را برای document نفحص نکن (جلوگیری از false positive)
+    if file_id is None and kind not in ('text',):
+        hit = _find_document(item)
+        if hit:
+            file_id = hit['file_id']
+            file_access_hash = hit['file_access_hash']
+            file_size = hit.get('file_size')
+            file_name = hit.get('file_name')
+            mime = hit.get('mime_type')
+            kind = 'photo' if (mime or '').startswith('image/') else 'document'
 
-    mid_i = _as_int(mid)
-    if mid_i is None:
-        return None
-    date_i = _as_int(date)
+    # اگر file_id == sender یا == mid باشد، قطعاً اشتباه است
     sender_i = _as_int(sender)
+    if file_id is not None and (file_id == sender_i or file_id == mid_i):
+        file_id = None
+        file_access_hash = None
+        if kind in ('document', 'photo', 'video'):
+            kind = 'unknown'
 
     return {
         'message_id': mid_i,
-        'date': date_i,
+        'date': _as_int(date),
         'sender_id': sender_i,
         'kind': kind,
         'preview': preview,

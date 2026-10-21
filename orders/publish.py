@@ -2936,6 +2936,20 @@ def test_copy_message_matrix(
 
     lines.append('kind_counts=' + str(kind_counts))
 
+    # رد false-positive: file_id نباید user_id لینک‌یار یا message_id باشد
+    me_id = None
+    try:
+        me = ly.get_me()
+        me_id = int((me or {}).get('user_id') or ((me or {}).get('result') or {}).get('id') or 0) or None
+    except Exception:
+        me_id = 1164810718
+    if media:
+        fid = media.get('file_id')
+        mid_m = media.get('message_id')
+        if fid is not None and (fid == me_id or fid == mid_m):
+            lines.append(f'⚠ media meta رد شد (file_id مشکوک={fid} me={me_id} mid={mid_m})')
+            media = None
+
     if media:
         lines.append(
             f"media from={media.get('from')} mid={media.get('message_id')} "
