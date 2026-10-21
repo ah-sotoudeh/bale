@@ -2829,6 +2829,320 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
+def test_copy_message_matrix(
+    *,
+    source_ref: str = '@linktest',
+    dest_ref: str = '@linktest2',
+    do_delete: bool = True,
+) -> Dict[str, Any]:
+    """کپی محتوا بدون فوروارد و بدون آپلود مجدد بایت.
+
+    مسیرها:
+      1) بازو copyMessage (Bot API)
+      2) لینک‌یار: استخراج file_id از پیام مبدأ → SendMessage با DocumentMessage همان file_id
+      3) لینک‌یار: کپی متن (send_message همان متن) — فقط برای پیام متنی
+      4) لینک‌یار: send_existing_file_to_channel اگر file_meta از تاریخچه باشد
+    """
+    import os
+    import time as _time
+    import asyncio as _aio
+
+    src_ref = str(source_ref or '@linktest').strip()
+    dst_ref = str(dest_ref or '@linktest2').strip()
+    marker = f'ly-copy-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
+    text = f'[{marker}] copy-matrix text body'
+    lines: List[str] = [
+        f'ماتریس کپی (بدون آپلود بایت) | {src_ref} → {dst_ref}',
+        f'marker: {marker}',
+    ]
+    trials: List[Dict[str, Any]] = []
+    known = {
+        '@linktest': 1497133952, 'linktest': 1497133952,
+        '@linktest2': 781346644, 'linktest2': 781346644,
+        '@linkbank': 1428761430, 'linkbank': 1428761430,
+    }
+
+    def _exc(e: BaseException) -> str:
+        parts = [f'{type(e).__name__}:{e}']
+        c = e.__cause__
+        if c is not None:
+            parts.append(f'cause={type(c).__name__}:{c}')
+        return ' | '.join(parts)[:300]
+
+    def _trial(name: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> None:
+        trials.append({
+            'method': name, 'ok': bool(ok), 'error': (err or '')[:300],
+            'message_id': int(mid) if mid is not None else None,
+            'ms': int(ms), 'detail': (detail or '')[:180],
+        })
+        lines.append(f"{'✓' if ok else '✗'} [{name}] ({ms}ms) {err or (f'mid={mid}' if mid is not None else detail)}")
+
+    src_id = int(known.get(src_ref) or known.get(src_ref.lstrip('@')) or 0)
+    dst_id = int(known.get(dst_ref) or known.get(dst_ref.lstrip('@')) or 0)
+
+    # ---------- 1) Bot copyMessage ----------
+    # اول با بازو یک پیام متنی در مبدأ بگذار، بعد copy به مقصد
+    t0 = _time.time()
+    bot_src_mid = None
+    try:
+        br = bc.send_message(src_ref, text + ' [bot-src]')
+        if isinstance(br, dict) and br.get('ok'):
+            res = br.get('result') or {}
+            bot_src_mid = res.get('message_id')
+            _trial('bot_send_src', True, mid=bot_src_mid, ms=int((_time.time() - t0) * 1000))
+        else:
+            _trial('bot_send_src', False, str((br or {}).get('error') or br)[:200], ms=int((_time.time() - t0) * 1000))
+    except Exception as e:
+        _trial('bot_send_src', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+
+    t0 = _time.time()
+    bot_copy_mid = None
+    if bot_src_mid:
+        try:
+            cr = bc.copy_message(dst_ref, src_ref, int(bot_src_mid))
+            ok = bool(isinstance(cr, dict) and cr.get('ok'))
+            if ok:
+                bot_copy_mid = ((cr.get('result') or {}) if isinstance(cr, dict) else {}).get('message_id')
+            _trial(
+                'bot_copyMessage',
+                ok,
+                '' if ok else str((cr or {}).get('error') or cr)[:200],
+                mid=bot_copy_mid,
+                ms=int((_time.time() - t0) * 1000),
+            )
+        except Exception as e:
+            _trial('bot_copyMessage', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+    else:
+        _trial('bot_copyMessage', False, 'no bot_src_mid')
+
+    # ---------- 2–4) User session (balelink) ----------
+    home = os.environ.get('BALELINK_HOME') or os.path.expanduser('~/.balelink')
+    session_ok = os.path.isfile(os.path.join(home, 'me.bale'))
+    lines.append(f'balelink session exists={session_ok}')
+
+    async def _user_copy():
+        from balelink import BaleClient
+        from balelink.models import Chat, ChatKind
+        from aiobale.enums import ChatType, PeerType
+        from aiobale.types import (
+            Peer, MessageContent, DocumentMessage, MessageCaption, DocumentsExt, PhotoExt, TextMessage,
+        )
+        from aiobale.methods.messaging.send_message import SendMessage
+        from aiobale.utils import generate_id
+
+        local = {'ok': False, 'winning': None, 'cleanup': []}
+
+        async with BaleClient('me', directory=home) as bale:
+            transport = getattr(bale, '_transport', None)
+            client = getattr(transport, '_client', None) if transport else None
+            if client is None:
+                return {'error': 'no_client'}
+
+            # ارسال متن مبدأ با user
+            t0 = _time.time()
+            src_msg = None
+            for ct in (ChatType.GROUP, ChatType.CHANNEL):
+                try:
+                    src_msg = await client.send_message(text=text + ' [user-src]', chat_id=src_id, chat_type=ct)
+                    break
+                except Exception as e:
+                    last_send = _exc(e)
+                    src_msg = None
+            if src_msg is None:
+                _trial('user_send_src', False, locals().get('last_send', 'fail'), ms=int((_time.time() - t0) * 1000))
+                return local
+            src_mid = int(getattr(src_msg, 'message_id', 0) or 0)
+            _trial('user_send_src', True, mid=src_mid, ms=int((_time.time() - t0) * 1000))
+            local['cleanup'].append(('src', src_id, src_mid, getattr(src_msg, 'date', 0)))
+
+            # 2) کپی متن: همان متن به مقصد (بدون فوروارد)
+            t0 = _time.time()
+            try:
+                copied = await client.send_message(
+                    text=text + ' [user-src]',  # exact same body
+                    chat_id=dst_id,
+                    chat_type=ChatType.GROUP,
+                )
+                cm = int(getattr(copied, 'message_id', 0) or 0)
+                _trial('user_resend_same_text', True, mid=cm, ms=int((_time.time() - t0) * 1000), detail='text clone')
+                local['ok'] = True
+                local['winning'] = 'user_resend_same_text'
+                local['cleanup'].append(('dst', dst_id, cm, getattr(copied, 'date', 0)))
+            except Exception as e:
+                _trial('user_resend_same_text', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+
+            # استخراج file از تاریخچهٔ لینک‌بانک / مبدأ (اگر بنر رسانه‌ای باشد)
+            def _extract_file(msg) -> Optional[Dict[str, Any]]:
+                if msg is None:
+                    return None
+                doc = getattr(msg, 'document', None)
+                if doc is None:
+                    content = getattr(msg, 'content', None)
+                    doc = getattr(content, 'document', None) if content is not None else None
+                if doc is None:
+                    # dict-like / extra
+                    extra = getattr(msg, 'model_dump', None)
+                    return None
+                fid = getattr(doc, 'file_id', None)
+                ah = getattr(doc, 'access_hash', None)
+                if fid is None:
+                    return None
+                return {
+                    'file_id': fid,
+                    'access_hash': ah,
+                    'size': int(getattr(doc, 'size', 0) or 0),
+                    'name': str(getattr(doc, 'name', None) or 'banner.jpg'),
+                    'mime_type': str(getattr(doc, 'mime_type', None) or 'image/jpeg'),
+                }
+
+            # اگر در مبدأ پیام رسانه‌ای اخیر هست از تاریخچه بگیر
+            media_meta = None
+            media_msg = None
+            try:
+                hist = await client.load_history(chat_id=src_id, chat_type=ChatType.GROUP, limit=40)
+                for m in hist or []:
+                    meta = _extract_file(m)
+                    if meta and meta.get('file_id') and meta.get('access_hash') is not None:
+                        media_meta = meta
+                        media_msg = m
+                        break
+            except Exception as e:
+                lines.append(f'hist media scan: {_exc(e)}')
+
+            # لینک‌بانک هم اگر id داریم
+            lb_id = known.get('@linkbank')
+            if media_meta is None and lb_id:
+                try:
+                    hist = await client.load_history(chat_id=int(lb_id), chat_type=ChatType.GROUP, limit=40)
+                    for m in hist or []:
+                        meta = _extract_file(m)
+                        if meta and meta.get('file_id') is not None:
+                            media_meta = meta
+                            media_msg = m
+                            lines.append(f'media from linkbank mid={getattr(m, "message_id", None)}')
+                            break
+                except Exception as e:
+                    lines.append(f'linkbank hist: {_exc(e)}')
+
+            if media_meta:
+                lines.append(
+                    f"media_meta file_id={media_meta.get('file_id')} ah={media_meta.get('access_hash')} "
+                    f"name={media_meta.get('name')}"
+                )
+                # 3) SendMessage با همان file_id (کپی سمت سرور، بدون آپلود)
+                t0 = _time.time()
+                try:
+                    cap = MessageCaption(content=f'[{marker}] copy-by-file_id')
+                    document = DocumentMessage(
+                        file_id=media_meta['file_id'],
+                        size=int(media_meta.get('size') or 0),
+                        name=media_meta.get('name') or 'banner.jpg',
+                        mime_type=media_meta.get('mime_type') or 'image/jpeg',
+                        access_hash=int(media_meta['access_hash']),
+                        caption=cap,
+                        ext=DocumentsExt(photo=PhotoExt(w=1000, h=1000)),
+                    )
+                    content = MessageContent(document=document)
+                    peer = Peer(type=PeerType.GROUP, id=int(dst_id))
+                    from aiobale.types import Chat as AChat
+                    chat = AChat(id=int(dst_id), type=ChatType.GROUP)
+                    mid = generate_id()
+                    call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
+                    result = await client(call)
+                    msg = getattr(result, 'message', result)
+                    out_mid = getattr(msg, 'message_id', mid)
+                    _trial('user_copy_by_file_id', True, mid=out_mid, ms=int((_time.time() - t0) * 1000))
+                    local['ok'] = True
+                    local['winning'] = local.get('winning') or 'user_copy_by_file_id'
+                    local['cleanup'].append(('dst_media', dst_id, int(out_mid or 0), 0))
+                except Exception as e:
+                    _trial('user_copy_by_file_id', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+
+                # 4) wrapper send_existing_file_to_channel
+                t0 = _time.time()
+                try:
+                    # sync wrapper needs _run outside — call inline
+                    from aiobale.enums import ChatType as CT
+                    # already have client; duplicate above is enough
+                    _trial('user_send_existing_wrapper', False, 'covered_by_file_id_path', ms=0)
+                except Exception as e:
+                    _trial('user_send_existing_wrapper', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+            else:
+                _trial('user_copy_by_file_id', False, 'no_media_in_src_or_linkbank_history')
+                lines.append('⚠ برای تست کپی بنر تصویری، یک بنر رسانه‌ای در @linktest یا @linkbank باشد')
+
+            # cleanup
+            if do_delete:
+                lines.append('— حذف —')
+                for label, cid, mid, date in local.get('cleanup') or []:
+                    if not mid:
+                        continue
+                    try:
+                        d = date
+                        if hasattr(d, 'value'):
+                            d = d.value
+                        d = int(d or 0)
+                        await client.delete_message(
+                            message_id=int(mid), message_date=d,
+                            chat_id=int(cid), chat_type=ChatType.GROUP,
+                        )
+                        lines.append(f'✓ delete {label} mid={mid}')
+                    except Exception as e:
+                        lines.append(f'✗ delete {label}: {_exc(e)}')
+
+        return local
+
+    t0 = _time.time()
+    try:
+        from balelink import BaleClient  # noqa: F401
+        user_out = ly._run(_user_copy())
+    except Exception as e:
+        logger.exception('copy matrix user')
+        user_out = {'ok': False, 'error': _exc(e)}
+        _trial('user_session', False, _exc(e))
+
+    if not isinstance(user_out, dict):
+        user_out = {'ok': False}
+
+    # bot cleanup
+    if do_delete:
+        for mid, chat in ((bot_src_mid, src_ref), (bot_copy_mid, dst_ref)):
+            if not mid:
+                continue
+            try:
+                bc.delete_message(chat, int(mid))
+                lines.append(f'✓ bot delete mid={mid} in {chat}')
+            except Exception as e:
+                lines.append(f'✗ bot delete: {_exc(e)}')
+
+    any_ok = bool(user_out.get('ok')) or any(t.get('ok') and 'copy' in t.get('method', '') for t in trials)
+    # bot copy counts
+    if any(t.get('method') == 'bot_copyMessage' and t.get('ok') for t in trials):
+        any_ok = True
+        win_bot = 'bot_copyMessage'
+    else:
+        win_bot = None
+
+    winning = user_out.get('winning') or win_bot
+    lines.append(f'— جمع — winning={winning or "—"}')
+    lines.append('نتیجه: ' + ('حداقل یک روش کپی موفق' if any_ok else 'کپی ناموفق'))
+    lines.append(
+        'توضیح: copy واقعی = ارسال محتوای یکسان بدون هدر فوروارد؛ '
+        'برای تصویر با file_id سرور (بدون آپلود بایت). فوروارد به کانال ممکن نیست.'
+    )
+
+    return {
+        'ok': any_ok,
+        'marker': marker,
+        'winning': winning,
+        'trials': trials,
+        'message': '\n'.join(lines),
+        'lib': 'bot+balelink-file_id',
+    }
+
+
+
 def test_balelink_text_forward_channels(
     *,
     source_ref: str = '@linktest',

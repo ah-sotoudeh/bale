@@ -2246,7 +2246,7 @@ def api_operator_test_matrix(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(['POST'])
 def api_operator_test_linkyar_fwd(request: HttpRequest) -> JsonResponse:
-    """پشتیبان: متن در @linktest → فوروارد به @linktest2 با سشن Balelink."""
+    """پشتیبان: ماتریس کپی (copyMessage بازو + file_id لینک‌یار) بدون آپلود."""
     user, err = _auth_user(request)
     if err:
         return err
@@ -2259,7 +2259,7 @@ def api_operator_test_linkyar_fwd(request: HttpRequest) -> JsonResponse:
     do_delete = body.get('do_delete', True)
     if isinstance(do_delete, str):
         do_delete = do_delete.lower() not in ('0', 'false', 'no')
-    from orders.publish import test_balelink_text_forward_channels as test_linkyar_text_forward_channels
+    from orders.publish import test_copy_message_matrix as test_linkyar_text_forward_channels
     try:
         result = test_linkyar_text_forward_channels(source_ref=src, dest_ref=dst, do_delete=bool(do_delete))
     except Exception as exc:
