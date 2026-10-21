@@ -2182,8 +2182,12 @@ def send_existing_file_to_channel(
     caption: str = '',
     kind: str = 'photo',
 ) -> Dict[str, Any]:
-    """ارسال همان فایل سرور بله (بدون دانلود مجدد) — معادل copy بدون نقل‌قول."""
+    """ارسال همان فایل سرور بله (بدون دانلود/آپلود بایت) — یک‌بار فقط.
+
+    کتابخانه: baleclient (fork aiobale) + JWT لینک‌یار — نه balelink.
+    """
     async def _fn(client):
+        import asyncio as _aio
         from aiobale.enums import ChatType, PeerType
         from aiobale.types import (
             Chat,
@@ -2228,92 +2232,131 @@ def send_existing_file_to_channel(
             ext=ext,
         )
         content = MessageContent(document=document)
-        errors = []
-        # 1) high-level send_photo / send_document با همان DocumentMessage
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        errors: List[str] = []
+        cap_key = (caption or '')[:40]
+
+        async def _find_by_caption(limit: int = 15) -> List[Dict[str, Any]]:
+            if not cap_key:
+                return []
+            found: List[Dict[str, Any]] = []
             try:
-                if kind == 'photo':
-                    msg = await client.send_photo(
-                        photo=document,
-                        chat_id=peer_id,
-                        chat_type=ctype,
-                        caption=caption or None,
-                    )
-                else:
-                    msg = await client.send_document(
-                        document=document,
-                        chat_id=peer_id,
-                        chat_type=ctype,
-                        caption=caption or None,
-                    )
-                mid = getattr(msg, 'message_id', None)
-                date = getattr(msg, 'date', None)
-                if hasattr(date, 'value'):
-                    date = date.value
+                hist = await _load_history_raw(client, peer_id, access_hash, limit=limit)
+                if not hist.get('ok'):
+                    return []
+                uname = str(channel_ref).lstrip('@')
+                for it in hist.get('items') or []:
+                    parsed = _parse_raw_message_item(it, uname)
+                    if not parsed:
+                        continue
+                    prev = str(parsed.get('preview') or '')
+                    if cap_key in prev or (caption and caption in prev):
+                        found.append(parsed)
+            except Exception as e:
+                errors.append(f'hist:{type(e).__name__}:{e}')
+            return found
+
+        # قبل از ارسال: چند پیام با همین caption؟
+        before = await _find_by_caption()
+        before_ids = {int(p['message_id']) for p in before if p.get('message_id')}
+
+        async def _after_new() -> Optional[Dict[str, Any]]:
+            await _aio.sleep(1.2)
+            after = await _find_by_caption()
+            for p in after:
+                mid = p.get('message_id')
+                if mid is not None and int(mid) not in before_ids:
+                    return p
+            # اگر قبل خالی بود و حالا یکی هست
+            if not before_ids and after:
+                return after[0]
+            return None
+
+        # فقط یک تلاش اصلی: high-level GROUP (کانال‌های بله معمولاً GROUP)
+        try:
+            if kind == 'photo':
+                msg = await client.send_photo(
+                    photo=document,
+                    chat_id=peer_id,
+                    chat_type=ChatType.GROUP,
+                    caption=caption or None,
+                )
+            else:
+                msg = await client.send_document(
+                    document=document,
+                    chat_id=peer_id,
+                    chat_type=ChatType.GROUP,
+                    caption=caption or None,
+                )
+            mid = getattr(msg, 'message_id', None)
+            date = getattr(msg, 'date', None)
+            if hasattr(date, 'value'):
+                date = date.value
+            return {
+                'ok': True,
+                'message_id': mid,
+                'date': date,
+                'method': 'send_photo_highlevel/GROUP' if kind == 'photo' else 'send_document_highlevel/GROUP',
+                'lib': 'baleclient',
+                'via': 'jwt_token',
+            }
+        except Exception as e:
+            errors.append(f'hl/GROUP: {type(e).__name__}: {e}')
+            # ممکن است ارسال شده باشد ولی پاسخ parse نشوند
+            hit = await _after_new()
+            if hit:
                 return {
                     'ok': True,
-                    'message_id': mid,
-                    'date': date,
-                    'method': f'send_{kind}_highlevel/{ctype}',
+                    'message_id': hit.get('message_id'),
+                    'date': hit.get('date'),
+                    'method': 'hl_GROUP_recovered',
+                    'recovered': True,
+                    'lib': 'baleclient',
+                    'via': 'jwt_token',
+                    'tries': errors[:4],
                 }
-            except Exception as e:
-                errors.append(f'hl/{ctype}: {type(e).__name__}: {e}')
 
-        # 2) SendMessage خام
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        # fallback یک‌بار: SendMessage خام فقط GROUP
+        try:
             peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
             if access_hash not in (None, 0):
                 peer_kwargs['access_hash'] = int(access_hash)
             peer = Peer(**peer_kwargs)
-            chat = Chat(id=peer_id, type=ctype)
+            chat = Chat(id=peer_id, type=ChatType.GROUP)
             mid = generate_id()
             call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
-            try:
-                result = await client(call)
-                msg = getattr(result, 'message', result)
+            result = await client(call)
+            msg = getattr(result, 'message', result)
+            return {
+                'ok': True,
+                'message_id': getattr(msg, 'message_id', mid),
+                'date': getattr(msg, 'date', None),
+                'method': 'send_existing_raw/GROUP',
+                'lib': 'baleclient',
+                'via': 'jwt_token',
+            }
+        except Exception as e:
+            errors.append(f'raw/GROUP: {type(e).__name__}: {e}')
+            hit = await _after_new()
+            if hit:
                 return {
                     'ok': True,
-                    'message_id': getattr(msg, 'message_id', mid),
-                    'date': getattr(msg, 'date', None),
-                    'method': f'send_existing_raw/{ctype}',
-                    'chat_type': str(ctype),
+                    'message_id': hit.get('message_id'),
+                    'date': hit.get('date'),
+                    'method': 'raw_GROUP_recovered',
+                    'recovered': True,
+                    'lib': 'baleclient',
+                    'via': 'jwt_token',
+                    'tries': errors[:4],
                 }
-            except Exception as e:
-                errors.append(f'raw/{ctype}: {type(e).__name__}: {e}')
-
-        # 3) با وجود خطا، گاهی پیام می‌رسد — با caption در تاریخچه پیدا کن
-        if caption:
-            import asyncio as _aio
-            await _aio.sleep(1.5)
-            try:
-                hist = await _load_history_raw(client, peer_id, access_hash, limit=20)
-                if hist.get('ok'):
-                    uname = str(channel_ref).lstrip('@')
-                    for it in hist.get('items') or []:
-                        parsed = _parse_raw_message_item(it, uname)
-                        if not parsed:
-                            continue
-                        prev = str(parsed.get('preview') or '')
-                        if caption[:24] in prev or (caption and caption in prev):
-                            return {
-                                'ok': True,
-                                'message_id': parsed.get('message_id'),
-                                'date': parsed.get('date'),
-                                'method': 'send_existing_recovered',
-                                'recovered': True,
-                                'tries': errors[:6],
-                            }
-            except Exception as e:
-                errors.append(f'recover: {type(e).__name__}: {e}')
 
         return {
             'ok': False,
             'error': 'send_existing_failed',
-            'tries': errors[:10],
+            'tries': errors[:8],
             'file_id': file_id,
             'file_access_hash': file_access_hash,
-            'mime_type': mime_type,
-            'file_name': file_name,
+            'lib': 'baleclient',
+            'via': 'jwt_token',
         }
 
     return _run(_with_client(_fn))

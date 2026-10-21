@@ -2985,14 +2985,14 @@ def test_copy_message_matrix(
             )
             if ok and mid:
                 cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
-            # اگر API خطا داد ولی با marker در مقصد چیزی هست، حذفش کن
-            elif marker:
+            # همهٔ پیام‌های با این marker در مقصد (جلوگیری از ماندن نسخهٔ اول در double-send)
+            if marker:
                 try:
-                    h2 = ly.load_channel_history(dst_ref, limit=15)
+                    h2 = ly.load_channel_history(dst_ref, limit=20)
                     for p in list((h2 or {}).get('messages') or []):
-                        if marker in str(p.get('preview') or ''):
+                        if marker in str(p.get('preview') or '') and p.get('message_id'):
                             cleanup.append((dst_ref, int(p['message_id']), int(p.get('date') or 0)))
-                            lines.append(f'⚠ orphan media by marker mid={p.get("message_id")} scheduled delete')
+                            lines.append(f'marker-hit mid={p.get("message_id")} kind={p.get("kind")} scheduled delete')
                 except Exception:
                     pass
         except Exception as e:
@@ -3023,7 +3023,7 @@ def test_copy_message_matrix(
         'winning': winning,
         'trials': trials,
         'message': '\n'.join(lines),
-        'lib': 'linkyar-only',
+        'lib': 'baleclient+jwt (not balelink)',
     }
 
 
