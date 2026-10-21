@@ -2831,35 +2831,31 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
 def test_copy_message_matrix(
     *,
     source_ref: str = '@linktest',
     dest_ref: str = '@linktest2',
     do_delete: bool = True,
 ) -> Dict[str, Any]:
-    """کپی بدون آپلود بایت — با helperهای پایدار linkyar + Bot API.
+    """فقط لینک‌یار: کپی محتوا بدون آپلود بایت (بازو در این تست نیست).
 
-    1) تشخیص: آیا لینک‌یار/بازو اصلاً به مقصد می‌توانند پیام بفرستند؟
-    2) bot copyMessage / bot forwardMessage
-    3) لینک‌یار resend متن با send_text_to_channel
-    4) لینک‌یار send_existing_file (file_id از تاریخچهٔ raw)
+    1) ارسال متن به مبدأ و مقصد (قابلیت)
+    2) کلون متن به مقصد
+    3) پیدا کردن رسانه در تاریخچه (با parser بهبودیافته) → send_existing_file_id
     """
     import time as _time
 
     src_ref = str(source_ref or '@linktest').strip()
     dst_ref = str(dest_ref or '@linktest2').strip()
     marker = f'ly-copy-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
-    text = f'[{marker}] copy-matrix'
+    text = f'[{marker}] ly-copy'
     lines: List[str] = [
-        f'ماتریس کپی | {src_ref} → {dst_ref}',
+        f'ماتریس کپی فقط لینک‌یار | {src_ref} → {dst_ref}',
         f'marker: {marker}',
     ]
     trials: List[Dict[str, Any]] = []
-    cleanup_bot: List[tuple] = []
-    cleanup_ly: List[tuple] = []
-
-    def _exc(e: BaseException) -> str:
-        return f'{type(e).__name__}:{e}'[:280]
+    cleanup: List[tuple] = []
 
     def _trial(name: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> None:
         trials.append({
@@ -2867,115 +2863,84 @@ def test_copy_message_matrix(
             'message_id': int(mid) if mid is not None else None,
             'ms': int(ms), 'detail': (detail or '')[:160],
         })
-        extra = err or detail or (f'mid={mid}' if mid is not None else '')
-        lines.append(f"{'✓' if ok else '✗'} [{name}] ({ms}ms) {extra}")
+        lines.append(f"{'✓' if ok else '✗'} [{name}] ({ms}ms) {err or detail or (f'mid={mid}' if mid is not None else '')}")
 
-    # ---- 0) capability: send text to src and dst (linkyar + bot) ----
+    # cap src/dst
     for label, ref in (('src', src_ref), ('dst', dst_ref)):
         t0 = _time.time()
         try:
-            r = ly.send_text_to_channel(ref, f'{text} ly-cap-{label}')
+            r = ly.send_text_to_channel(ref, f'{text}-{label}')
             ok = bool(isinstance(r, dict) and r.get('ok'))
             mid = (r or {}).get('message_id') if isinstance(r, dict) else None
-            _trial(f'ly_cap_send_{label}', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
+            _trial(f'cap_send_{label}', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
             if ok and mid:
-                cleanup_ly.append((ref, int(mid), int((r or {}).get('date') or 0)))
+                cleanup.append((ref, int(mid), int((r or {}).get('date') or 0)))
         except Exception as e:
-            _trial(f'ly_cap_send_{label}', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+            _trial(f'cap_send_{label}', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
 
-        t0 = _time.time()
-        try:
-            r = bc.send_message(ref, f'{text} bot-cap-{label}')
-            ok = bool(isinstance(r, dict) and r.get('ok'))
-            mid = None
-            if ok:
-                mid = ((r.get('result') or {}) if isinstance(r, dict) else {}).get('message_id')
-            _trial(f'bot_cap_send_{label}', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
-            if ok and mid:
-                cleanup_bot.append((ref, int(mid)))
-        except Exception as e:
-            _trial(f'bot_cap_send_{label}', False, _exc(e), ms=int((_time.time() - t0) * 1000))
-
-    # ---- 1) Bot: send on src then copyMessage + forwardMessage to dst ----
-    t0 = _time.time()
-    bot_src_mid = None
-    try:
-        r = bc.send_message(src_ref, f'{text} bot-src-for-copy')
-        ok = bool(isinstance(r, dict) and r.get('ok'))
-        if ok:
-            bot_src_mid = ((r.get('result') or {})).get('message_id')
-            cleanup_bot.append((src_ref, int(bot_src_mid)))
-        _trial('bot_send_for_copy', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=bot_src_mid, ms=int((_time.time() - t0) * 1000))
-    except Exception as e:
-        _trial('bot_send_for_copy', False, _exc(e), ms=int((_time.time() - t0) * 1000))
-
-    if bot_src_mid:
-        t0 = _time.time()
-        try:
-            r = bc.copy_message(dst_ref, src_ref, int(bot_src_mid))
-            ok = bool(isinstance(r, dict) and r.get('ok'))
-            mid = ((r.get('result') or {}) if ok else {}).get('message_id')
-            _trial('bot_copyMessage', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
-            if ok and mid:
-                cleanup_bot.append((dst_ref, int(mid)))
-        except Exception as e:
-            _trial('bot_copyMessage', False, _exc(e), ms=int((_time.time() - t0) * 1000))
-
-        t0 = _time.time()
-        try:
-            r = bc.forward_message(dst_ref, src_ref, int(bot_src_mid))
-            ok = bool(isinstance(r, dict) and r.get('ok'))
-            mid = ((r.get('result') or {}) if ok else {}).get('message_id')
-            _trial('bot_forwardMessage', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
-            if ok and mid:
-                cleanup_bot.append((dst_ref, int(mid)))
-        except Exception as e:
-            _trial('bot_forwardMessage', False, _exc(e), ms=int((_time.time() - t0) * 1000))
-
-    # ---- 2) Linkyar: text "copy" via send_text_to_channel (same body) ----
+    # text clone
     t0 = _time.time()
     try:
-        r = ly.send_text_to_channel(dst_ref, f'{text} ly-text-clone')
+        r = ly.send_text_to_channel(dst_ref, f'{text}-clone')
         ok = bool(isinstance(r, dict) and r.get('ok'))
         mid = (r or {}).get('message_id') if isinstance(r, dict) else None
-        _trial('ly_text_clone_to_dst', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
+        _trial('text_clone_to_dst', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
         if ok and mid:
-            cleanup_ly.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
+            cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
     except Exception as e:
-        _trial('ly_text_clone_to_dst', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+        _trial('text_clone_to_dst', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
 
-    # ---- 3) Media file_id from raw history (src + linkbank) ----
+    # history media scan
     media = None
-    for href in (src_ref, '@linkbank', '@linktest'):
+    kind_counts: Dict[str, int] = {}
+    for href in (src_ref, '@linkbank'):
         try:
-            hist = ly.load_channel_history(href, limit=30)
+            hist = ly.load_channel_history(href, limit=40)
         except Exception as e:
-            lines.append(f'hist {href}: {_exc(e)}')
+            lines.append(f'hist {href}: {type(e).__name__}:{e}')
             continue
         if not isinstance(hist, dict) or not hist.get('ok'):
             lines.append(f'hist {href}: {(hist or {}).get("error")}')
             continue
-        lines.append(f'hist {href}: count={hist.get("count")} peer={hist.get("peer_id")} ah={hist.get("access_hash")}')
-        for p in list(hist.get('messages') or []):
+        msgs = list(hist.get('messages') or [])
+        lines.append(f'hist {href}: n={len(msgs)} peer={hist.get("peer_id")} ah={hist.get("access_hash")}')
+        for p in msgs:
+            k = str(p.get('kind') or 'unknown')
+            kind_counts[k] = kind_counts.get(k, 0) + 1
             if p.get('file_id') is not None and p.get('file_access_hash') is not None:
                 media = {
                     'from': href,
-                    'message_id': p.get('message_id'),
-                    'file_id': p.get('file_id'),
-                    'file_access_hash': p.get('file_access_hash'),
-                    'file_size': p.get('file_size') or 0,
-                    'file_name': p.get('file_name') or 'banner.jpg',
-                    'kind': p.get('kind') or 'photo',
-                    'preview': str(p.get('preview') or '')[:40],
+                    **{kk: p.get(kk) for kk in (
+                        'message_id', 'file_id', 'file_access_hash', 'file_size',
+                        'file_name', 'kind', 'preview', 'mime',
+                    )},
                 }
                 break
         if media:
             break
+        # نمونه برای دیباگ: اولین غیرمتن
+        for p in msgs:
+            if p.get('kind') not in ('text', None):
+                lines.append(
+                    f"sample non-text kind={p.get('kind')} keys={p.get('content_keys')} "
+                    f"mid={p.get('message_id')} mime={p.get('mime')} name={p.get('file_name')}"
+                )
+                break
+        else:
+            # اگر همه text/unknown — content_keys نمونه
+            for p in msgs[:3]:
+                lines.append(
+                    f"sample mid={p.get('message_id')} kind={p.get('kind')} "
+                    f"keys={p.get('content_keys')} prev={str(p.get('preview') or '')[:30]!r}"
+                )
+
+    lines.append('kind_counts=' + str(kind_counts))
 
     if media:
         lines.append(
-            f"media from {media['from']} mid={media['message_id']} "
-            f"file_id={media['file_id']} ah={media['file_access_hash']}"
+            f"media from={media.get('from')} mid={media.get('message_id')} "
+            f"file_id={media.get('file_id')} ah={media.get('file_access_hash')} "
+            f"name={media.get('file_name')} mime={media.get('mime')}"
         )
         t0 = _time.time()
         try:
@@ -2985,71 +2950,49 @@ def test_copy_message_matrix(
                 file_access_hash=int(media['file_access_hash']),
                 file_size=int(media.get('file_size') or 0),
                 file_name=str(media.get('file_name') or 'banner.jpg'),
-                caption=f'[{marker}] copy-by-file_id',
-                kind='photo' if media.get('kind') in ('photo', '', None) else str(media.get('kind')),
+                caption=f'[{marker}] file_id-copy',
+                kind='photo' if str(media.get('kind') or '').startswith('photo') or str(media.get('mime') or '').startswith('image/') else 'document',
             )
             ok = bool(isinstance(r, dict) and r.get('ok'))
             mid = (r or {}).get('message_id') if isinstance(r, dict) else None
             _trial(
-                'ly_copy_by_file_id',
+                'copy_by_file_id',
                 ok,
                 '' if ok else str((r or {}).get('error') or r)[:220],
                 mid=mid,
                 ms=int((_time.time() - t0) * 1000),
             )
             if ok and mid:
-                cleanup_ly.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
+                cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
         except Exception as e:
-            _trial('ly_copy_by_file_id', False, _exc(e), ms=int((_time.time() - t0) * 1000))
+            _trial('copy_by_file_id', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
     else:
-        _trial('ly_copy_by_file_id', False, 'no_media_file_id_in_history')
-        lines.append('⚠ بنر تصویری در تاریخچهٔ مبدأ/لینک‌بانک پیدا نشد (یا parse نشد)')
+        _trial('copy_by_file_id', False, 'no_media_file_id_parsed')
+        lines.append('⚠ هیچ file_id از تاریخچه استخراج نشد — بنر تصویری را در لینک‌بانک/مبدأ چک کنید')
 
-    # ---- cleanup ----
     if do_delete:
         lines.append('— حذف —')
-        for ref, mid in cleanup_bot:
-            try:
-                bc.delete_message(ref, int(mid))
-                lines.append(f'✓ bot del {ref} mid={mid}')
-            except Exception as e:
-                lines.append(f'✗ bot del: {_exc(e)}')
-        for ref, mid, date in cleanup_ly:
+        for ref, mid, date in cleanup:
             try:
                 r = ly.delete_message(ref, int(mid), message_date=int(date or 0))
                 ok = bool(isinstance(r, dict) and r.get('ok'))
-                lines.append(('✓' if ok else '✗') + f' ly del {ref} mid={mid} {"" if ok else (r or {}).get("error")}')
+                lines.append(('✓' if ok else '✗') + f' del {ref} mid={mid}')
             except Exception as e:
-                lines.append(f'✗ ly del: {_exc(e)}')
+                lines.append(f'✗ del {type(e).__name__}:{e}')
 
-    winning = next((t['method'] for t in trials if t.get('ok') and 'copy' in t['method'].lower()), None)
-    if not winning:
-        winning = next((t['method'] for t in trials if t.get('ok') and t['method'] in (
-            'bot_forwardMessage', 'ly_text_clone_to_dst', 'ly_copy_by_file_id', 'bot_copyMessage',
-        )), None)
-    any_copy = any(
-        t.get('ok') and t['method'] in (
-            'bot_copyMessage', 'bot_forwardMessage', 'ly_copy_by_file_id', 'ly_text_clone_to_dst',
-        )
-        for t in trials
-    )
+    winning = next((t['method'] for t in trials if t.get('ok') and t['method'] in (
+        'copy_by_file_id', 'text_clone_to_dst',
+    )), None)
+    any_ok = winning is not None
     lines.append(f'— جمع — winning={winning or "—"}')
-    lines.append('نتیجه: ' + ('کپی/کلون موفق' if any_copy else 'کپی ناموفق'))
-    # capability summary
-    ly_dst = next((t for t in trials if t['method'] == 'ly_cap_send_dst'), None)
-    bot_dst = next((t for t in trials if t['method'] == 'bot_cap_send_dst'), None)
-    if ly_dst and not ly_dst.get('ok'):
-        lines.append('⚠ لینک‌یار به مقصد نمی‌تواند پیام بفرستد — اول ادمین بودن و peer را چک کنید')
-    if bot_dst and not bot_dst.get('ok'):
-        lines.append('⚠ بازو به مقصد دسترسی ارسال ندارد — برای copyMessage بازو باید ادمین مقصد باشد')
-
+    lines.append('نتیجه: ' + ('کپی موفق' if any_ok else 'کپی ناموفق'))
     return {
-        'ok': any_copy,
+        'ok': any_ok,
         'marker': marker,
         'winning': winning,
         'trials': trials,
         'message': '\n'.join(lines),
-        'lib': 'bot+linkyar-helpers',
+        'lib': 'linkyar-only',
     }
 
 

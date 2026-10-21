@@ -360,19 +360,80 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     if not isinstance(item, dict):
         return None
 
-    def g(*keys):
+    def g(obj, *keys):
+        if not isinstance(obj, dict):
+            return None
         for k in keys:
-            if k in item:
-                return item[k]
+            if k in obj:
+                return obj[k]
             sk = str(k)
-            if sk in item:
-                return item[sk]
+            if sk in obj:
+                return obj[sk]
         return None
 
-    sender = g(1, '1')
-    mid = g(2, '2')
-    date = g(3, '3')
-    content = g(4, '4')
+    def _as_int(v):
+        try:
+            if v is None:
+                return None
+            if isinstance(v, dict) and ('1' in v or 1 in v):
+                v = v.get('1', v.get(1))
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _find_document(obj: Any, depth: int = 0) -> Optional[Dict[str, Any]]:
+        """جست‌وجوی بازگشتی DocumentMessage در ساختار خام protobuf-json."""
+        if depth > 8 or obj is None:
+            return None
+        if isinstance(obj, dict):
+            # شکل رایج DocumentMessage: 1=file_id, 2=access_hash, 3=size, 4=name, 5=mime
+            fid = g(obj, 1, '1', 'file_id', 'fileId')
+            ah = g(obj, 2, '2', 'access_hash', 'accessHash')
+            mime = g(obj, 5, '5', 'mime_type', 'mimeType')
+            name = g(obj, 4, '4', 'name', 'file_name')
+            size = g(obj, 3, '3', 'size', 'file_size')
+            # file_id در بله اغلب int خیلی بزرگ یا str است
+            fid_i = _as_int(fid)
+            ah_i = _as_int(ah)
+            mime_s = str(mime) if mime is not None and not isinstance(mime, dict) else ''
+            name_s = ''
+            if isinstance(name, str):
+                name_s = name
+            elif isinstance(name, dict):
+                name_s = str(g(name, 1, '1') or '')
+            # اگر mime/image یا name پسوند تصویر دارد و file_id داریم
+            looks_doc = fid_i is not None and ah_i is not None and (
+                bool(mime_s) or bool(name_s) or size is not None
+            )
+            # بعضی وقت‌ها فقط file_id + access_hash بدون mime
+            if fid_i is not None and ah_i is not None and (looks_doc or depth >= 1):
+                if mime_s or name_s or (size is not None) or depth >= 2:
+                    return {
+                        'file_id': fid_i,
+                        'file_access_hash': ah_i,
+                        'file_size': _as_int(size) or 0,
+                        'file_name': name_s or 'banner.jpg',
+                        'mime_type': mime_s or 'application/octet-stream',
+                    }
+            for v in obj.values():
+                found = _find_document(v, depth + 1)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for v in obj:
+                found = _find_document(v, depth + 1)
+                if found:
+                    return found
+        return None
+
+    sender = g(item, 1, '1', 'sender_id')
+    mid = g(item, 2, '2', 'message_id', 'rid')
+    date = g(item, 3, '3', 'date')
+    content = g(item, 4, '4', 'message', 'content')
+
+    # بعضی پاسخ‌ها message را زیر 5 می‌گذارند
+    if content is None:
+        content = g(item, 5, '5')
 
     if mid is None:
         return None
@@ -384,59 +445,69 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     file_access_hash = None
     file_size = None
     file_name = None
+    content_keys = list(content.keys())[:12] if isinstance(content, dict) else None
 
     if isinstance(content, dict):
-        # MessageContent: text alias 1, document alias 2 (approx)
-        text = content.get(1) or content.get('1')
-        doc = content.get(2) or content.get('2')
+        text = g(content, 1, '1', 'text', 'textMessage')
+        doc = g(content, 2, '2', 'document', 'documentMessage')
         if isinstance(text, dict):
             kind = 'text'
-            preview = str(text.get(1) or text.get('1') or '')[:120]
-        elif isinstance(doc, dict):
-            mime = str(doc.get(5) or doc.get('5') or '')
-            file_id = doc.get(1) or doc.get('1')
-            try:
-                file_access_hash = int(doc.get(2) or doc.get('2') or 0) or None
-            except (TypeError, ValueError):
-                file_access_hash = None
-            try:
-                file_size = int(doc.get(3) or doc.get('3') or 0) or None
-            except (TypeError, ValueError):
-                file_size = None
-            name = doc.get(4) or doc.get('4')
+            preview = str(g(text, 1, '1', 'text', 'value') or '')[:120]
+        elif isinstance(text, str) and text.strip():
+            kind = 'text'
+            preview = text[:120]
+        if isinstance(doc, dict):
+            mime = str(g(doc, 5, '5') or '')
+            file_id = _as_int(g(doc, 1, '1'))
+            file_access_hash = _as_int(g(doc, 2, '2'))
+            file_size = _as_int(g(doc, 3, '3'))
+            name = g(doc, 4, '4')
             if isinstance(name, dict):
-                name = str(name)
+                name = str(g(name, 1, '1') or '')
             file_name = name if isinstance(name, str) else None
-            cap = doc.get(8) or doc.get('8')
+            cap = g(doc, 8, '8', 7, '7')
             cap_text = ''
             if isinstance(cap, dict):
-                cap_text = str(cap.get(1) or cap.get('1') or '')
-            if mime.startswith('image/') or (
-                isinstance(name, str) and name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))
+                cap_text = str(g(cap, 1, '1') or '')
+            if (mime or '').startswith('image/') or (
+                isinstance(file_name, str) and file_name.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))
             ):
                 kind = 'photo'
-            elif mime.startswith('video/'):
+            elif (mime or '').startswith('video/'):
                 kind = 'video'
             else:
                 kind = 'document'
-            preview = (cap_text or (name if isinstance(name, str) else '') or mime)[:120]
+            preview = (cap_text or file_name or mime or '')[:120]
+        if file_id is None:
+            found = _find_document(content)
+            if found:
+                file_id = found['file_id']
+                file_access_hash = found['file_access_hash']
+                file_size = found.get('file_size')
+                file_name = found.get('file_name')
+                mime = found.get('mime_type') or mime
+                if kind in ('unknown', 'text') and file_id:
+                    kind = 'document'
+                    if (mime or '').startswith('image/'):
+                        kind = 'photo'
 
-    try:
-        mid_i = int(mid)
-    except (TypeError, ValueError):
+    # کل item را هم در صورت نیاز بگرد
+    if file_id is None:
+        found = _find_document(item)
+        if found:
+            file_id = found['file_id']
+            file_access_hash = found['file_access_hash']
+            file_size = found.get('file_size')
+            file_name = found.get('file_name')
+            mime = found.get('mime_type') or mime
+            if kind == 'unknown':
+                kind = 'document'
+
+    mid_i = _as_int(mid)
+    if mid_i is None:
         return None
-    try:
-        date_i = int(date) if date is not None else None
-    except (TypeError, ValueError):
-        date_i = None
-    try:
-        sender_i = int(sender) if sender is not None else None
-    except (TypeError, ValueError):
-        sender_i = None
-
-    permalink = None
-    if date_i is not None and channel_username:
-        permalink = message_permalink(channel_username, mid_i, date_i)
+    date_i = _as_int(date)
+    sender_i = _as_int(sender)
 
     return {
         'message_id': mid_i,
@@ -444,14 +515,15 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
         'sender_id': sender_i,
         'kind': kind,
         'preview': preview,
-        'mime_type': mime,
+        'mime': mime,
         'file_id': file_id,
         'file_access_hash': file_access_hash,
         'file_size': file_size,
         'file_name': file_name,
-        'permalink': permalink,
-        'raw_keys': list(item.keys()) if isinstance(item, dict) else None,
+        'content_keys': content_keys,
+        'channel': channel_username,
     }
+
 
 
 async def _load_history_raw(
