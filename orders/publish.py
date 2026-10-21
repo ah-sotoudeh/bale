@@ -2826,6 +2826,261 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
+def test_balelink_text_forward_channels(
+    *,
+    source_ref: str = '@linktest',
+    dest_ref: str = '@linktest2',
+    do_delete: bool = True,
+) -> Dict[str, Any]:
+    """تست فوروارد با سشن واقعی Balelink (نه JWT تزریقی).
+
+    نیاز: ``balelink login me`` روی سرور → ~/.balelink/me.bale
+    مسیر: متن → مبدأ → فوروارد → مقصد → حذف فقط همین پیام‌ها
+    """
+    import os
+    import time as _time
+
+    src_ref = str(source_ref or '@linktest').strip()
+    dst_ref = str(dest_ref or '@linktest2').strip()
+    marker = f'ly-bl-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
+    text = f'[{marker}] تست فوروارد balelink {src_ref}→{dst_ref}'
+    lines = [
+        f'تست فوروارد با Balelink | {src_ref} → {dst_ref}',
+        f'marker: {marker}',
+    ]
+    trials: List[Dict[str, Any]] = []
+
+    # peer idهای شناخته‌شده از تست‌های قبلی (در صورت نبود در dialogs)
+    known_ids = {
+        '@linktest': 1497133952,
+        'linktest': 1497133952,
+        '@linktest2': 781346644,
+        'linktest2': 781346644,
+    }
+
+    def _row(method: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> Dict[str, Any]:
+        r = {
+            'method': method, 'ok': ok, 'error': (err or '')[:300],
+            'message_id': int(mid) if mid is not None else None,
+            'message_date': None, 'ms': ms, 'detail': detail[:200],
+        }
+        trials.append(r)
+        return r
+
+    try:
+        from balelink import BaleClient
+        from balelink.models import Chat, ChatKind
+    except Exception as e:
+        lines.append(f'✗ balelink نصب نیست: {type(e).__name__}: {e}')
+        return {
+            'ok': False, 'error': 'balelink_missing', 'message': '\n'.join(lines),
+            'trials': trials, 'marker': marker,
+            'hint': 'روی سرور: pip install balelink && balelink login me',
+        }
+
+    home = os.environ.get('BALELINK_HOME') or os.path.expanduser('~/.balelink')
+    session_path = os.path.join(home, 'me.bale')
+    lines.append(f'session: {session_path} exists={os.path.isfile(session_path)}')
+
+    async def _run():
+        async with BaleClient('me', directory=home) as bale:
+            if not getattr(bale, 'is_logged_in', False):
+                # بعضی نسخه‌ها is_logged_in بعد از enter ست می‌شود
+                me = getattr(bale, 'me', None)
+                if me is None:
+                    return {'ok': False, 'error': 'not_logged_in', 'detail': f'no session at {session_path}'}
+
+            me = getattr(bale, 'me', None)
+            me_id = getattr(me, 'id', None) if me else None
+            lines_local = [f'me={me_id}']
+
+            # dialogs برای تشخیص kind
+            dialogs = []
+            try:
+                dialogs = await bale.dialogs(limit=100)
+                lines_local.append(f'dialogs={len(dialogs)}')
+            except Exception as e:
+                lines_local.append(f'dialogs_err:{type(e).__name__}:{e}')
+
+            def _pick_chat(ref: str) -> Optional[Any]:
+                key = ref.lstrip('@').lower()
+                # 1) از dialogs با username در group_info — فقط id
+                want_id = known_ids.get(ref) or known_ids.get(key)
+                if want_id:
+                    for d in dialogs:
+                        if int(getattr(d, 'id', 0) or 0) == int(want_id):
+                            return d
+                    # kind را حدس بزن
+                    for kind in (ChatKind.GROUP, ChatKind.CHANNEL, ChatKind.SUPER_GROUP):
+                        return Chat(int(want_id), kind)
+                # 2) اگر ref عددی است
+                if ref.lstrip('-').isdigit():
+                    for d in dialogs:
+                        if int(d.id) == int(ref):
+                            return d
+                    return Chat(int(ref), ChatKind.GROUP)
+                return None
+
+            src_chat = _pick_chat(src_ref)
+            dst_chat = _pick_chat(dst_ref)
+            if src_chat is None or dst_chat is None:
+                return {
+                    'ok': False,
+                    'error': f'resolve_failed src={src_chat} dst={dst_chat}',
+                    'lines': lines_local,
+                    'dialog_ids': [getattr(d, 'id', None) for d in dialogs[:20]],
+                }
+            lines_local.append(f'src_chat={src_chat.id}/{getattr(src_chat.kind, "value", src_chat.kind)}')
+            lines_local.append(f'dst_chat={dst_chat.id}/{getattr(dst_chat.kind, "value", dst_chat.kind)}')
+
+            # ارسال متن — اگر kind غلط بود، چند kind را امتحان کن
+            sent = None
+            send_err = ''
+            for kind in (
+                getattr(src_chat, 'kind', ChatKind.GROUP),
+                ChatKind.GROUP,
+                ChatKind.CHANNEL,
+                ChatKind.SUPER_GROUP,
+            ):
+                try_chat = Chat(int(src_chat.id), kind)
+                try:
+                    sent = await bale.send_text(try_chat, text)
+                    src_chat = try_chat
+                    send_err = ''
+                    break
+                except Exception as e:
+                    send_err = f'{kind}:{type(e).__name__}:{e}'
+            if sent is None:
+                return {'ok': False, 'error': f'send_failed:{send_err}', 'lines': lines_local}
+
+            sent_id = getattr(sent, 'id', None)
+            lines_local.append(f'sent id={sent_id} chat={src_chat.id}')
+
+            # فوروارد
+            fwd_err = ''
+            fwd_ok = False
+            for kind in (
+                getattr(dst_chat, 'kind', ChatKind.GROUP),
+                ChatKind.GROUP,
+                ChatKind.CHANNEL,
+                ChatKind.SUPER_GROUP,
+            ):
+                try_dst = Chat(int(dst_chat.id), kind)
+                try:
+                    await bale.forward_messages([sent], try_dst)
+                    dst_chat = try_dst
+                    fwd_ok = True
+                    fwd_err = ''
+                    break
+                except Exception as e:
+                    fwd_err = f'{kind}:{type(e).__name__}:{e}'
+                    # جایگزین: message.forward
+                    try:
+                        await sent.forward(try_dst)
+                        dst_chat = try_dst
+                        fwd_ok = True
+                        fwd_err = ''
+                        break
+                    except Exception as e2:
+                        fwd_err = f'{kind}:fwd={type(e).__name__}:{e}|msg.fwd={type(e2).__name__}:{e2}'
+
+            # تأیید در مقصد
+            dest_mid = None
+            if fwd_ok:
+                import asyncio as _aio
+                await _aio.sleep(1.2)
+                try:
+                    hist = await bale.history(dst_chat, limit=15)
+                    for m in hist:
+                        if marker in str(getattr(m, 'text', None) or ''):
+                            dest_mid = getattr(m, 'id', None)
+                            break
+                    if dest_mid is None and hist:
+                        dest_mid = getattr(hist[0], 'id', None)
+                        lines_local.append('dest_marker_not_found_using_top')
+                except Exception as e:
+                    lines_local.append(f'dest_hist:{type(e).__name__}:{e}')
+
+            # حذف
+            deleted = []
+            if do_delete:
+                try:
+                    await sent.delete(just_me=False)
+                    deleted.append(f'src:{sent_id}:ok')
+                except Exception as e:
+                    deleted.append(f'src:{sent_id}:{type(e).__name__}:{e}')
+                if dest_mid:
+                    try:
+                        # پیدا کردن Message در تاریخچه برای delete
+                        hist = await bale.history(dst_chat, limit=20)
+                        target_m = None
+                        for m in hist:
+                            if getattr(m, 'id', None) == dest_mid or marker in str(getattr(m, 'text', None) or ''):
+                                target_m = m
+                                break
+                        if target_m:
+                            await target_m.delete(just_me=False)
+                            deleted.append(f'dst:{dest_mid}:ok')
+                        else:
+                            deleted.append(f'dst:{dest_mid}:not_found')
+                    except Exception as e:
+                        deleted.append(f'dst:{dest_mid}:{type(e).__name__}:{e}')
+
+            return {
+                'ok': bool(fwd_ok),
+                'sent_id': sent_id,
+                'dest_mid': dest_mid,
+                'fwd_error': fwd_err,
+                'deleted': deleted,
+                'lines': lines_local,
+                'src': f'{src_chat.id}/{src_chat.kind}',
+                'dst': f'{dst_chat.id}/{dst_chat.kind}',
+            }
+
+    t0 = _time.time()
+    try:
+        out = ly._run(_run())
+    except Exception as e:
+        logger.exception('balelink test')
+        out = {'ok': False, 'error': f'{type(e).__name__}:{e}'}
+    ms = int((_time.time() - t0) * 1000)
+
+    if not isinstance(out, dict):
+        out = {'ok': False, 'error': str(out)}
+
+    for ln in out.get('lines') or []:
+        lines.append(str(ln))
+    if out.get('error') and not out.get('sent_id'):
+        lines.append(f'✗ {out.get("error")}')
+    else:
+        lines.append(('✓' if out.get('sent_id') else '✗') + f" ارسال ({ms}ms) mid={out.get('sent_id')}")
+        if out.get('ok'):
+            lines.append(f"✓ فوروارد به {dst_ref} dest_mid={out.get('dest_mid')}")
+        else:
+            lines.append(f"✗ فوروارد: {out.get('fwd_error') or out.get('error') or 'failed'}")
+        for d in out.get('deleted') or []:
+            lines.append(f'حذف: {d}')
+
+    _row('balelink_send', bool(out.get('sent_id')), out.get('error') or '', out.get('sent_id'), ms)
+    _row('balelink_forward', bool(out.get('ok')), out.get('fwd_error') or out.get('error') or '', out.get('dest_mid'), 0)
+
+    lines.append('نتیجه: ' + ('فوروارد موفق (balelink)' if out.get('ok') else 'فوروارد ناموفق'))
+    return {
+        'ok': bool(out.get('ok')),
+        'marker': marker,
+        'source': src_ref,
+        'dest': dst_ref,
+        'source_mid': out.get('sent_id'),
+        'dest_mid': out.get('dest_mid'),
+        'trials': trials,
+        'message': '\n'.join(lines),
+        'lib': 'balelink',
+        'raw': {k: out.get(k) for k in ('src', 'dst', 'fwd_error', 'deleted', 'error')},
+    }
+
+
+
 def test_linkyar_text_forward_channels(
     *,
     source_ref: str = '@linktest',
