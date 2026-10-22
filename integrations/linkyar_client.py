@@ -356,7 +356,7 @@ async def _resolve_peer(client, channel_ref: str) -> Dict[str, Any]:
 
 
 def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[str, Any]]:
-    """Parse one MessageData dict from raw LoadHistory (aliases as str keys)."""
+    """Parse MessageData: content=alias4, document=alias4, text=alias15."""
     if not isinstance(item, dict):
         return None
 
@@ -373,9 +373,7 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
 
     def _as_int(v):
         try:
-            if v is None:
-                return None
-            if isinstance(v, bool):
+            if v is None or isinstance(v, bool):
                 return None
             if isinstance(v, dict):
                 v = v.get('1', v.get(1, v.get('value')))
@@ -383,69 +381,10 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
         except (TypeError, ValueError):
             return None
 
-    def _looks_like_document(obj: dict) -> Optional[Dict[str, Any]]:
-        """فقط وقتی mime یا نام فایل رسانه‌ای مشخص باشد — نه message_id/user_id."""
-        if not isinstance(obj, dict):
-            return None
-        mime = g(obj, 5, '5', 'mime_type', 'mimeType')
-        name = g(obj, 4, '4', 'name', 'file_name', 'fileName')
-        if isinstance(name, dict):
-            name = g(name, 1, '1') or ''
-        mime_s = str(mime).strip() if mime is not None and not isinstance(mime, (dict, list)) else ''
-        name_s = str(name).strip() if name is not None and not isinstance(name, (dict, list)) else ''
-        # شرط سخت: mime شبیه type/subtype یا پسوند فایل رسانه‌ای
-        mime_ok = ('/' in mime_s) and not mime_s.startswith('{')
-        name_ok = bool(name_s) and any(
-            name_s.lower().endswith(ext)
-            for ext in (
-                '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.mov',
-                '.pdf', '.zip', '.webm', '.mkv', '.doc', '.docx',
-            )
-        )
-        if not mime_ok and not name_ok:
-            return None
-        fid = _as_int(g(obj, 1, '1', 'file_id', 'fileId'))
-        ah = _as_int(g(obj, 2, '2', 'access_hash', 'accessHash'))
-        size = _as_int(g(obj, 3, '3', 'size', 'file_size'))
-        if fid is None or ah is None:
-            return None
-        # رد کردن شناسه‌های واضح پیام/کاربر (معمولاً کوچک‌تر از file_id واقعی بله نیستند،
-        # ولی user_id لینک‌یار را صریح رد می‌کنیم)
-        if fid in (0, 1, -1):
-            return None
-        return {
-            'file_id': fid,
-            'file_access_hash': ah,
-            'file_size': size or 0,
-            'file_name': name_s or 'banner.jpg',
-            'mime_type': mime_s or 'application/octet-stream',
-        }
-
-    def _find_document(obj: Any, depth: int = 0) -> Optional[Dict[str, Any]]:
-        if depth > 6 or obj is None:
-            return None
-        if isinstance(obj, dict):
-            hit = _looks_like_document(obj)
-            if hit:
-                return hit
-            for v in obj.values():
-                found = _find_document(v, depth + 1)
-                if found:
-                    return found
-        elif isinstance(obj, list):
-            for v in obj[:30]:
-                found = _find_document(v, depth + 1)
-                if found:
-                    return found
-        return None
-
-    sender = g(item, 1, '1', 'sender_id')
-    mid = g(item, 2, '2', 'message_id', 'rid')
-    date = g(item, 3, '3', 'date')
-    content = g(item, 4, '4', 'message', 'content')
-    if content is None:
-        content = g(item, 5, '5')
-
+    sender = g(item, 1, '1')
+    mid = g(item, 2, '2')
+    date = g(item, 3, '3')
+    content = g(item, 4, '4')
     mid_i = _as_int(mid)
     if mid_i is None:
         return None
@@ -457,70 +396,55 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     file_access_hash = None
     file_size = None
     file_name = None
-    content_keys = list(content.keys())[:12] if isinstance(content, dict) else None
+    content_keys = list(content.keys())[:16] if isinstance(content, dict) else None
+    raw_doc = None
 
     if isinstance(content, dict):
-        # MessageContent در baleclient: text=alias 15 ، document=alias 4
-        text = g(content, 15, '15', 1, '1', 'text', 'textMessage')
-        doc = g(content, 4, '4', 2, '2', 'document', 'documentMessage')
+        text = g(content, 15, '15', 1, '1')
         if isinstance(text, dict):
             kind = 'text'
-            preview = str(g(text, 1, '1', 'text', 'value') or '')[:120]
+            preview = str(g(text, 1, '1', 'value') or '')[:120]
         elif isinstance(text, str) and text.strip():
             kind = 'text'
             preview = text[:120]
+
+        doc = g(content, 4, '4')
         if isinstance(doc, dict):
-            hit = _looks_like_document(doc)
-            if hit:
-                file_id = hit['file_id']
-                file_access_hash = hit['file_access_hash']
-                file_size = hit.get('file_size')
-                file_name = hit.get('file_name')
-                mime = hit.get('mime_type')
-                if (mime or '').startswith('image/') or (
-                    file_name and str(file_name).lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
-                ):
-                    kind = 'photo'
-                elif (mime or '').startswith('video/'):
-                    kind = 'video'
-                else:
-                    kind = 'document'
-                cap = g(doc, 8, '8', 7, '7')
-                cap_text = str(g(cap, 1, '1') or '') if isinstance(cap, dict) else ''
-                preview = (cap_text or file_name or mime or '')[:120]
-        if file_id is None and kind != 'text':
-            hit = _find_document(content)
-            if hit:
-                file_id = hit['file_id']
-                file_access_hash = hit['file_access_hash']
-                file_size = hit.get('file_size')
-                file_name = hit.get('file_name')
-                mime = hit.get('mime_type')
-                kind = 'photo' if (mime or '').startswith('image/') else 'document'
+            raw_doc = {
+                str(k): (v if not isinstance(v, (dict, list, bytes)) else type(v).__name__)
+                for k, v in list(doc.items())[:10]
+            }
+            fid = _as_int(g(doc, 1, '1'))
+            ah = _as_int(g(doc, 2, '2'))
+            size = _as_int(g(doc, 3, '3'))
+            name = g(doc, 4, '4')
+            if isinstance(name, dict):
+                name = g(name, 1, '1') or ''
+            name_s = str(name).strip() if name is not None and not isinstance(name, (dict, list)) else ''
+            mime_v = g(doc, 5, '5')
+            mime_s = str(mime_v).strip() if mime_v is not None and not isinstance(mime_v, (dict, list)) else ''
 
-    # اگر هنوز text است، دیگر کل item را برای document نفحص نکن (جلوگیری از false positive)
-    if file_id is None and kind not in ('text',):
-        hit = _find_document(item)
-        if hit:
-            file_id = hit['file_id']
-            file_access_hash = hit['file_access_hash']
-            file_size = hit.get('file_size')
-            file_name = hit.get('file_name')
-            mime = hit.get('mime_type')
-            kind = 'photo' if (mime or '').startswith('image/') else 'document'
-
-    # اگر file_id == sender یا == mid باشد، قطعاً اشتباه است
-    sender_i = _as_int(sender)
-    if file_id is not None and (file_id == sender_i or file_id == mid_i):
-        file_id = None
-        file_access_hash = None
-        if kind in ('document', 'photo', 'video'):
-            kind = 'unknown'
+            if fid is not None and ah is not None:
+                if fid != mid_i and abs(fid) > 10_000:
+                    file_id = fid
+                    file_access_hash = ah
+                    file_size = size or 0
+                    file_name = name_s or 'banner.jpg'
+                    mime = mime_s or 'application/octet-stream'
+                    if mime.startswith('image/') or name_s.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                        kind = 'photo'
+                    elif mime.startswith('video/') or name_s.lower().endswith(('.mp4', '.mov', '.webm')):
+                        kind = 'video'
+                    else:
+                        kind = 'document'
+                    cap = g(doc, 8, '8')
+                    cap_text = str(g(cap, 1, '1') or '') if isinstance(cap, dict) else ''
+                    preview = (cap_text or name_s or mime)[:120]
 
     return {
         'message_id': mid_i,
         'date': _as_int(date),
-        'sender_id': sender_i,
+        'sender_id': _as_int(sender),
         'kind': kind,
         'preview': preview,
         'mime': mime,
@@ -529,6 +453,7 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
         'file_size': file_size,
         'file_name': file_name,
         'content_keys': content_keys,
+        'raw_doc_keys': raw_doc,
         'channel': channel_username,
     }
 
@@ -2182,22 +2107,13 @@ def send_existing_file_to_channel(
     caption: str = '',
     kind: str = 'photo',
 ) -> Dict[str, Any]:
-    """ارسال همان فایل سرور بله (بدون دانلود/آپلود بایت) — یک‌بار فقط.
-
-    کتابخانه: baleclient (fork aiobale) + JWT لینک‌یار — نه balelink.
-    """
+    """کپی با file_id — بدون آپلود. بعد از اولین visible متوقف می‌شود."""
     async def _fn(client):
         import asyncio as _aio
         from aiobale.enums import ChatType, PeerType
         from aiobale.types import (
-            Chat,
-            Peer,
-            MessageContent,
-            DocumentMessage,
-            MessageCaption,
-            DocumentsExt,
-            PhotoExt,
-            VideoExt,
+            Chat, Peer, MessageContent, DocumentMessage, MessageCaption,
+            DocumentsExt, PhotoExt, VideoExt,
         )
         from aiobale.methods.messaging.send_message import SendMessage
         from aiobale.utils import generate_id
@@ -2213,17 +2129,15 @@ def send_existing_file_to_channel(
             pass
 
         cap = MessageCaption(content=caption) if caption else None
-        ext = None
-        if kind == 'photo':
-            ext = DocumentsExt(photo=PhotoExt(w=1000, h=1000))
-        elif kind == 'video':
+        ext = DocumentsExt(photo=PhotoExt(w=1000, h=1000)) if kind == 'photo' else None
+        if kind == 'video':
             try:
                 ext = DocumentsExt(video=VideoExt(w=1280, h=720))
             except Exception:
                 ext = None
 
         document = DocumentMessage(
-            file_id=file_id,
+            file_id=int(file_id),
             size=int(file_size or 0),
             name=file_name or 'banner.jpg',
             mime_type=mime_type or 'image/jpeg',
@@ -2233,130 +2147,95 @@ def send_existing_file_to_channel(
         )
         content = MessageContent(document=document)
         errors: List[str] = []
-        cap_key = (caption or '')[:40]
+        cap_key = (caption or '')[:36]
 
-        async def _find_by_caption(limit: int = 15) -> List[Dict[str, Any]]:
+        async def _visible_new(before_ids: set) -> Optional[Dict[str, Any]]:
             if not cap_key:
-                return []
-            found: List[Dict[str, Any]] = []
+                return None
+            await _aio.sleep(1.0)
             try:
-                hist = await _load_history_raw(client, peer_id, access_hash, limit=limit)
+                hist = await _load_history_raw(client, peer_id, access_hash, limit=15)
                 if not hist.get('ok'):
-                    return []
+                    return None
                 uname = str(channel_ref).lstrip('@')
                 for it in hist.get('items') or []:
                     parsed = _parse_raw_message_item(it, uname)
-                    if not parsed:
+                    if not parsed or not parsed.get('message_id'):
                         continue
-                    prev = str(parsed.get('preview') or '')
-                    if cap_key in prev or (caption and caption in prev):
-                        found.append(parsed)
+                    mid = int(parsed['message_id'])
+                    if mid in before_ids:
+                        continue
+                    if cap_key in str(parsed.get('preview') or '') or (caption and caption in str(parsed.get('preview') or '')):
+                        return parsed
             except Exception as e:
-                errors.append(f'hist:{type(e).__name__}:{e}')
-            return found
-
-        # قبل از ارسال: چند پیام با همین caption؟
-        before = await _find_by_caption()
-        before_ids = {int(p['message_id']) for p in before if p.get('message_id')}
-
-        async def _after_new() -> Optional[Dict[str, Any]]:
-            await _aio.sleep(1.2)
-            after = await _find_by_caption()
-            for p in after:
-                mid = p.get('message_id')
-                if mid is not None and int(mid) not in before_ids:
-                    return p
-            # اگر قبل خالی بود و حالا یکی هست
-            if not before_ids and after:
-                return after[0]
+                errors.append(f'vis:{type(e).__name__}:{e}')
             return None
 
-        # فقط یک تلاش اصلی: high-level GROUP (کانال‌های بله معمولاً GROUP)
-        try:
-            if kind == 'photo':
-                msg = await client.send_photo(
-                    photo=document,
-                    chat_id=peer_id,
-                    chat_type=ChatType.GROUP,
-                    caption=caption or None,
-                )
-            else:
-                msg = await client.send_document(
-                    document=document,
-                    chat_id=peer_id,
-                    chat_type=ChatType.GROUP,
-                    caption=caption or None,
-                )
-            mid = getattr(msg, 'message_id', None)
-            date = getattr(msg, 'date', None)
-            if hasattr(date, 'value'):
-                date = date.value
-            return {
-                'ok': True,
-                'message_id': mid,
-                'date': date,
-                'method': 'send_photo_highlevel/GROUP' if kind == 'photo' else 'send_document_highlevel/GROUP',
-                'lib': 'baleclient',
-                'via': 'jwt_token',
-            }
-        except Exception as e:
-            errors.append(f'hl/GROUP: {type(e).__name__}: {e}')
-            # ممکن است ارسال شده باشد ولی پاسخ parse نشوند
-            hit = await _after_new()
-            if hit:
-                return {
-                    'ok': True,
-                    'message_id': hit.get('message_id'),
-                    'date': hit.get('date'),
-                    'method': 'hl_GROUP_recovered',
-                    'recovered': True,
-                    'lib': 'baleclient',
-                    'via': 'jwt_token',
-                    'tries': errors[:4],
-                }
+        before_ids: set = set()
+        if cap_key:
+            try:
+                hist0 = await _load_history_raw(client, peer_id, access_hash, limit=12)
+                uname = str(channel_ref).lstrip('@')
+                for it in (hist0.get('items') or []) if hist0.get('ok') else []:
+                    p = _parse_raw_message_item(it, uname)
+                    if p and p.get('message_id') and cap_key in str(p.get('preview') or ''):
+                        before_ids.add(int(p['message_id']))
+            except Exception:
+                pass
 
-        # fallback یک‌بار: SendMessage خام فقط GROUP
-        try:
-            peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
-            if access_hash not in (None, 0):
-                peer_kwargs['access_hash'] = int(access_hash)
-            peer = Peer(**peer_kwargs)
-            chat = Chat(id=peer_id, type=ChatType.GROUP)
-            mid = generate_id()
-            call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
-            result = await client(call)
-            msg = getattr(result, 'message', result)
-            return {
-                'ok': True,
-                'message_id': getattr(msg, 'message_id', mid),
-                'date': getattr(msg, 'date', None),
-                'method': 'send_existing_raw/GROUP',
-                'lib': 'baleclient',
-                'via': 'jwt_token',
-            }
-        except Exception as e:
-            errors.append(f'raw/GROUP: {type(e).__name__}: {e}')
-            hit = await _after_new()
-            if hit:
+        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+            try:
+                if kind == 'photo':
+                    msg = await client.send_photo(
+                        photo=document, chat_id=peer_id, chat_type=ctype, caption=caption or None,
+                    )
+                else:
+                    msg = await client.send_document(
+                        document=document, chat_id=peer_id, chat_type=ctype, caption=caption or None,
+                    )
+                mid = getattr(msg, 'message_id', None)
+                date = getattr(msg, 'date', None)
+                if hasattr(date, 'value'):
+                    date = date.value
+                return {'ok': True, 'message_id': mid, 'date': date, 'method': f'hl/{ctype}', 'lib': 'baleclient'}
+            except Exception as e:
+                errors.append(f'hl/{ctype}:{type(e).__name__}:{e}')
+                hit = await _visible_new(before_ids)
+                if hit:
+                    return {
+                        'ok': True, 'message_id': hit.get('message_id'), 'date': hit.get('date'),
+                        'method': f'hl/{ctype}/recovered', 'recovered': True, 'lib': 'baleclient',
+                    }
+
+            try:
+                peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
+                if access_hash not in (None, 0):
+                    peer_kwargs['access_hash'] = int(access_hash)
+                peer = Peer(**peer_kwargs)
+                chat = Chat(id=peer_id, type=ctype)
+                mid = generate_id()
+                call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
+                result = await client(call)
+                msg = getattr(result, 'message', result)
                 return {
                     'ok': True,
-                    'message_id': hit.get('message_id'),
-                    'date': hit.get('date'),
-                    'method': 'raw_GROUP_recovered',
-                    'recovered': True,
+                    'message_id': getattr(msg, 'message_id', mid),
+                    'date': getattr(msg, 'date', None),
+                    'method': f'raw/{ctype}',
                     'lib': 'baleclient',
-                    'via': 'jwt_token',
-                    'tries': errors[:4],
                 }
+            except Exception as e:
+                errors.append(f'raw/{ctype}:{type(e).__name__}:{e}')
+                hit = await _visible_new(before_ids)
+                if hit:
+                    return {
+                        'ok': True, 'message_id': hit.get('message_id'), 'date': hit.get('date'),
+                        'method': f'raw/{ctype}/recovered', 'recovered': True, 'lib': 'baleclient',
+                    }
 
         return {
-            'ok': False,
-            'error': 'send_existing_failed',
-            'tries': errors[:8],
-            'file_id': file_id,
-            'file_access_hash': file_access_hash,
-            'lib': 'baleclient',
-            'via': 'jwt_token',
+            'ok': False, 'error': 'send_existing_failed', 'tries': errors[:12],
+            'file_id': file_id, 'file_access_hash': file_access_hash, 'lib': 'baleclient',
         }
 
     return _run(_with_client(_fn))
