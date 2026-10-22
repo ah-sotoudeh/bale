@@ -1,4 +1,4 @@
-"""درخواست انتشار بنر در کانال مرجع (فعلاً @linktest برای تست؛ پروداکشن @linkbank)."""
+"""ثبت و انتشار بنر در کانال مرجع (@linkbank2)."""
 from __future__ import annotations
 
 import logging
@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def linkbank_channel() -> str:
-    """کانال مرجع بنر. تست: @linktest — پروداکشن: LINKBANK_CHANNEL=@linkbank"""
+    """کانال مرجع بنر. پیش‌فرض: @linkbank2 (قابل‌override با LINKBANK_CHANNEL)."""
     raw = (
         os.environ.get('LINKBANK_CHANNEL')
         or os.environ.get('BANNER_REFERENCE_CHANNEL')
-        or '@linktest'  # موقت تا بازو روی لینک‌بانک ادمین شود
+        or '@linkbank2'
     ).strip()
     if raw and not raw.startswith('@') and not raw.lstrip('-').isdigit():
         raw = '@' + raw

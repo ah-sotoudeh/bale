@@ -33,7 +33,7 @@ def linkbank_username() -> str:
     raw = (
         os.environ.get('LINKBANK_CHANNEL')
         or os.environ.get('BANNER_REFERENCE_CHANNEL')
-        or '@linktest'
+        or '@linkbank2'
     ).strip()
     if raw and not raw.startswith('@') and not raw.lstrip('-').isdigit():
         raw = '@' + raw
@@ -222,7 +222,7 @@ def _is_linkbank_chat(uname: str, title: str) -> bool:
     lb = _folded(linkbank_username().lstrip('@'))
     folded_name = _folded(uname)
     folded_title = _folded(title)
-    aliases = {'linkbank', 'linktest', 'لينكبانك'}
+    aliases = {'linkbank', 'linkbank2', 'linktest', 'لينكبانك'}
     if lb:
         aliases.add(lb)
     # Persian without hamza variants
@@ -304,42 +304,42 @@ def _apply_banner_to_draft(
 
 
 def _banner_rules() -> str:
-    lb = linkbank_username()
     return (
-        f'یک بنر بفرستید: عکس یا ویدیو با متن زیرش، '
-        f'یا یک جملهٔ تبلیغ، یا بازارسال از کانال بنرها ({lb}).'
+        'بنر خود را همین‌جا برای بازو بازارسال کنید '
+        '(عکس یا ویدیو به‌همراه متن زیر آن).'
     )
 
 
-def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, from_reference: bool) -> None:
-    sess = get_session(bale_user_id)
+def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, from_reference: bool = True) -> None:
+    """پیام موفقیت ثبت بنر + دکمهٔ باز کردن برگه بنرها در مینی‌اپ."""
     preview = (banner.caption or '').strip().replace('\n', ' ')
-    if len(preview) > 140:
-        preview = preview[:140] + '…'
+    if len(preview) > 120:
+        preview = preview[:120] + '…'
     if not preview:
         preview = 'بدون متن'
-    if from_reference:
-        note = 'بنر از کانال بنرها رسید. حالا کانال و روز را انتخاب کنید.'
-    else:
-        note = (
-            'بنر برای بررسی رفت.\n'
-            'حالا کانال و روز را انتخاب کنید.'
-        )
-    rows = [
-        [{'text': 'تأیید و انتخاب کانال', 'callback_data': 'cu:catalog'}],
-        [{'text': 'ویرایش', 'callback_data': f'cu:editcap:{banner.id}'}],
-    ]
-    slot = (sess.data or {}).get('pending_slot') or {}
-    if slot.get('tariff_id') and slot.get('date'):
-        rows.insert(0, [{
-            'text': 'ادامه همان روز',
-            'callback_data': f"cu:day:{slot['tariff_id']}:{slot['date']}",
-        }])
-    bc.send_message(
-        str(chat_id),
-        f'بنر رسید. پیش‌نمایشش را ببینید:\n{banner.display_title()}\n{preview}\n\n{note}',
-        reply_markup=bc.inline_keyboard(rows),
+    text = (
+        f'✅ بنر شما با موفقیت ثبت شد.\n'
+        f'«{banner.display_title()}»\n'
+        f'{preview}\n\n'
+        f'می‌توانید از مینی‌اپ فهرست بنرها را ببینید یا برای سفارش از همین بنر استفاده کنید.'
     )
+    rows: List[List[Dict[str, str]]] = []
+    try:
+        from miniapp.launch import miniapp_url
+        url = miniapp_url(role='customer')
+        if url:
+            sep = '&' if '?' in url else '?'
+            url = f'{url}{sep}tab=banners'
+            rows.append([{'text': '🖼 مشاهده بنرها در مینی‌اپ', 'web_app': {'url': url}}])
+    except Exception:
+        logger.exception('miniapp url for banner confirm')
+    rows.append([
+        {'text': '📝 ویرایش متن', 'callback_data': f'cu:editcap:{banner.id}'},
+        {'text': '🛒 شروع سفارش', 'callback_data': 'cu:catalog'},
+    ])
+    rows.append([{'text': '🖼 بنرهای من (گفتگو)', 'callback_data': 'cu:banners'}])
+    bc.send_message(str(chat_id), text, reply_markup=bc.inline_keyboard(rows))
+
 
 
 def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> bool:
@@ -359,7 +359,8 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         if has_media:
             bc.send_message(
                 str(chat_id),
-                'اگر این فایل بنر است، دکمهٔ «بنر جدید» را بزنید و دوباره بفرستید.\n\n'
+                'اگر این همان بنر تبلیغاتی است، یک‌بار دیگر دکمهٔ «افزودن بنر» را بزنید '
+                'یا همین پیام را دوباره بفرستید.\n\n'
                 + _banner_rules(),
             )
             return True
@@ -723,11 +724,11 @@ def handle_customer_callback(
     if data == 'cu:new':
         sess = get_session(bale_user_id)
         save_session(sess, STATE_CUST_BANNER, role='customer')
-        lb = linkbank_username()
         bc.send_message(
             str(chat_id),
-            f'بنر را بفرستید: عکس یا ویدیو، و متن را زیر همان عکس بنویسید.\n'
-            f'اگر بنر از قبل در کانال بنرها ({lb}) هست، همان پست را بازارسال کنید.',
+            'لطفاً بنر خود را همین‌جا ارسال یا بازارسال کنید.\n'
+            'عکس یا ویدیو به‌همراه متن زیر آن کافی است.\n'
+            'پس از دریافت، بنر به‌صورت خودکار ثبت می‌شود.',
             reply_markup=bc.inline_keyboard([[{'text': 'انصراف', 'callback_data': 'cu:banners'}]]),
         )
         return True

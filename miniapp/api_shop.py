@@ -554,6 +554,46 @@ def api_tariff_delete(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_banner_request_new(request: HttpRequest) -> JsonResponse:
+    """دکمهٔ افزودن بنر در مینی‌اپ → بازو از کاربر بنر می‌خواهد."""
+    from miniapp.api import _auth_user
+    from bot_flow.session import get_session, save_session
+    from bot_flow.customer import STATE_CUST_BANNER
+    from integrations import bale_client as bc
+
+    user, err = _auth_user(request)
+    if err:
+        return err
+    chat_id = str(user.bale_user_id or '')
+    if not chat_id:
+        return JsonResponse({'ok': False, 'error': 'no_chat'}, status=400)
+    try:
+        sess = get_session(chat_id)
+        save_session(sess, STATE_CUST_BANNER, role='customer')
+    except Exception:
+        pass
+    msg = (
+        'لطفاً بنر خود را همین‌جا ارسال یا بازارسال کنید.\n'
+        'عکس یا ویدیو به‌همراه متن زیر آن کافی است.\n'
+        'پس از دریافت، بنر به‌صورت خودکار ثبت می‌شود.'
+    )
+    r = bc.send_message(
+        chat_id,
+        msg,
+        reply_markup=bc.inline_keyboard([
+            [{'text': 'انصراف', 'callback_data': 'cu:banners'}],
+        ]),
+    )
+    return JsonResponse({
+        'ok': True,
+        'message': 'پیام در گفتگوی بازو برایتان ارسال شد؛ بنر را همان‌جا بفرستید.',
+        'bot_ok': bool(isinstance(r, dict) and (r.get('ok') is not False)),
+    })
+
+
 def api_banners(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

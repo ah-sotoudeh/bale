@@ -3913,3 +3913,83 @@ var reset = document.getElementById("lb-theme-reset");
 
 
 })();
+
+
+  /* —— بنر مشتری: درخواست از بازو + tab=banners —— */
+  (function () {
+    function initDataHeader() {
+      try {
+        var tg = window.Bale || window.Telegram;
+        var id = (tg && tg.WebApp && tg.WebApp.initData) || "";
+        return id || (window.lbInitData || "");
+      } catch (e) { return ""; }
+    }
+    async function requestNewBanner() {
+      try {
+        if (window.lbHaptic) window.lbHaptic("selection");
+      } catch (e) {}
+      var headers = { "Content-Type": "application/json" };
+      var init = initDataHeader();
+      if (init) headers["X-Bale-Init-Data"] = init;
+      try {
+        var r = await fetch("/miniapp/api/banners/request-new", {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify({ initData: init }),
+          credentials: "same-origin",
+        });
+        var j = await r.json().catch(function () { return {}; });
+        var msg = (j && j.message) || "پیام در بازو ارسال شد؛ بنر را همان‌جا بفرستید.";
+        if (window.lbToast) window.lbToast(msg);
+        else if (window.Bale && window.Bale.WebApp && window.Bale.WebApp.showAlert)
+          window.Bale.WebApp.showAlert(msg);
+        try {
+          if (window.Bale && window.Bale.WebApp && window.Bale.WebApp.close)
+            setTimeout(function () { try { window.Bale.WebApp.close(); } catch (e) {} }, 600);
+        } catch (e) {}
+      } catch (e) {
+        if (window.lbToast) window.lbToast("ارتباط با سرور برقرار نشد");
+      }
+    }
+    window.lbRequestNewBanner = requestNewBanner;
+
+    document.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t || !t.closest) return;
+      var btn = t.closest("button, a, [role=button]");
+      if (!btn) return;
+      var txt = (btn.textContent || "").replace(/\s+/g, " ").trim();
+      if (
+        /افزودن بنر|ساخت بنر|بنر جدید|＋ بنر|\+ بنر/.test(txt) ||
+        btn.getAttribute("data-lb-banner-add") === "1"
+      ) {
+        // فقط در نقش مشتری
+        var roleBtn = document.querySelector("header button.rounded-full.bg-link");
+        var role = roleBtn ? (roleBtn.textContent || "") : "";
+        var h1 = document.querySelector("header h1");
+        var title = h1 ? (h1.textContent || "") : "";
+        if (/مشتری/.test(role) || /بنر/.test(title)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          requestNewBanner();
+        }
+      }
+    }, true);
+
+    // deep link ?tab=banners
+    try {
+      var q = new URLSearchParams(location.search || "");
+      if ((q.get("tab") || "") === "banners") {
+        setTimeout(function () {
+          var nav = document.querySelectorAll("nav button, nav a, [data-tab]");
+          for (var i = 0; i < nav.length; i++) {
+            if (/بنر/.test(nav[i].textContent || "")) {
+              nav[i].click();
+              break;
+            }
+          }
+        }, 400);
+      }
+    } catch (e) {}
+  })();
+
