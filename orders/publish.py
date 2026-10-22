@@ -301,6 +301,7 @@ def _resolve_linkbank_forward_source(
     src_chat = str(from_chat_id or '').strip() or lb
     src_mid = int(message_id or 0)
     caption = caption or ''
+    db_file_meta: Dict[str, Any] = {}
 
     if banner_id:
         bn = CustomerBanner.objects.filter(id=int(banner_id)).first()
@@ -313,6 +314,17 @@ def _resolve_linkbank_forward_source(
                     pass
             if not caption and bn.caption:
                 caption = bn.caption
+            # متای کپی ذخیره‌شده در DB (اولویت در return)
+            if getattr(bn, 'ly_file_id', None) and getattr(bn, 'ly_file_access_hash', None):
+                db_file_meta = {
+                    'file_id': int(bn.ly_file_id) if str(bn.ly_file_id).lstrip('-').isdigit() else bn.ly_file_id,
+                    'file_access_hash': int(bn.ly_file_access_hash) if str(bn.ly_file_access_hash).lstrip('-').isdigit() else bn.ly_file_access_hash,
+                    'file_size': int(getattr(bn, 'ly_file_size', 0) or 0),
+                    'file_name': getattr(bn, 'ly_file_name', '') or 'banner.jpg',
+                    'mime_type': getattr(bn, 'ly_mime_type', '') or 'image/jpeg',
+                    'kind': bn.media_kind or 'photo',
+                    'source': 'db',
+                }
 
     bot_from = src_chat or lb
     if bot_from and not str(bot_from).startswith('@') and 'ble.ir' not in str(bot_from) and not str(bot_from).lstrip('-').isdigit():
@@ -398,8 +410,8 @@ def _resolve_linkbank_forward_source(
         except (TypeError, ValueError):
             ly_ah = None
     # فایل همان پیام برای ارسال بدون دانلود (اگر فوروارد شکست خورد)
-    file_meta: Dict[str, Any] = {}
-    if hist and hist.get('ok') and ly_mid:
+    file_meta: Dict[str, Any] = dict(db_file_meta) if db_file_meta else {}
+    if not file_meta and hist and hist.get('ok') and ly_mid:
         for post in list(hist.get('messages') or []):
             try:
                 if int(post.get('message_id') or 0) == int(ly_mid):

@@ -64,12 +64,17 @@ def user_facing_error(code: str) -> str:
 
 
 def banner_stage(banner: CustomerBanner) -> str:
-    """ready بعد از تأیید، rejected اگر آخرین درخواست رد شده، وگرنه در انتظار بررسی."""
+    """ثبت بنر دیگر نیاز به تأیید ندارد — ready به‌محض انتشار در کانال مرجع."""
+    if banner.from_linkbank and banner.linkbank_message_id:
+        return 'ready'
     if banner.from_linkbank:
         return 'ready'
     req = banner.publish_requests.order_by('-id').first()
     if req and req.status == 'rejected':
         return 'rejected'
+    # سازگاری با بنرهای قدیمی بدون linkbank
+    if banner.is_active:
+        return 'pending'
     return 'pending'
 
 
@@ -350,44 +355,247 @@ def operator_decide(req_id: int, operator_bale_id: str, approve: bool) -> Dict[s
     }
 
 
+
+
+def register_banner_immediate(
+    user: User,
+    *,
+    storage_chat_id: str,
+    storage_message_id: str,
+    caption: str = '',
+    media_kind: str = '',
+    title: str = '',
+    bot_file_id: str = '',
+    message: dict | None = None,
+) -> Dict[str, Any]:
+    """ثبت فوری بنر مشتری بدون تأیید اپراتور.
+
+    1) بازو پیام را با copyMessage به کانال مرجع می‌فرستد
+    2) CustomerBanner با from_linkbank=True ساخته/به‌روز می‌شود
+    3) لینک‌یار از تاریخچهٔ مرجع file_id/access_hash می‌گیرد و ذخیره می‌کند
+    """
+    from integrations import linkyar_client as ly
+    from orders.banner_media import file_from_message, save_banner_from_message
+
+    lb = linkbank_channel()
+    caption = (caption or '')[:2000]
+    media_kind = (media_kind or 'photo').lower() or 'photo'
+    title = (title or (caption.strip().split('\n')[0] if caption.strip() else '') or '')[:120]
+
+    if message and not bot_file_id:
+        try:
+            fid, kind = file_from_message(message)
+            if fid:
+                bot_file_id = str(fid)
+            if kind and not media_kind:
+                media_kind = kind
+        except Exception:
+            logger.exception('extract bot_file_id')
+
+    # کپی به کانال مرجع با بازو
+    lb_mid = ''
+    copy_err = ''
+    try:
+        # ترجیح: copyMessage تا بدون هدر فوروارد باشد
+        cr = bc.copy_message(lb, str(storage_chat_id), int(storage_message_id))
+        if isinstance(cr, dict) and cr.get('ok'):
+            res = cr.get('result') or {}
+            lb_mid = str(res.get('message_id') or '')
+        else:
+            copy_err = str((cr or {}).get('error') or cr)[:200]
+            # fallback forward
+            fr = bc.forward_message(lb, str(storage_chat_id), int(storage_message_id))
+            if isinstance(fr, dict) and fr.get('ok'):
+                res = fr.get('result') or {}
+                lb_mid = str(res.get('message_id') or '')
+                copy_err = ''
+            else:
+                copy_err = copy_err or str((fr or {}).get('error') or fr)[:200]
+    except Exception as e:
+        copy_err = f'{type(e).__name__}:{e}'
+        logger.exception('copy banner to linkbank')
+
+    if not lb_mid:
+        return {
+            'ok': False,
+            'error': 'linkbank_copy_failed',
+            'message': 'نتوانستم بنر را در کانال مرجع ثبت کنم. دوباره بفرستید.',
+            'detail': copy_err,
+        }
+
+    banner = CustomerBanner.objects.create(
+        customer=user,
+        title=title,
+        caption=caption,
+        storage_chat_id=str(storage_chat_id),
+        storage_message_id=str(storage_message_id),
+        from_linkbank=True,
+        linkbank_chat_id=lb,
+        linkbank_message_id=str(lb_mid),
+        media_kind=media_kind,
+        bot_file_id=str(bot_file_id or ''),
+        is_active=True,
+    )
+
+    # فایل محلی اختیاری (پشتیبان)
+    if message:
+        try:
+            save_banner_from_message(banner.id, message)
+        except Exception:
+            logger.exception('save_banner_from_message')
+
+    # متای لینک‌یار از تاریخچهٔ کانال مرجع
+    ly_meta = _capture_linkyar_file_meta(lb, caption=caption, prefer_mid=None)
+    if ly_meta:
+        banner.ly_file_id = str(ly_meta.get('file_id') or '')
+        banner.ly_file_access_hash = str(ly_meta.get('file_access_hash') or '')
+        banner.ly_file_size = int(ly_meta.get('file_size') or 0)
+        banner.ly_file_name = str(ly_meta.get('file_name') or '')[:255]
+        banner.ly_mime_type = str(ly_meta.get('mime') or ly_meta.get('mime_type') or '')[:80]
+        if ly_meta.get('message_id'):
+            banner.linkyar_rid = str(ly_meta.get('message_id'))
+        if ly_meta.get('date'):
+            banner.linkyar_date = str(ly_meta.get('date'))
+        banner.save(update_fields=[
+            'ly_file_id', 'ly_file_access_hash', 'ly_file_size', 'ly_file_name',
+            'ly_mime_type', 'linkyar_rid', 'linkyar_date',
+        ])
+
+    return {
+        'ok': True,
+        'banner': banner,
+        'banner_id': banner.id,
+        'linkbank_message_id': lb_mid,
+        'ly_file_id': banner.ly_file_id,
+        'bot_file_id': banner.bot_file_id,
+        'message': 'بنر ثبت شد و در فهرست بنرهای شما قرار گرفت.',
+    }
+
+
+def _capture_linkyar_file_meta(
+    channel_ref: str,
+    *,
+    caption: str = '',
+    prefer_mid: Any = None,
+) -> Dict[str, Any] | None:
+    """از تاریخچهٔ لینک‌یار آخرین/مچ‌شده‌ترین document را بردار."""
+    import time as _time
+    from integrations import linkyar_client as ly
+
+    # کمی صبر تا پیام در تاریخچه دیده شود
+    for delay in (0.8, 1.5, 2.5):
+        try:
+            _time.sleep(delay)
+            hist = ly.load_channel_history(channel_ref, limit=25)
+        except Exception as e:
+            logger.warning('ly history for meta: %s', e)
+            continue
+        if not isinstance(hist, dict) or not hist.get('ok'):
+            continue
+        msgs = list(hist.get('messages') or [])
+        # اولویت: message_id مشخص، بعد caption match، بعد آخرین photo
+        if prefer_mid:
+            for p in msgs:
+                if str(p.get('message_id')) == str(prefer_mid) and p.get('file_id'):
+                    return p
+        cap_key = (caption or '').strip()[:40]
+        if cap_key:
+            for p in msgs:
+                if p.get('file_id') and cap_key in str(p.get('preview') or ''):
+                    return p
+        for p in msgs:
+            if p.get('kind') in ('photo', 'document', 'video') and p.get('file_id') and p.get('file_access_hash'):
+                return p
+    return None
+
+
 def edit_banner_caption(
     banner_id: int,
     customer_bale_id: str,
     new_caption: str,
 ) -> Dict[str, Any]:
+    """ویرایش فقط متن بنر. ترجیح: editMessageCaption روی کانال مرجع؛ وگرنه کپی جدید."""
     from bot_flow.banned_words import is_allowed
 
     try:
         banner = CustomerBanner.objects.select_related('customer').get(id=banner_id)
     except CustomerBanner.DoesNotExist:
-        return {'ok': False, 'error': 'not_found', 'message': user_facing_error('not_found')}
+        return {'ok': False, 'error': 'not_found', 'message': 'بنر پیدا نشد.'}
+
     if str(banner.customer.bale_user_id) != str(customer_bale_id):
-        return {'ok': False, 'error': 'forbidden', 'message': user_facing_error('forbidden')}
+        return {'ok': False, 'error': 'forbidden', 'message': 'اجازه ندارید.'}
 
-    ok, hits = is_allowed(new_caption or '')
+    new_caption = (new_caption or '')[:2000]
+    ok, hits = is_allowed(new_caption)
     if not ok:
-        return {'ok': False, 'error': 'banned', 'message': user_facing_error('banned')}
+        return {
+            'ok': False,
+            'error': 'banned_words',
+            'message': 'این عبارت مجاز نیست: ' + ', '.join(hits),
+        }
 
-    banner.caption = new_caption or ''
-    banner.save(update_fields=['caption'])
+    lb = banner.linkbank_chat_id or linkbank_channel()
+    lb_mid = str(banner.linkbank_message_id or '').strip()
+    edited = False
+    method = ''
 
-    try:
-        bc.edit_message_caption(
-            banner.storage_chat_id,
-            int(banner.storage_message_id),
-            new_caption or ' ',
-        )
-    except Exception:
-        logger.exception('edit storage caption failed')
-
-    if banner.linkbank_message_id and str(banner.linkbank_message_id).isdigit():
+    # 1) ویرایش همان پیام در کانال مرجع (پایدارتر — message_id عوض نمی‌شود)
+    if lb_mid:
         try:
-            bc.edit_message_caption(
-                banner.linkbank_chat_id or linkbank_channel(),
-                int(banner.linkbank_message_id),
-                new_caption or ' ',
-            )
+            er = bc.edit_message_caption(lb, int(lb_mid), new_caption)
+            if isinstance(er, dict) and er.get('ok'):
+                edited = True
+                method = 'editMessageCaption'
+            else:
+                logger.info('editMessageCaption failed: %s', (er or {}).get('error'))
         except Exception:
-            logger.exception('edit channel caption failed')
+            logger.exception('editMessageCaption')
 
-    return {'ok': True, 'banner_id': banner.id, 'message': 'متن به‌روز شد.'}
+    # 2) اگر ویرایش ممکن نبود: کپی جدید با caption تازه و جایگزینی شناسه‌ها
+    if not edited and lb_mid and banner.storage_chat_id and banner.storage_message_id:
+        try:
+            # کپی از پیام ذخیره‌شده مشتری با caption جدید ممکن است پشتیبانی نشود؛
+            # copy بدون caption سپس edit، یا forward از linkbank و edit
+            fr = bc.copy_message(lb, lb, int(lb_mid))
+            if isinstance(fr, dict) and fr.get('ok'):
+                new_mid = str(((fr.get('result') or {}).get('message_id')) or '')
+                if new_mid:
+                    er = bc.edit_message_caption(lb, int(new_mid), new_caption)
+                    if isinstance(er, dict) and er.get('ok'):
+                        # حذف پیام قدیمی اختیاری
+                        try:
+                            bc.delete_message(lb, int(lb_mid))
+                        except Exception:
+                            pass
+                        banner.linkbank_message_id = new_mid
+                        edited = True
+                        method = 'recopy+edit'
+                        # رفرش متای لینک‌یار
+                        ly_meta = _capture_linkyar_file_meta(lb, caption=new_caption)
+                        if ly_meta:
+                            banner.ly_file_id = str(ly_meta.get('file_id') or banner.ly_file_id)
+                            banner.ly_file_access_hash = str(
+                                ly_meta.get('file_access_hash') or banner.ly_file_access_hash
+                            )
+                            if ly_meta.get('message_id'):
+                                banner.linkyar_rid = str(ly_meta.get('message_id'))
+                            if ly_meta.get('date'):
+                                banner.linkyar_date = str(ly_meta.get('date'))
+        except Exception:
+            logger.exception('recopy banner for caption edit')
+
+    banner.caption = new_caption
+    if title_from_cap := (new_caption.strip().split('\n')[0][:120] if new_caption.strip() else ''):
+        banner.title = title_from_cap
+    fields = ['caption', 'title', 'linkbank_message_id', 'ly_file_id', 'ly_file_access_hash', 'linkyar_rid', 'linkyar_date']
+    banner.save(update_fields=[f for f in fields if hasattr(banner, f)])
+
+    return {
+        'ok': True,
+        'banner_id': banner.id,
+        'method': method or 'db_only',
+        'edited_in_channel': edited,
+        'message': 'متن بنر به‌روز شد.' if edited else 'متن در سامانه به‌روز شد (ویرایش کانال مرجع ممکن نشد).',
+    }
+
+

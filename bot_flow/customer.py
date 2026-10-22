@@ -381,43 +381,92 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         bc.send_message(str(chat_id), 'این پیام را نگرفتم. یک بار دیگر بفرستید.')
         return True
 
-    banner = _apply_banner_to_draft(
-        user,
-        storage_chat_id=str(chat_id),
-        storage_message_id=str(msg_id),
-        caption=caption,
-        from_linkbank=from_lb,
-        linkbank_chat_id=str(lb_chat or linkbank_username()) if from_lb else '',
-        linkbank_message_id=str(lb_mid or '') if from_lb else '',
-        media_kind=_media_kind(message),
-        title=(caption or '').strip().split('\n')[0][:120],
-    )
-    try:
-        from orders.banner_media import save_banner_from_message
+    # ثبت فوری بدون تأیید اپراتور: کپی به کانال مرجع + متای بات و لینک‌یار
+    from orders.banner_publish import register_banner_immediate
 
-        save_banner_from_message(banner.id, message)
-    except Exception:
-        logger.exception('banner file')
-    d = dict(sess.data or {})
-    d['pending_banner'] = {'banner_id': banner.id, 'from_linkbank': bool(from_lb), 'chat_id': str(chat_id), 'message_id': str(msg_id), 'caption': caption, 'media_kind': _media_kind(message)}
-    sess.data = d
-    sess.save(update_fields=['data'])
-    save_session(sess, STATE_CUST_HOME, role='customer')
-    if not from_lb:
-        from orders.banner_publish import create_publish_request
+    if from_lb and lb_mid:
+        # بنر از خود لینک‌بانک فوروارد شده — همان mid مرجع
+        from orders.models import CustomerBanner
+        from orders.banner_media import file_from_message, save_banner_from_message
 
+        bot_fid = ''
         try:
-            create_publish_request(
-                user,
-                storage_chat_id=str(chat_id),
-                storage_message_id=str(msg_id),
-                caption=caption,
-                media_kind=_media_kind(message),
-                banner=banner,
-            )
+            bot_fid, _k = file_from_message(message)
         except Exception:
-            logger.exception('banner request')
-    _confirm_banner(chat_id, bale_user_id, banner, from_reference=from_lb)
+            bot_fid = ''
+        banner = CustomerBanner.objects.create(
+            customer=user,
+            title=(caption or '').strip().split('\n')[0][:120],
+            caption=caption,
+            storage_chat_id=str(chat_id),
+            storage_message_id=str(msg_id),
+            from_linkbank=True,
+            linkbank_chat_id=str(lb_chat or linkbank_username()),
+            linkbank_message_id=str(lb_mid),
+            media_kind=_media_kind(message),
+            bot_file_id=str(bot_fid or ''),
+            is_active=True,
+        )
+        try:
+            save_banner_from_message(banner.id, message)
+        except Exception:
+            logger.exception('banner file')
+        try:
+            from orders.banner_publish import _capture_linkyar_file_meta
+            ly_meta = _capture_linkyar_file_meta(
+                str(lb_chat or linkbank_username()),
+                caption=caption,
+                prefer_mid=lb_mid,
+            )
+            if ly_meta:
+                banner.ly_file_id = str(ly_meta.get('file_id') or '')
+                banner.ly_file_access_hash = str(ly_meta.get('file_access_hash') or '')
+                banner.ly_file_size = int(ly_meta.get('file_size') or 0)
+                banner.ly_file_name = str(ly_meta.get('file_name') or '')[:255]
+                banner.ly_mime_type = str(ly_meta.get('mime') or '')[:80]
+                if ly_meta.get('message_id'):
+                    banner.linkyar_rid = str(ly_meta.get('message_id'))
+                if ly_meta.get('date'):
+                    banner.linkyar_date = str(ly_meta.get('date'))
+                banner.save()
+        except Exception:
+            logger.exception('ly meta from_lb')
+        reg = {'ok': True, 'banner': banner}
+    else:
+        reg = register_banner_immediate(
+            user,
+            storage_chat_id=str(chat_id),
+            storage_message_id=str(msg_id),
+            caption=caption,
+            media_kind=_media_kind(message),
+            title=(caption or '').strip().split('\n')[0][:120],
+            message=message,
+        )
+        if not reg.get('ok'):
+            bc.send_message(str(chat_id), reg.get('message') or 'ثبت بنر ناموفق بود. دوباره بفرستید.')
+            return True
+        banner = reg['banner']
+
+    # اتصال به سفارش پیش‌نویس در صورت وجود
+    try:
+        _apply_banner_to_draft(
+            user,
+            storage_chat_id=str(banner.storage_chat_id),
+            storage_message_id=str(banner.storage_message_id),
+            caption=banner.caption or caption,
+            from_linkbank=True,
+            linkbank_chat_id=str(banner.linkbank_chat_id or ''),
+            linkbank_message_id=str(banner.linkbank_message_id or ''),
+            media_kind=banner.media_kind or _media_kind(message),
+            title=banner.title or '',
+            banner=banner,
+        )
+    except Exception:
+        logger.exception('apply banner to draft')
+
+    save_session(sess, STATE_CUST_HOME, role='customer')
+    _confirm_banner(chat_id, bale_user_id, banner, from_reference=True)
+    return True
     return True
 
 

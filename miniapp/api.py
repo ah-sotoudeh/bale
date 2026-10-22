@@ -2331,6 +2331,28 @@ def api_operator_test_delete(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_customer_banner_edit_caption(request: HttpRequest) -> JsonResponse:
+    """ویرایش متن بنر مشتری (بدون تغییر تصویر)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    try:
+        body = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        body = {}
+    banner_id = body.get('banner_id') or body.get('id')
+    caption = str(body.get('caption') or body.get('text') or '')
+    if not banner_id:
+        return JsonResponse({'ok': False, 'error': 'banner_id_required'}, status=400)
+    from orders.banner_publish import edit_banner_caption
+    result = edit_banner_caption(int(banner_id), str(user.bale_user_id), caption)
+    status = 200 if result.get('ok') else 400
+    return JsonResponse(result, status=status)
+
+
 def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
     """بنرهای تأییدشده و کانال‌ها برای تست ارسال پشتیبان."""
     user, err = _auth_user(request)

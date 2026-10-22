@@ -13,6 +13,7 @@ urlpatterns = [
     path('demos/<str:name>/<path:path>', demo_asset, name='miniapp_demo_asset'),
     path('manager/', manager_app, name='miniapp_manager'),
     path('api/me', api.api_me),
+    path('api/customer/banner/edit-caption', api.api_customer_banner_edit_caption),
     path('api/me/prefs', api.api_me_prefs),
     path('api/channels/<int:channel_id>/avatar', api.api_channel_avatar),
     path('api/channels', api.api_channels),

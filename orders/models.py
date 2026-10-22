@@ -21,6 +21,13 @@ class CustomerBanner(models.Model):
     linkyar_rid = models.CharField(max_length=64, blank=True, default='')
     linkyar_date = models.CharField(max_length=64, blank=True, default='')
     linkyar_seq = models.CharField(max_length=32, blank=True, default='')
+    # متای کپی بدون آپلود — بات و لینک‌یار
+    bot_file_id = models.CharField(max_length=128, blank=True, default='')
+    ly_file_id = models.CharField(max_length=64, blank=True, default='')
+    ly_file_access_hash = models.CharField(max_length=64, blank=True, default='')
+    ly_file_size = models.PositiveIntegerField(default=0)
+    ly_file_name = models.CharField(max_length=255, blank=True, default='')
+    ly_mime_type = models.CharField(max_length=80, blank=True, default='')
     media_kind = models.CharField(max_length=20, blank=True, default='')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
