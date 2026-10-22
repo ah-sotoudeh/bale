@@ -398,6 +398,7 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
     file_name = None
     content_keys = list(content.keys())[:16] if isinstance(content, dict) else None
     raw_doc = None
+    thumb_raw = None
 
     if isinstance(content, dict):
         text = g(content, 15, '15', 1, '1')
@@ -440,6 +441,7 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
                     cap = g(doc, 8, '8')
                     cap_text = str(g(cap, 1, '1') or '') if isinstance(cap, dict) else ''
                     preview = (cap_text or name_s or mime)[:120]
+                    thumb_raw = g(doc, 6, '6')  # Thumbnail اصلی برای پیش‌نمایش غیرسیاه
 
     return {
         'message_id': mid_i,
@@ -454,6 +456,7 @@ def _parse_raw_message_item(item: Any, channel_username: str) -> Optional[Dict[s
         'file_name': file_name,
         'content_keys': content_keys,
         'raw_doc_keys': raw_doc,
+        'thumb_raw': thumb_raw,
         'channel': channel_username,
     }
 
@@ -2106,14 +2109,19 @@ def send_existing_file_to_channel(
     mime_type: str = 'image/jpeg',
     caption: str = '',
     kind: str = 'photo',
+    thumb_raw: Any = None,
 ) -> Dict[str, Any]:
-    """کپی با file_id — بدون آپلود. بعد از اولین visible متوقف می‌شود."""
+    """کپی یک‌باره با file_id سرور — بدون آپلود بایت، با thumb اصلی.
+
+    access_hash در بله برای فایل آپلود‌شده = id آپلودکننده است (نه hash جدا).
+    lib: baleclient + JWT
+    """
     async def _fn(client):
         import asyncio as _aio
-        from aiobale.enums import ChatType, PeerType
+        from aiobale.enums import ChatType, PeerType, SendType
         from aiobale.types import (
             Chat, Peer, MessageContent, DocumentMessage, MessageCaption,
-            DocumentsExt, PhotoExt, VideoExt,
+            DocumentsExt, PhotoExt, Thumbnail,
         )
         from aiobale.methods.messaging.send_message import SendMessage
         from aiobale.utils import generate_id
@@ -2122,7 +2130,7 @@ def send_existing_file_to_channel(
         if not resolved.get('ok'):
             return {'ok': False, 'error': resolved.get('error')}
         peer_id = int(resolved['peer_id'])
-        access_hash = resolved.get('access_hash')
+        peer_ah = resolved.get('access_hash')
         try:
             await client.join_public_chat(peer_id)
         except Exception:
@@ -2130,11 +2138,23 @@ def send_existing_file_to_channel(
 
         cap = MessageCaption(content=caption) if caption else None
         ext = DocumentsExt(photo=PhotoExt(w=1000, h=1000)) if kind == 'photo' else None
-        if kind == 'video':
+
+        thumb = None
+        if isinstance(thumb_raw, dict):
             try:
-                ext = DocumentsExt(video=VideoExt(w=1280, h=720))
+                thumb = Thumbnail.model_validate(thumb_raw)
             except Exception:
-                ext = None
+                try:
+                    w = thumb_raw.get('1') or thumb_raw.get(1) or 100
+                    h = thumb_raw.get('2') or thumb_raw.get(2) or 100
+                    img = thumb_raw.get('3') or thumb_raw.get(3)
+                    if isinstance(img, dict):
+                        img = img.get('10') or img.get(10) or b''
+                    if img is None:
+                        img = b''
+                    thumb = Thumbnail(w=int(w), h=int(h), image=img)
+                except Exception:
+                    thumb = None
 
         document = DocumentMessage(
             file_id=int(file_id),
@@ -2143,9 +2163,10 @@ def send_existing_file_to_channel(
             mime_type=mime_type or 'image/jpeg',
             access_hash=int(file_access_hash),
             caption=cap,
+            thumb=thumb,
             ext=ext,
         )
-        content = MessageContent(document=document)
+
         errors: List[str] = []
         cap_key = (caption or '')[:36]
 
@@ -2154,7 +2175,7 @@ def send_existing_file_to_channel(
                 return None
             await _aio.sleep(1.0)
             try:
-                hist = await _load_history_raw(client, peer_id, access_hash, limit=15)
+                hist = await _load_history_raw(client, peer_id, peer_ah, limit=12)
                 if not hist.get('ok'):
                     return None
                 uname = str(channel_ref).lstrip('@')
@@ -2165,7 +2186,7 @@ def send_existing_file_to_channel(
                     mid = int(parsed['message_id'])
                     if mid in before_ids:
                         continue
-                    if cap_key in str(parsed.get('preview') or '') or (caption and caption in str(parsed.get('preview') or '')):
+                    if cap_key in str(parsed.get('preview') or ''):
                         return parsed
             except Exception as e:
                 errors.append(f'vis:{type(e).__name__}:{e}')
@@ -2174,7 +2195,7 @@ def send_existing_file_to_channel(
         before_ids: set = set()
         if cap_key:
             try:
-                hist0 = await _load_history_raw(client, peer_id, access_hash, limit=12)
+                hist0 = await _load_history_raw(client, peer_id, peer_ah, limit=10)
                 uname = str(channel_ref).lstrip('@')
                 for it in (hist0.get('items') or []) if hist0.get('ok') else []:
                     p = _parse_raw_message_item(it, uname)
@@ -2183,9 +2204,22 @@ def send_existing_file_to_channel(
             except Exception:
                 pass
 
-        for ctype in (ChatType.GROUP, ChatType.CHANNEL, ChatType.SUPER_GROUP):
+        # فقط CHANNEL سپس GROUP — یک موفقیت کافی است (جلوگیری از دوبار ارسال)
+        for ctype in (ChatType.CHANNEL, ChatType.GROUP):
+            # مسیر اصلی: use_own_content تا document+thumb دست‌نخورده برود
             try:
-                if kind == 'photo':
+                if hasattr(client, '_send_file_message'):
+                    msg = await client._send_file_message(
+                        file=document,
+                        chat_id=peer_id,
+                        chat_type=ctype,
+                        caption=None,  # داخل document است
+                        send_type=SendType.PHOTO if kind == 'photo' else SendType.DOCUMENT,
+                        thumb=thumb,
+                        ext=ext,
+                        use_own_content=True,
+                    )
+                elif kind == 'photo':
                     msg = await client.send_photo(
                         photo=document, chat_id=peer_id, chat_type=ctype, caption=caption or None,
                     )
@@ -2197,24 +2231,41 @@ def send_existing_file_to_channel(
                 date = getattr(msg, 'date', None)
                 if hasattr(date, 'value'):
                     date = date.value
-                return {'ok': True, 'message_id': mid, 'date': date, 'method': f'hl/{ctype}', 'lib': 'baleclient'}
+                return {
+                    'ok': True,
+                    'message_id': mid,
+                    'date': date,
+                    'method': f'own/{ctype}',
+                    'lib': 'baleclient',
+                    'has_thumb': thumb is not None,
+                }
             except Exception as e:
-                errors.append(f'hl/{ctype}:{type(e).__name__}:{e}')
+                errors.append(f'own/{ctype}:{type(e).__name__}:{e}')
                 hit = await _visible_new(before_ids)
                 if hit:
                     return {
-                        'ok': True, 'message_id': hit.get('message_id'), 'date': hit.get('date'),
-                        'method': f'hl/{ctype}/recovered', 'recovered': True, 'lib': 'baleclient',
+                        'ok': True,
+                        'message_id': hit.get('message_id'),
+                        'date': hit.get('date'),
+                        'method': f'own/{ctype}/recovered',
+                        'recovered': True,
+                        'lib': 'baleclient',
+                        'has_thumb': thumb is not None,
                     }
 
+            # fallback خام فقط اگر هنوز چیزی نرسیده
             try:
                 peer_kwargs: Dict[str, Any] = {'type': PeerType.GROUP, 'id': peer_id}
-                if access_hash not in (None, 0):
-                    peer_kwargs['access_hash'] = int(access_hash)
+                if peer_ah not in (None, 0):
+                    peer_kwargs['access_hash'] = int(peer_ah)
                 peer = Peer(**peer_kwargs)
                 chat = Chat(id=peer_id, type=ctype)
                 mid = generate_id()
-                call = SendMessage(peer=peer, message_id=mid, content=content, chat=chat)
+                call = SendMessage(
+                    peer=peer, message_id=mid,
+                    content=MessageContent(document=document),
+                    chat=chat,
+                )
                 result = await client(call)
                 msg = getattr(result, 'message', result)
                 return {
@@ -2223,19 +2274,28 @@ def send_existing_file_to_channel(
                     'date': getattr(msg, 'date', None),
                     'method': f'raw/{ctype}',
                     'lib': 'baleclient',
+                    'has_thumb': thumb is not None,
                 }
             except Exception as e:
                 errors.append(f'raw/{ctype}:{type(e).__name__}:{e}')
                 hit = await _visible_new(before_ids)
                 if hit:
                     return {
-                        'ok': True, 'message_id': hit.get('message_id'), 'date': hit.get('date'),
-                        'method': f'raw/{ctype}/recovered', 'recovered': True, 'lib': 'baleclient',
+                        'ok': True,
+                        'message_id': hit.get('message_id'),
+                        'date': hit.get('date'),
+                        'method': f'raw/{ctype}/recovered',
+                        'recovered': True,
+                        'lib': 'baleclient',
                     }
 
         return {
-            'ok': False, 'error': 'send_existing_failed', 'tries': errors[:12],
-            'file_id': file_id, 'file_access_hash': file_access_hash, 'lib': 'baleclient',
+            'ok': False,
+            'error': 'send_existing_failed',
+            'tries': errors[:10],
+            'file_id': file_id,
+            'file_access_hash': file_access_hash,
+            'lib': 'baleclient',
         }
 
     return _run(_with_client(_fn))

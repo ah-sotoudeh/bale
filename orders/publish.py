@@ -2900,11 +2900,12 @@ def test_copy_message_matrix(
             mime_type=str(media.get('mime') or 'image/jpeg'),
             caption=f'[{marker}] file_id-copy',
             kind='photo' if media.get('kind') == 'photo' else 'document',
+            thumb_raw=media.get('thumb_raw'),
         )
         ok = bool(isinstance(r, dict) and r.get('ok'))
         mid = (r or {}).get('message_id')
         err = '' if ok else (str((r or {}).get('error') or '')[:80] + ' | ' + ' ; '.join(str(x)[:55] for x in ((r or {}).get('tries') or [])[:5]))
-        _trial('copy_by_file_id', ok, err, mid=mid, ms=int((_time.time() - t0) * 1000), detail=str((r or {}).get('method') or ''))
+        _trial('copy_by_file_id', ok, err, mid=mid, ms=int((_time.time() - t0) * 1000), detail=f"method={(r or {}).get('method')} thumb={(r or {}).get('has_thumb')}")
         if ok and mid:
             cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
         elif marker:
@@ -2941,6 +2942,7 @@ def test_copy_message_matrix(
                 mime_type=str(media.get('mime') or 'image/jpeg'),
                 caption=f'[{marker}] after-src-deleted',
                 kind='photo' if media.get('kind') == 'photo' else 'document',
+                thumb_raw=media.get('thumb_raw'),
             )
             ok2 = bool(isinstance(r2, dict) and r2.get('ok'))
             mid2 = (r2 or {}).get('message_id')
