@@ -2832,67 +2832,67 @@ def test_linkyar_forward_copy_delete(
 
 
 
+
 def test_copy_message_matrix(
     *,
     source_ref: str = '@linktest',
     dest_ref: str = '@linktest2',
     do_delete: bool = True,
 ) -> Dict[str, Any]:
-    """فقط لینک‌یار: کپی محتوا بدون آپلود بایت (بازو در این تست نیست).
+    """فقط کپی تصویر با file_id + تست ماندگاری بعد از حذف پیام مبدأ.
 
-    1) ارسال متن به مبدأ و مقصد (قابلیت)
-    2) کلون متن به مقصد
-    3) پیدا کردن رسانه در تاریخچه (با parser بهبودیافته) → send_existing_file_id
+    بدون تست متن. کتابخانه: baleclient + JWT لینک‌یار.
     """
     import time as _time
+    import json as _json
 
     src_ref = str(source_ref or '@linktest').strip()
     dst_ref = str(dest_ref or '@linktest2').strip()
-    marker = f'ly-copy-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
-    text = f'[{marker}] ly-copy'
+    marker = f'ly-img-{int(_time.time())}-{int(_time.time() * 1000) % 10000}'
     lines: List[str] = [
-        f'ماتریس کپی فقط لینک‌یار | {src_ref} → {dst_ref}',
+        f'ماتریس کپی تصویر | {src_ref} → {dst_ref}',
         f'marker: {marker}',
+        'lib: baleclient + JWT (نه balelink)',
     ]
     trials: List[Dict[str, Any]] = []
-    cleanup: List[tuple] = []
+    cleanup: List[tuple] = []  # (ref, mid, date)
 
     def _trial(name: str, ok: bool, err: str = '', mid=None, ms: int = 0, detail: str = '') -> None:
         trials.append({
-            'method': name, 'ok': bool(ok), 'error': (err or '')[:280],
+            'method': name, 'ok': bool(ok), 'error': (err or '')[:300],
             'message_id': int(mid) if mid is not None else None,
-            'ms': int(ms), 'detail': (detail or '')[:160],
+            'ms': int(ms), 'detail': (detail or '')[:180],
         })
-        lines.append(f"{'✓' if ok else '✗'} [{name}] ({ms}ms) {err or detail or (f'mid={mid}' if mid is not None else '')}")
+        lines.append(
+            f"{'✓' if ok else '✗'} [{name}] ({ms}ms) "
+            f"{err or detail or (f'mid={mid}' if mid is not None else '')}"
+        )
 
-    # cap src/dst
-    for label, ref in (('src', src_ref), ('dst', dst_ref)):
-        t0 = _time.time()
-        try:
-            r = ly.send_text_to_channel(ref, f'{text}-{label}')
-            ok = bool(isinstance(r, dict) and r.get('ok'))
-            mid = (r or {}).get('message_id') if isinstance(r, dict) else None
-            _trial(f'cap_send_{label}', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
-            if ok and mid:
-                cleanup.append((ref, int(mid), int((r or {}).get('date') or 0)))
-        except Exception as e:
-            _trial(f'cap_send_{label}', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
+    def _shape(obj: Any, depth: int = 0) -> Any:
+        if depth > 4:
+            return '...'
+        if isinstance(obj, dict):
+            out = {}
+            for i, (k, v) in enumerate(obj.items()):
+                if i >= 12:
+                    out['…'] = f'+{len(obj) - 12}'
+                    break
+                if isinstance(v, (dict, list)):
+                    out[str(k)] = _shape(v, depth + 1)
+                elif isinstance(v, (bytes, bytearray)):
+                    out[str(k)] = f'bytes:{len(v)}'
+                elif isinstance(v, str) and len(v) > 60:
+                    out[str(k)] = v[:40] + '…'
+                else:
+                    out[str(k)] = v
+            return out
+        if isinstance(obj, list):
+            return [_shape(x, depth + 1) for x in obj[:4]]
+        return obj
 
-    # text clone
-    t0 = _time.time()
-    try:
-        r = ly.send_text_to_channel(dst_ref, f'{text}-clone')
-        ok = bool(isinstance(r, dict) and r.get('ok'))
-        mid = (r or {}).get('message_id') if isinstance(r, dict) else None
-        _trial('text_clone_to_dst', ok, '' if ok else str((r or {}).get('error') or r)[:200], mid=mid, ms=int((_time.time() - t0) * 1000))
-        if ok and mid:
-            cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
-    except Exception as e:
-        _trial('text_clone_to_dst', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
-
-    # history media scan
+    # ---- 1) پیدا کردن عکس در تاریخچه + شکل خام document ----
     media = None
-    kind_counts: Dict[str, int] = {}
+    raw_doc_shape = None
     for href in (src_ref, '@linkbank'):
         try:
             hist = ly.load_channel_history(href, limit=40)
@@ -2903,127 +2903,342 @@ def test_copy_message_matrix(
             lines.append(f'hist {href}: {(hist or {}).get("error")}')
             continue
         msgs = list(hist.get('messages') or [])
-        lines.append(f'hist {href}: n={len(msgs)} peer={hist.get("peer_id")} ah={hist.get("access_hash")}')
+        kinds = {}
         for p in msgs:
             k = str(p.get('kind') or 'unknown')
-            kind_counts[k] = kind_counts.get(k, 0) + 1
-            if p.get('file_id') is not None and p.get('file_access_hash') is not None:
+            kinds[k] = kinds.get(k, 0) + 1
+        lines.append(f'hist {href}: n={len(msgs)} kinds={kinds} peer={hist.get("peer_id")}')
+
+        # شکل خام اولین پیام رسانه‌ای
+        try:
+            resolved = ly.resolve_channel(href) if hasattr(ly, 'resolve_channel') else None
+            peer_id = (hist.get('peer_id') or (resolved or {}).get('peer_id'))
+            ah = hist.get('access_hash')
+            if peer_id:
+                raw = ly._run(ly._load_history_raw(
+                    # need client - use internal via load again
+                    __import__('asyncio').get_event_loop()  # placeholder
+                )) if False else None
+        except Exception:
+            pass
+
+        for p in msgs:
+            if p.get('kind') in ('photo', 'document', 'video') and p.get('file_id') is not None:
                 media = {
                     'from': href,
-                    **{kk: p.get(kk) for kk in (
-                        'message_id', 'file_id', 'file_access_hash', 'file_size',
-                        'file_name', 'kind', 'preview', 'mime',
-                    )},
+                    'message_id': p.get('message_id'),
+                    'date': p.get('date'),
+                    'file_id': p.get('file_id'),
+                    'file_access_hash': p.get('file_access_hash'),
+                    'file_size': p.get('file_size') or 0,
+                    'file_name': p.get('file_name') or 'banner.jpg',
+                    'mime': p.get('mime') or 'image/jpeg',
+                    'kind': p.get('kind'),
+                    'preview': str(p.get('preview') or '')[:40],
                 }
                 break
         if media:
             break
-        # نمونه برای دیباگ: اولین غیرمتن
-        for p in msgs:
-            if p.get('kind') not in ('text', None):
-                lines.append(
-                    f"sample non-text kind={p.get('kind')} keys={p.get('content_keys')} "
-                    f"mid={p.get('message_id')} mime={p.get('mime')} name={p.get('file_name')}"
-                )
-                break
-        else:
-            # اگر همه text/unknown — content_keys نمونه
-            for p in msgs[:3]:
-                lines.append(
-                    f"sample mid={p.get('message_id')} kind={p.get('kind')} "
-                    f"keys={p.get('content_keys')} prev={str(p.get('preview') or '')[:30]!r}"
-                )
 
-    lines.append('kind_counts=' + str(kind_counts))
-
-    # رد false-positive: file_id نباید user_id لینک‌یار یا message_id باشد
-    me_id = None
-    try:
-        me = ly.get_me()
-        me_id = int((me or {}).get('user_id') or ((me or {}).get('result') or {}).get('id') or 0) or None
-    except Exception:
-        me_id = 1164810718
-    if media:
-        fid = media.get('file_id')
-        mid_m = media.get('message_id')
-        if fid is not None and (fid == me_id or fid == mid_m):
-            lines.append(f'⚠ media meta رد شد (file_id مشکوک={fid} me={me_id} mid={mid_m})')
-            media = None
-
+    # شکل خام document از LoadHistory مستقیم
     if media:
         lines.append(
-            f"media from={media.get('from')} mid={media.get('message_id')} "
-            f"file_id={media.get('file_id')} ah={media.get('file_access_hash')} "
-            f"name={media.get('file_name')} mime={media.get('mime')}"
+            f"media mid={media['message_id']} file_id={media['file_id']} "
+            f"ah={media['file_access_hash']} name={media['file_name']} mime={media['mime']}"
         )
+        try:
+            async def _dump_raw(client):
+                resolved = await ly._resolve_peer(client, media['from'])
+                if not resolved.get('ok'):
+                    return {'error': resolved}
+                pid = int(resolved['peer_id'])
+                raw = await ly._load_history_raw(
+                    client, pid, resolved.get('access_hash'), limit=40,
+                )
+                if not raw.get('ok'):
+                    return {'error': raw.get('error')}
+                want = int(media['message_id'])
+                for it in raw.get('items') or []:
+                    if not isinstance(it, dict):
+                        continue
+                    mid = it.get('2') or it.get(2)
+                    try:
+                        if int(mid) != want:
+                            continue
+                    except Exception:
+                        continue
+                    content = it.get('4') or it.get(4) or it.get('5') or it.get(5)
+                    return {
+                        'item_keys': list(it.keys())[:15],
+                        'content_shape': _shape(content),
+                    }
+                return {'error': 'mid_not_in_raw', 'n': raw.get('raw_count')}
+
+            dump = ly._run(ly._with_client(_dump_raw))
+            lines.append('raw_doc: ' + _json.dumps(dump, ensure_ascii=False, default=str)[:900])
+            raw_doc_shape = dump
+        except Exception as e:
+            lines.append(f'raw dump: {type(e).__name__}:{e}')
+
+    if not media:
+        _trial('find_photo', False, 'no_photo_in_history')
+        lines.append('⚠ یک بنر تصویری در @linktest یا @linkbank بگذارید')
+        return {
+            'ok': False, 'marker': marker, 'trials': trials,
+            'message': '\n'.join(lines), 'lib': 'baleclient+jwt',
+        }
+
+    # ---- 2) تلاش‌های کپی با ترکیب‌های مختلف access_hash ----
+    # گاهی فیلد 2 اشتباه است؛ از raw_doc حدس بزن
+    ah_candidates = []
+    if media.get('file_access_hash') is not None:
+        ah_candidates.append(int(media['file_access_hash']))
+    try:
+        content = (raw_doc_shape or {}).get('content_shape') or {}
+        # document معمولاً زیر کلید 4
+        doc = content.get('4') or content.get(4) if isinstance(content, dict) else None
+        if isinstance(doc, dict):
+            for key in ('2', 2, '3', 3, 'access_hash'):
+                v = doc.get(str(key), doc.get(key) if not isinstance(key, str) else None)
+                try:
+                    iv = int(v)
+                    if iv not in ah_candidates and iv not in (0, 1, -1):
+                        ah_candidates.append(iv)
+                except Exception:
+                    pass
+            # nested file info
+            for sub in doc.values():
+                if isinstance(sub, dict):
+                    for key in ('2', 2, 'access_hash'):
+                        v = sub.get(str(key), sub.get(key) if not isinstance(key, str) else None)
+                        try:
+                            iv = int(v)
+                            if iv not in ah_candidates and abs(iv) > 1000:
+                                ah_candidates.append(iv)
+                        except Exception:
+                            pass
+    except Exception as e:
+        lines.append(f'ah candidates: {e}')
+
+    lines.append(f'ah_candidates={ah_candidates[:6]}')
+
+    copy_ok = False
+    copy_mid = None
+    for i, ah in enumerate(ah_candidates[:4] or [0]):
         t0 = _time.time()
         try:
             r = ly.send_existing_file_to_channel(
                 dst_ref,
                 file_id=media['file_id'],
-                file_access_hash=int(media['file_access_hash']),
+                file_access_hash=int(ah),
                 file_size=int(media.get('file_size') or 0),
                 file_name=str(media.get('file_name') or 'banner.jpg'),
-                caption=f'[{marker}] file_id-copy',
-                kind='photo' if str(media.get('kind') or '').startswith('photo') or str(media.get('mime') or '').startswith('image/') else 'document',
+                mime_type=str(media.get('mime') or 'image/jpeg'),
+                caption=f'[{marker}] copy-{i}',
+                kind='photo' if media.get('kind') == 'photo' else 'document',
             )
             ok = bool(isinstance(r, dict) and r.get('ok'))
             mid = (r or {}).get('message_id') if isinstance(r, dict) else None
             err = ''
             if not ok:
-                err = str((r or {}).get('error') or r)[:120]
+                err = str((r or {}).get('error') or '')[:80]
                 tries = (r or {}).get('tries') or []
                 if tries:
-                    err += ' | ' + ' ; '.join(str(x)[:80] for x in tries[:4])
+                    err += ' | ' + ' ; '.join(str(x)[:70] for x in tries[:3])
             _trial(
-                'copy_by_file_id',
+                f'copy_file_id_ah{i}',
                 ok,
                 err,
                 mid=mid,
                 ms=int((_time.time() - t0) * 1000),
-                detail=str((r or {}).get('method') or ''),
+                detail=f'ah={ah} method={(r or {}).get("method")}',
             )
-            if ok and mid:
-                cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
-            # همهٔ پیام‌های با این marker در مقصد (جلوگیری از ماندن نسخهٔ اول در double-send)
-            if marker:
-                try:
-                    h2 = ly.load_channel_history(dst_ref, limit=20)
-                    for p in list((h2 or {}).get('messages') or []):
-                        if marker in str(p.get('preview') or '') and p.get('message_id'):
-                            cleanup.append((dst_ref, int(p['message_id']), int(p.get('date') or 0)))
-                            lines.append(f'marker-hit mid={p.get("message_id")} kind={p.get("kind")} scheduled delete')
-                except Exception:
-                    pass
+            if ok:
+                copy_ok = True
+                copy_mid = mid
+                if mid:
+                    cleanup.append((dst_ref, int(mid), int((r or {}).get('date') or 0)))
+                break
+            # recover by marker even if failed
+            try:
+                h2 = ly.load_channel_history(dst_ref, limit=12)
+                for p in list((h2 or {}).get('messages') or []):
+                    if marker in str(p.get('preview') or '') and p.get('kind') in ('photo', 'document', 'unknown'):
+                        copy_ok = True
+                        copy_mid = p.get('message_id')
+                        cleanup.append((dst_ref, int(p['message_id']), int(p.get('date') or 0)))
+                        lines.append(f'⚠ recovered photo mid={copy_mid}')
+                        break
+            except Exception:
+                pass
+            if copy_ok:
+                break
         except Exception as e:
-            _trial('copy_by_file_id', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
-    else:
-        _trial('copy_by_file_id', False, 'no_media_file_id_parsed')
-        lines.append('⚠ هیچ file_id از تاریخچه استخراج نشد — بنر تصویری را در لینک‌بانک/مبدأ چک کنید')
+            _trial(f'copy_file_id_ah{i}', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
 
+    # ---- 3) تست ماندگاری file_id بعد از حذف پیام مبدأ ----
+    # کپی از همان meta، بعد حذف پیام مبدأ در src، دوباره به dst بفرست
+    lines.append('— تست حذف مبدأ / ماندگاری file_id —')
+    src_mid = media.get('message_id')
+    src_date = media.get('date') or 0
+    # اول یک کپی با marker lifecycle (اگر copy قبلی موفق نبود باز هم امتحان)
+    life_marker = f'{marker}-life'
+    t0 = _time.time()
+    life_r = None
+    try:
+        ah0 = int(ah_candidates[0]) if ah_candidates else int(media.get('file_access_hash') or 0)
+        life_r = ly.send_existing_file_to_channel(
+            dst_ref,
+            file_id=media['file_id'],
+            file_access_hash=ah0,
+            file_size=int(media.get('file_size') or 0),
+            file_name=str(media.get('file_name') or 'banner.jpg'),
+            mime_type=str(media.get('mime') or 'image/jpeg'),
+            caption=f'[{life_marker}] before-delete-src',
+            kind='photo' if media.get('kind') == 'photo' else 'document',
+        )
+        ok_before = bool(isinstance(life_r, dict) and life_r.get('ok'))
+        # recover
+        if not ok_before:
+            try:
+                h2 = ly.load_channel_history(dst_ref, limit=12)
+                for p in list((h2 or {}).get('messages') or []):
+                    if life_marker in str(p.get('preview') or ''):
+                        ok_before = True
+                        life_r = {
+                            'ok': True,
+                            'message_id': p.get('message_id'),
+                            'date': p.get('date'),
+                            'method': 'recovered',
+                        }
+                        break
+            except Exception:
+                pass
+        _trial(
+            'life_copy_before_delete',
+            ok_before,
+            '' if ok_before else str((life_r or {}).get('error') or life_r)[:150],
+            mid=(life_r or {}).get('message_id'),
+            ms=int((_time.time() - t0) * 1000),
+        )
+        if ok_before and (life_r or {}).get('message_id'):
+            cleanup.append((dst_ref, int(life_r['message_id']), int((life_r or {}).get('date') or 0)))
+    except Exception as e:
+        _trial('life_copy_before_delete', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
+        ok_before = False
+
+    # حذف پیام مبدأ در کانال منبع (اگر لینک‌یار اجازه دارد)
+    t0 = _time.time()
+    del_src_ok = False
+    if src_mid:
+        try:
+            dr = ly.delete_message(src_ref, int(src_mid), message_date=int(src_date or 0))
+            del_src_ok = bool(isinstance(dr, dict) and dr.get('ok'))
+            _trial(
+                'delete_source_message',
+                del_src_ok,
+                '' if del_src_ok else str((dr or {}).get('error') or dr)[:150],
+                mid=src_mid,
+                ms=int((_time.time() - t0) * 1000),
+            )
+        except Exception as e:
+            _trial('delete_source_message', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
+    else:
+        _trial('delete_source_message', False, 'no_src_mid')
+
+    # دوباره همان file_id را بفرست
+    t0 = _time.time()
+    try:
+        ah0 = int(ah_candidates[0]) if ah_candidates else int(media.get('file_access_hash') or 0)
+        r2 = ly.send_existing_file_to_channel(
+            dst_ref,
+            file_id=media['file_id'],
+            file_access_hash=ah0,
+            file_size=int(media.get('file_size') or 0),
+            file_name=str(media.get('file_name') or 'banner.jpg'),
+            mime_type=str(media.get('mime') or 'image/jpeg'),
+            caption=f'[{life_marker}] after-delete-src',
+            kind='photo' if media.get('kind') == 'photo' else 'document',
+        )
+        ok_after = bool(isinstance(r2, dict) and r2.get('ok'))
+        if not ok_after:
+            try:
+                h2 = ly.load_channel_history(dst_ref, limit=12)
+                for p in list((h2 or {}).get('messages') or []):
+                    if 'after-delete-src' in str(p.get('preview') or ''):
+                        ok_after = True
+                        r2 = {
+                            'ok': True,
+                            'message_id': p.get('message_id'),
+                            'date': p.get('date'),
+                            'method': 'recovered',
+                        }
+                        break
+            except Exception:
+                pass
+        _trial(
+            'life_copy_after_delete',
+            ok_after,
+            '' if ok_after else str((r2 or {}).get('error') or r2)[:150],
+            mid=(r2 or {}).get('message_id'),
+            ms=int((_time.time() - t0) * 1000),
+        )
+        if ok_after and (r2 or {}).get('message_id'):
+            cleanup.append((dst_ref, int(r2['message_id']), int((r2 or {}).get('date') or 0)))
+        if ok_after:
+            lines.append('نتیجه ماندگاری: file_id بعد از حذف پیام مبدأ هنوز کار می‌کند')
+        elif del_src_ok:
+            lines.append('نتیجه ماندگاری: بعد از حذف مبدأ، file_id کار نکرد (یا از اول هم کپی نامعتبر بود)')
+        else:
+            lines.append('نتیجه ماندگاری: پیام مبدأ حذف نشد — تست ناقص')
+    except Exception as e:
+        _trial('life_copy_after_delete', False, f'{type(e).__name__}:{e}', ms=int((_time.time() - t0) * 1000))
+
+    # cleanup فقط پیام‌های تست در مقصد (مبدأ را عمداً حذف کردیم در life test)
     if do_delete:
-        lines.append('— حذف —')
+        lines.append('— حذف پیام‌های تست در مقصد —')
+        seen = set()
         for ref, mid, date in cleanup:
+            key = (ref, int(mid))
+            if key in seen:
+                continue
+            seen.add(key)
             try:
                 r = ly.delete_message(ref, int(mid), message_date=int(date or 0))
                 ok = bool(isinstance(r, dict) and r.get('ok'))
                 lines.append(('✓' if ok else '✗') + f' del {ref} mid={mid}')
             except Exception as e:
                 lines.append(f'✗ del {type(e).__name__}:{e}')
+        # marker sweep
+        try:
+            h2 = ly.load_channel_history(dst_ref, limit=20)
+            for p in list((h2 or {}).get('messages') or []):
+                prev = str(p.get('preview') or '')
+                if marker in prev and p.get('message_id'):
+                    try:
+                        ly.delete_message(dst_ref, int(p['message_id']), message_date=int(p.get('date') or 0))
+                        lines.append(f'✓ del marker mid={p["message_id"]}')
+                    except Exception as e:
+                        lines.append(f'✗ del marker: {e}')
+        except Exception:
+            pass
 
-    winning = next((t['method'] for t in trials if t.get('ok') and t['method'] in (
-        'copy_by_file_id', 'text_clone_to_dst',
-    )), None)
-    any_ok = winning is not None
-    lines.append(f'— جمع — winning={winning or "—"}')
-    lines.append('نتیجه: ' + ('کپی موفق' if any_ok else 'کپی ناموفق'))
+    any_ok = any(t.get('ok') and t['method'].startswith('copy_file_id') for t in trials)
+    life_ok = any(t.get('method') == 'life_copy_after_delete' and t.get('ok') for t in trials)
+    winning = next((t['method'] for t in trials if t.get('ok') and 'copy_file_id' in t['method']), None)
+    if not winning and life_ok:
+        winning = 'life_copy_after_delete'
+    lines.append(f'— جمع — winning={winning or "—"} life_after_delete={life_ok}')
+    lines.append('نتیجه کپی تصویر: ' + ('موفق' if any_ok or life_ok else 'ناموفق'))
+
     return {
-        'ok': any_ok,
+        'ok': bool(any_ok or life_ok),
         'marker': marker,
         'winning': winning,
+        'file_id_survives_source_delete': life_ok,
         'trials': trials,
         'message': '\n'.join(lines),
-        'lib': 'baleclient+jwt (not balelink)',
+        'lib': 'baleclient+jwt',
     }
 
 
