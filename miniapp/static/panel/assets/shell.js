@@ -3943,10 +3943,7 @@ var reset = document.getElementById("lb-theme-reset");
         if (window.lbToast) window.lbToast(msg);
         else if (window.Bale && window.Bale.WebApp && window.Bale.WebApp.showAlert)
           window.Bale.WebApp.showAlert(msg);
-        try {
-          if (window.Bale && window.Bale.WebApp && window.Bale.WebApp.close)
-            setTimeout(function () { try { window.Bale.WebApp.close(); } catch (e) {} }, 600);
-        } catch (e) {}
+        /* مینی‌اپ را نبسته می‌گذاریم تا کاربر بتواند بعداً فهرست را ببیند */
       } catch (e) {
         if (window.lbToast) window.lbToast("ارتباط با سرور برقرار نشد");
       }

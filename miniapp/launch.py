@@ -13,6 +13,7 @@ def miniapp_url(path: str | None = None, role: str | None = None) -> str:
     base = (
         getattr(settings, 'MINIAPP_BASE_URL', '')
         or os.environ.get('MINIAPP_BASE_URL', '')
+        or 'https://bale.taiyebestan.ir'
     ).rstrip('/')
     if not base:
         return ''

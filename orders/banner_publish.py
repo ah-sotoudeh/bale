@@ -64,18 +64,13 @@ def user_facing_error(code: str) -> str:
 
 
 def banner_stage(banner: CustomerBanner) -> str:
-    """ثبت بنر دیگر نیاز به تأیید ندارد — ready به‌محض انتشار در کانال مرجع."""
-    if banner.from_linkbank and banner.linkbank_message_id:
-        return 'ready'
-    if banner.from_linkbank:
-        return 'ready'
+    """ثبت بنر بدون تأیید اپراتور — بنر فعال = آماده سفارش."""
+    if not banner.is_active:
+        return 'rejected'
     req = banner.publish_requests.order_by('-id').first()
     if req and req.status == 'rejected':
         return 'rejected'
-    # سازگاری با بنرهای قدیمی بدون linkbank
-    if banner.is_active:
-        return 'pending'
-    return 'pending'
+    return 'ready'
 
 
 def create_publish_request(
@@ -396,46 +391,45 @@ def register_banner_immediate(
     lb_mid = ''
     copy_err = ''
     try:
-        # ترجیح: copyMessage تا بدون هدر فوروارد باشد
-        cr = bc.copy_message(lb, str(storage_chat_id), int(storage_message_id))
-        if isinstance(cr, dict) and cr.get('ok'):
-            res = cr.get('result') or {}
-            lb_mid = str(res.get('message_id') or '')
+        # اول forward (پایدارتر روی بله)، بعد copyMessage
+        fr = bc.forward_message(lb, str(storage_chat_id), int(storage_message_id))
+        if isinstance(fr, dict) and fr.get('ok'):
+            res = fr.get('result') or {}
+            lb_mid = str(res.get('message_id') or res.get('message', {}).get('message_id') or '')
+            if not lb_mid and isinstance(res, dict):
+                lb_mid = str(res.get('message_id') or '')
         else:
-            copy_err = str((cr or {}).get('error') or cr)[:200]
-            # fallback forward
-            fr = bc.forward_message(lb, str(storage_chat_id), int(storage_message_id))
-            if isinstance(fr, dict) and fr.get('ok'):
-                res = fr.get('result') or {}
+            copy_err = str((fr or {}).get('error') or (fr or {}).get('description') or fr)[:200]
+            cr = bc.copy_message(lb, str(storage_chat_id), int(storage_message_id))
+            if isinstance(cr, dict) and cr.get('ok'):
+                res = cr.get('result') or {}
                 lb_mid = str(res.get('message_id') or '')
                 copy_err = ''
             else:
-                copy_err = copy_err or str((fr or {}).get('error') or fr)[:200]
+                copy_err = copy_err or str((cr or {}).get('error') or cr)[:200]
     except Exception as e:
         copy_err = f'{type(e).__name__}:{e}'
         logger.exception('copy banner to linkbank')
 
-    if not lb_mid:
-        return {
-            'ok': False,
-            'error': 'linkbank_copy_failed',
-            'message': 'نتوانستم بنر را در کانال مرجع ثبت کنم. دوباره بفرستید.',
-            'detail': copy_err,
-        }
-
+    # حتی اگر کپی به کانال مرجع شکست بخورد، بنر در فهرست مشتری ثبت می‌شود
     banner = CustomerBanner.objects.create(
         customer=user,
         title=title,
         caption=caption,
         storage_chat_id=str(storage_chat_id),
         storage_message_id=str(storage_message_id),
-        from_linkbank=True,
-        linkbank_chat_id=lb,
-        linkbank_message_id=str(lb_mid),
+        from_linkbank=bool(lb_mid),
+        linkbank_chat_id=lb if lb_mid else '',
+        linkbank_message_id=str(lb_mid or ''),
         media_kind=media_kind,
         bot_file_id=str(bot_file_id or ''),
         is_active=True,
     )
+    if not lb_mid:
+        logger.warning(
+            'banner #%s saved without linkbank copy: %s',
+            banner.id, copy_err,
+        )
 
     # فایل محلی اختیاری (پشتیبان)
     if message:
@@ -444,8 +438,10 @@ def register_banner_immediate(
         except Exception:
             logger.exception('save_banner_from_message')
 
-    # متای لینک‌یار از تاریخچهٔ کانال مرجع
-    ly_meta = _capture_linkyar_file_meta(lb, caption=caption, prefer_mid=None)
+    # متای لینک‌یار فقط اگر پیام در کانال مرجع نشسته باشد
+    ly_meta = None
+    if lb_mid:
+        ly_meta = _capture_linkyar_file_meta(lb, caption=caption, prefer_mid=lb_mid)
     if ly_meta:
         banner.ly_file_id = str(ly_meta.get('file_id') or '')
         banner.ly_file_access_hash = str(ly_meta.get('file_access_hash') or '')

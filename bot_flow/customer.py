@@ -311,7 +311,7 @@ def _banner_rules() -> str:
 
 
 def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, from_reference: bool = True) -> None:
-    """پیام موفقیت ثبت بنر + دکمهٔ باز کردن برگه بنرها در مینی‌اپ."""
+    """فقط پیام موفقیت + دکمهٔ باز کردن برگه بنرها در مینی‌اپ."""
     preview = (banner.caption or '').strip().replace('\n', ' ')
     if len(preview) > 120:
         preview = preview[:120] + '…'
@@ -321,23 +321,25 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
         f'✅ بنر شما با موفقیت ثبت شد.\n'
         f'«{banner.display_title()}»\n'
         f'{preview}\n\n'
-        f'می‌توانید از مینی‌اپ فهرست بنرها را ببینید یا برای سفارش از همین بنر استفاده کنید.'
+        f'برای دیدن فهرست بنرها، دکمه زیر را بزنید.'
     )
     rows: List[List[Dict[str, str]]] = []
     try:
         from miniapp.launch import miniapp_url
+        import os
         url = miniapp_url(role='customer')
-        if url:
-            sep = '&' if '?' in url else '?'
-            url = f'{url}{sep}tab=banners'
-            rows.append([{'text': '🖼 مشاهده بنرها در مینی‌اپ', 'web_app': {'url': url}}])
+        if not url:
+            base = (
+                os.environ.get('MINIAPP_BASE_URL')
+                or 'https://bale.taiyebestan.ir'
+            ).rstrip('/')
+            url = f'{base}/miniapp/?role=customer'
+        sep = '&' if '?' in url else '?'
+        url = f'{url}{sep}tab=banners'
+        rows.append([{'text': '🖼 مشاهده بنرها در مینی‌اپ', 'web_app': {'url': url}}])
     except Exception:
         logger.exception('miniapp url for banner confirm')
-    rows.append([
-        {'text': '📝 ویرایش متن', 'callback_data': f'cu:editcap:{banner.id}'},
-        {'text': '🛒 شروع سفارش', 'callback_data': 'cu:catalog'},
-    ])
-    rows.append([{'text': '🖼 بنرهای من (گفتگو)', 'callback_data': 'cu:banners'}])
+        rows.append([{'text': '🖼 بنرهای من', 'callback_data': 'cu:banners'}])
     bc.send_message(str(chat_id), text, reply_markup=bc.inline_keyboard(rows))
 
 
@@ -367,95 +369,52 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
         return False
 
     if not has_media and not is_fwd and len(caption.strip()) < 8:
-        bc.send_message(str(chat_id), 'این متن برای بنر کوتاه است. یک جملهٔ کامل بفرستید.\n\n' + _banner_rules())
+        bc.send_message(
+            str(chat_id),
+            'این متن برای بنر کوتاه است. یک جملهٔ کامل بفرستید.\n\n' + _banner_rules(),
+        )
         return True
 
     ok, hits = is_allowed(caption)
     if not ok:
-        bc.send_message(str(chat_id), 'این بنر را نمی‌توانم ثبت کنم. این عبارت مجاز نیست: ' + ', '.join(hits))
+        bc.send_message(
+            str(chat_id),
+            'این بنر را نمی‌توانم ثبت کنم. این عبارت مجاز نیست: ' + ', '.join(hits),
+        )
         return True
 
     user = ensure_user(bale_user_id)
-    from_lb, lb_chat, lb_mid = _forward_meta(message)
     msg_id = message.get('message_id')
     if not msg_id:
         bc.send_message(str(chat_id), 'این پیام را نگرفتم. یک بار دیگر بفرستید.')
         return True
 
-    # ثبت فوری بدون تأیید اپراتور: کپی به کانال مرجع + متای بات و لینک‌یار
     from orders.banner_publish import register_banner_immediate
 
-    if from_lb and lb_mid:
-        # بنر از خود لینک‌بانک فوروارد شده — همان mid مرجع
-        from orders.models import CustomerBanner
-        from orders.banner_media import file_from_message, save_banner_from_message
-
-        bot_fid = ''
-        try:
-            bot_fid, _k = file_from_message(message)
-        except Exception:
-            bot_fid = ''
-        banner = CustomerBanner.objects.create(
-            customer=user,
-            title=(caption or '').strip().split('\n')[0][:120],
-            caption=caption,
-            storage_chat_id=str(chat_id),
-            storage_message_id=str(msg_id),
-            from_linkbank=True,
-            linkbank_chat_id=str(lb_chat or linkbank_username()),
-            linkbank_message_id=str(lb_mid),
-            media_kind=_media_kind(message),
-            bot_file_id=str(bot_fid or ''),
-            is_active=True,
+    reg = register_banner_immediate(
+        user,
+        storage_chat_id=str(chat_id),
+        storage_message_id=str(msg_id),
+        caption=caption,
+        media_kind=_media_kind(message),
+        title=(caption or '').strip().split('\n')[0][:120],
+        message=message,
+    )
+    banner = reg.get('banner')
+    if not banner:
+        bc.send_message(
+            str(chat_id),
+            reg.get('message') or 'ثبت بنر ناموفق بود. دوباره بفرستید.',
         )
-        try:
-            save_banner_from_message(banner.id, message)
-        except Exception:
-            logger.exception('banner file')
-        try:
-            from orders.banner_publish import _capture_linkyar_file_meta
-            ly_meta = _capture_linkyar_file_meta(
-                str(lb_chat or linkbank_username()),
-                caption=caption,
-                prefer_mid=lb_mid,
-            )
-            if ly_meta:
-                banner.ly_file_id = str(ly_meta.get('file_id') or '')
-                banner.ly_file_access_hash = str(ly_meta.get('file_access_hash') or '')
-                banner.ly_file_size = int(ly_meta.get('file_size') or 0)
-                banner.ly_file_name = str(ly_meta.get('file_name') or '')[:255]
-                banner.ly_mime_type = str(ly_meta.get('mime') or '')[:80]
-                if ly_meta.get('message_id'):
-                    banner.linkyar_rid = str(ly_meta.get('message_id'))
-                if ly_meta.get('date'):
-                    banner.linkyar_date = str(ly_meta.get('date'))
-                banner.save()
-        except Exception:
-            logger.exception('ly meta from_lb')
-        reg = {'ok': True, 'banner': banner}
-    else:
-        reg = register_banner_immediate(
-            user,
-            storage_chat_id=str(chat_id),
-            storage_message_id=str(msg_id),
-            caption=caption,
-            media_kind=_media_kind(message),
-            title=(caption or '').strip().split('\n')[0][:120],
-            message=message,
-        )
-        if not reg.get('ok'):
-            bc.send_message(str(chat_id), reg.get('message') or 'ثبت بنر ناموفق بود. دوباره بفرستید.')
-            return True
-        banner = reg['banner']
+        return True
 
-    # اتصال به سفارش پیش‌نویس در صورت وجود
     try:
         _apply_banner_to_draft(
             user,
             storage_chat_id=str(banner.storage_chat_id),
             storage_message_id=str(banner.storage_message_id),
             caption=banner.caption or caption,
-            from_linkbank=True,
+            from_linkbank=bool(banner.from_linkbank),
             linkbank_chat_id=str(banner.linkbank_chat_id or ''),
             linkbank_message_id=str(banner.linkbank_message_id or ''),
             media_kind=banner.media_kind or _media_kind(message),
@@ -468,7 +427,7 @@ def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> boo
     save_session(sess, STATE_CUST_HOME, role='customer')
     _confirm_banner(chat_id, bale_user_id, banner, from_reference=True)
     return True
-    return True
+
 
 
 def _finish_named_banner(chat_id: str, bale_user_id: str, title: str) -> None:
