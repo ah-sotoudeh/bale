@@ -560,7 +560,7 @@ def api_tariff_delete(request: HttpRequest) -> JsonResponse:
 def api_banner_request_new(request: HttpRequest) -> JsonResponse:
     """دکمهٔ افزودن بنر در مینی‌اپ → بازو از کاربر بنر می‌خواهد."""
     from miniapp.api import _auth_user
-    from bot_flow.session import get_session, save_session
+    from bot_flow.handlers import get_session, save_session
     from bot_flow.customer import STATE_CUST_BANNER
     from integrations import bale_client as bc
 
