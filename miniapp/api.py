@@ -1666,6 +1666,81 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_topup(request: HttpRequest) -> JsonResponse:
+    """شارژ اعتبار مشتری: فاکتور در گفتگوی بازو با payload topup."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    assert user is not None
+    body = _json_body(request) or {}
+    try:
+        from config.system_settings import get_settings
+        cfg = get_settings()
+        amount = int(body.get('amount') or 0)
+        min_a = int(cfg.get('min_topup_toman') or 10000)
+        max_a = int(cfg.get('max_topup_toman') or 1000000)
+    except Exception:
+        amount = int(body.get('amount') or 0)
+        min_a, max_a = 10000, 1000000
+    if amount < min_a or amount > max_a:
+        return JsonResponse({
+            'ok': False,
+            'error': 'bad_amount',
+            'message': f'مبلغ شارژ باید بین {min_a:,} و {max_a:,} تومان باشد.',
+            'min': min_a,
+            'max': max_a,
+        }, status=200)
+    chat_id = str(user.bale_user_id or '').strip()
+    if not chat_id:
+        return JsonResponse({'ok': False, 'error': 'no_chat', 'message': 'شناسه بله پیدا نشد.'}, status=200)
+    import time
+    from integrations import bale_client as bc
+    nonce = str(int(time.time()))[-8:]
+    payload = f'topup:{user.id}:{amount}:{nonce}'
+    provider = ''
+    try:
+        from django.conf import settings as dj
+        provider = getattr(dj, 'BALE_PROVIDER_TOKEN', '') or ''
+    except Exception:
+        pass
+    # sendInvoice in bot chat
+    import os
+    provider = provider or os.environ.get('BALE_PROVIDER_TOKEN', '')
+    if not provider:
+        # try create_invoice_link path still needs token
+        return JsonResponse({
+            'ok': False,
+            'error': 'no_provider',
+            'message': 'درگاه پرداخت بله پیکربندی نشده (PROVIDER_TOKEN).',
+        }, status=200)
+    prices = [{'label': 'شارژ اعتبار', 'amount': amount * 10}]
+    r = bc.send_invoice(
+        chat_id,
+        title='شارژ اعتبار لینک‌بان',
+        description=f'افزایش اعتبار به مبلغ {amount:,} تومان',
+        payload=payload,
+        provider_token=provider,
+        prices=prices,
+    )
+    if isinstance(r, dict) and r.get('ok') is False or r.get('error'):
+        return JsonResponse({
+            'ok': False,
+            'error': 'invoice_failed',
+            'message': 'فاکتور شارژ ارسال نشد. دوباره تلاش کنید.',
+            'detail': str(r.get('error') or '')[:120],
+        }, status=200)
+    return JsonResponse({
+        'ok': True,
+        'via': 'bot',
+        'amount': amount,
+        'message': 'فاکتور شارژ در گفتگوی بازو فرستاده شد. پس از پرداخت، اعتبارتان به‌روز می‌شود.',
+        'open_bot': True,
+    })
+
+
 def api_request_payout(request: HttpRequest) -> JsonResponse:
     try:
         user, err = _auth_user(request)

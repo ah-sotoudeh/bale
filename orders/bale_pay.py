@@ -45,13 +45,29 @@ def payment_parts(amount_toman: int) -> list[int]:
 
 
 def parse_invoice_payload(payload: str) -> Optional[Dict[str, Any]]:
-    match = _PAYLOAD.match(str(payload or '').strip())
+    raw = str(payload or '').strip()
+    if raw.startswith('topup:'):
+        # topup:{user_id}:{amount_toman}:{nonce}
+        parts = raw.split(':')
+        if len(parts) >= 3:
+            try:
+                return {
+                    'kind': 'topup',
+                    'user_id': int(parts[1]),
+                    'amount': int(parts[2]),
+                    'nonce': parts[3] if len(parts) > 3 else '',
+                }
+            except (TypeError, ValueError):
+                return None
+        return None
+    match = _PAYLOAD.match(raw)
     if not match:
         return None
     order_id = int(match.group(1))
     if match.group(2) is None:
-        return {'order_id': order_id, 'part': None, 'amount': None}
+        return {'kind': 'order', 'order_id': order_id, 'part': None, 'amount': None}
     return {
+        'kind': 'order',
         'order_id': order_id,
         'part': int(match.group(2)),
         'amount': int(match.group(3)),
@@ -278,6 +294,20 @@ def handle_pre_checkout(query: Dict[str, Any]) -> None:
     if not parsed:
         bc.answer_pre_checkout_query(qid, False, 'این فاکتور برای سفارشی نیست. از سفارش‌ها دوباره پرداخت کنید.')
         return
+    if parsed.get('kind') == 'topup':
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        try:
+            u = User.objects.get(id=int(parsed['user_id']))
+        except Exception:
+            bc.answer_pre_checkout_query(qid, False, 'کاربر پیدا نشد.')
+            return
+        want_rial = int(parsed.get('amount') or 0) * 10
+        if amount and want_rial and abs(amount - want_rial) > 0:
+            bc.answer_pre_checkout_query(qid, False, 'مبلغ شارژ با فاکتور یکی نیست.')
+            return
+        bc.answer_pre_checkout_query(qid, True)
+        return
     try:
         order = Order.objects.get(id=parsed['order_id'])
     except Order.DoesNotExist:
@@ -369,6 +399,31 @@ def handle_successful_payment(message: Dict[str, Any]) -> None:
     chat_id = str((message.get('chat') or {}).get('id') or '')
     if not parsed:
         logger.warning('successful_payment ignored payload')
+        return
+    if parsed.get('kind') == 'topup':
+        from django.contrib.auth import get_user_model
+        from wallet.services import credit
+        User = get_user_model()
+        try:
+            u = User.objects.get(id=int(parsed['user_id']))
+        except Exception:
+            logger.warning('topup user missing %s', parsed)
+            return
+        amount = int(parsed.get('amount') or 0)
+        nonce = str(parsed.get('nonce') or '')[:40]
+        if amount <= 0:
+            return
+        credit(
+            u,
+            amount,
+            entry_type='topup',
+            ref=f'topup:{u.id}:{nonce}',
+            note=f'شارژ اعتبار {amount} تومان',
+            idempotency_key=f'topup:{u.id}:{nonce}:{amount}'[:80],
+        )
+        cid = chat_id or str(u.bale_user_id or '')
+        if cid:
+            bc.send_message(cid, f'✅ اعتبار شما {amount:,} تومان افزایش یافت.')
         return
     try:
         paid_rial = int(pay.get('total_amount') or 0)

@@ -248,6 +248,13 @@
     return ST.mgrTariffs;
   }
 
+  async function loadOpTickets() {
+    try {
+      const d = await api('/tickets');
+      if (d.ok) ST.opTickets = d.tickets || [];
+    } catch (e) { ST.opTickets = []; }
+  }
+
   async function loadOpSettings() {
     try {
       const d = await api('/operator/settings');
@@ -718,6 +725,7 @@
     const payouts = response.payouts || [];
     const ledger = response.ledger || [];
     const isAdvertiser = ST.role !== 'manager' && ST.role !== 'operator';
+    const topupHtml = isAdvertiser ? '<div style="padding:8px 0"><button class="btn btn-primary btn-block" id="btnTopup">شارژ اعتبار (فاکتور بله)</button></div>' : '';
     const payoutAllowed = ST.role === 'manager' && response.can_payout !== false;
     const visibleBalance = isAdvertiser ? Number(w.credit || 0) : Number(w.available || 0);
     const balanceLabel = isAdvertiser ? 'اعتبار قابل استفاده برای سفارش (تومان)' : 'موجودی قابل برداشت (تومان)';
@@ -725,7 +733,8 @@
     const ledgerLabels = { earn: 'درآمد انتشار', refund: 'بازگشت وجه', deposit: 'شارژ کیف پول با بله', penalty: 'جریمه', payout_lock: 'رزرو برداشت', payout_paid: 'برداشت پرداخت‌شده', payout_unlock: 'آزادسازی برداشت', spend: 'هزینه سفارش', escrow: 'وجه امانی', adjust: 'اصلاح موجودی' };
     const payoutLabels = { pending: 'در انتظار بررسی', paid: 'پرداخت‌شده', rejected: 'ردشده', cancelled: 'لغوشده' };
     return `
-      <section class="wallet-hero"><div class="wallet-hero-head"><span>${isAdvertiser ? 'اعتبار قابل استفاده' : 'موجودی قابل برداشت'}</span><span class="wallet-hero-icon">${icon('wallet',22)}</span></div><div class="wallet-total">${faNum(visibleBalance)} <small>تومان</small></div><div class="wallet-hero-foot"><span>${icon('shield-check',14)} موجودی حساب لینک‌بان</span><span>${isAdvertiser ? 'برای ثبت سفارش' : 'قابل تسویه طبق شرایط'}</span></div></section>
+      <section class="wallet-hero"><div class="wallet-hero-head"><span>${isAdvertiser ? 'اعتبار قابل استفاده' : 'موجودی قابل برداشت'}</span><span class="wallet-hero-icon">${icon('wallet',22)}</span></div><div class="wallet-total">${faNum(visibleBalance)} <small>تومان</small></div>
+      ${topupHtml}<div class="wallet-hero-foot"><span>${icon('shield-check',14)} موجودی حساب لینک‌بان</span><span>${isAdvertiser ? 'برای ثبت سفارش' : 'قابل تسویه طبق شرایط'}</span></div></section>
       <div class="wallet-secondary-stats"><div class="wallet-stat"><span class="wallet-stat-icon pending-icon">${icon('clock',19)}</span><div><small>در انتظار تسویه</small><strong>${faNum(w.locked_pending ?? w.pending)} <small>تومان</small></strong></div></div><div class="wallet-stat"><span class="wallet-stat-icon income-icon">${icon('trending-up',19)}</span><div><small>درآمد این ماه</small><strong>${faNum(response.report?.month_earn || 0)} <small>تومان</small></strong></div></div></div>
       <div class="wallet-quick-action"><div><strong>شارژ حساب</strong><span>فاکتور پرداخت را در بله دریافت کن.</span></div><button class="btn btn-primary" id="btnInvoice">${icon('plus',16)} افزایش موجودی</button></div>
       <div class="card wallet-paid-row"><div class="list-item"><div class="grow"><div class="title">مبلغ پرداخت‌شده</div><div class="sub">جمع برداشت‌های تسویه‌شده</div></div><b>${faNum(w.paid_out || 0)} تومان</b></div></div>
@@ -903,19 +912,21 @@
     return `<section class="operator-hero"><div class="operator-hero-art"><div class="operator-orbit"></div><span>${icon('headset',31)}</span></div><div class="operator-hero-copy"><span class="manager-eyebrow">میز پشتیبانی</span><h2>مرکز عملیات لینک‌بان</h2><p>صف‌های بررسی را اولویت‌بندی کن و وضعیت هر درخواست را روشن نگه دار.</p><span class="operator-security">${icon('shield-check',14)} دسترسی پشتیبان</span></div></section>
       <div class="operator-queue-grid"><button data-op-shortcut="banners" class="operator-queue-card ${ST.opTab==='banners'?'on':''}"><span class="operator-queue-icon banner-queue">${icon('image',19)}</span><small>بررسی بنر</small><strong>${fa(banners.length)}</strong><span>مورد در صف</span></button><button data-op-shortcut="payouts" class="operator-queue-card ${ST.opTab==='payouts'?'on':''}"><span class="operator-queue-icon payout-queue">${icon('wallet',19)}</span><small>تسویه‌ها</small><strong>${fa(payouts.length)}</strong><span>درخواست پرداخت</span></button><button data-op-shortcut="assign" class="operator-queue-card ${ST.opTab==='assign'?'on':''}"><span class="operator-queue-icon manager-queue">${icon('building-2',19)}</span><small>اتصال مدیران</small><strong>${fa(assigns.length)}</strong><span>تخصیص ثبت‌شده</span></button></div>
       <div class="operator-content-heading"><div><span class="eyebrow">صف کاری</span><h2>${ST.opTab==='banners'?'بررسی و تأیید بنرها':ST.opTab==='payouts'?'درخواست‌های برداشت':'مدیریت اتصال کانال‌ها'}</h2></div><button class="manager-refresh" id="btnOpRefresh" aria-label="به‌روزرسانی">${icon('refresh-cw',16)}</button></div>
-      <div class="seg operator-tabs" id="opTabs"><button class="${ST.opTab==='banners'?'on':''}" data-t="banners">بنرها ${banners.length?`<em>${fa(banners.length)}</em>`:''}</button><button class="${ST.opTab==='payouts'?'on':''}" data-t="payouts">تسویه‌ها ${payouts.length?`<em>${fa(payouts.length)}</em>`:''}</button><button class="${ST.opTab==='assign'?'on':''}" data-t="assign">مدیران</button><button class="${ST.opTab==='settings'?'on':''}" data-t="settings">تنظیمات</button></div>
-      <div class="operator-panel">${ST.opTab === 'banners' ? renderOpBanners(banners) : ST.opTab === 'payouts' ? renderOpPayouts(payouts) : ST.opTab === 'settings' ? renderOpSettings() : renderOpAssignments(assigns)}</div>`;
+      <div class="seg operator-tabs" id="opTabs"><button class="${ST.opTab==='banners'?'on':''}" data-t="banners">بنرها ${banners.length?`<em>${fa(banners.length)}</em>`:''}</button><button class="${ST.opTab==='payouts'?'on':''}" data-t="payouts">تسویه‌ها ${payouts.length?`<em>${fa(payouts.length)}</em>`:''}</button><button class="${ST.opTab==='assign'?'on':''}" data-t="assign">مدیران</button><button class="${ST.opTab==='tickets'?'on':''}" data-t="tickets">تیکت‌ها</button><button class="${ST.opTab==='settings'?'on':''}" data-t="settings">تنظیمات</button></div>
+      <div class="operator-panel">${ST.opTab === 'banners' ? renderOpBanners(banners) : ST.opTab === 'payouts' ? renderOpPayouts(payouts) : ST.opTab === 'tickets' ? renderOpTickets() : ST.opTab === 'settings' ? renderOpSettings() : renderOpAssignments(assigns)}</div>`;
   }
 
   function renderOpSettings() {
     const s = ST.opSettings || {};
-    const row = (key, label, hint) => `
-      <div class="field"><label>${label}</label>
-        <input type="number" data-setting="${key}" value="${esc(s[key] ?? '')}" inputmode="numeric"/>
+    const row = (key, label, hint, type) => {
+      type = type || 'number';
+      return `<div class="field"><label>${label}</label>
+        <input type="${type}" data-setting="${key}" value="${esc(s[key] ?? '')}" ${type==='number'?'inputmode="numeric"':''} dir="${type==='text'?'ltr':'rtl'}"/>
         <small class="field-help">${hint}</small></div>`;
+    };
     return `<div class="operator-settings">
-      <section class="form-sheet-hero"><div><span class="eyebrow">پیکربندی سامانه</span><h3>اعداد قابل تنظیم</h3>
-        <p>مهلت پرداخت، کارمزد و هزینهٔ بنر. فعلاً کارمزد و بنر صفر است.</p></div></section>
+      <section class="form-sheet-hero"><div><span class="eyebrow">پیکربندی سامانه</span><h3>اعداد و حساب‌ها</h3>
+        <p>مهلت پرداخت، کارمزد، شارژ و مشخصات کارت‌به‌کارت.</p></div></section>
       ${row('payment_hold_hours', 'مهلت پرداخت (ساعت)', 'بعد از قبول مدیر تا پرداخت')}
       ${row('banner_fee_toman', 'هزینه بنر بعدی (تومان)', '۰ = رایگان')}
       ${row('service_fee_toman', 'کارمزد سفارش (تومان)', '۰ = رایگان')}
@@ -923,8 +934,29 @@
       ${row('publish_retry_interval_sec', 'فاصله تلاش انتشار (ثانیه)', 'پیش‌فرض ۶۰')}
       ${row('min_topup_toman', 'حداقل شارژ (تومان)', '')}
       ${row('max_topup_toman', 'سقف شارژ (تومان)', '')}
+      <h3 style="margin:16px 0 8px">کارت‌به‌کارت</h3>
+      ${row('card_holder', 'نام صاحب حساب', '', 'text')}
+      ${row('card_number', 'شماره کارت', '', 'text')}
+      ${row('card_iban', 'شبا', '', 'text')}
+      ${row('card_bank_name', 'نام بانک', '', 'text')}
+      ${row('card_note', 'توضیح برای مشتری', '', 'text')}
       <button class="btn btn-primary btn-block" id="btnSaveOpSettings">ذخیره تنظیمات</button>
     </div>`;
+  }
+
+function renderOpTickets() {
+    const rows = ST.opTickets || [];
+    if (!rows.length) {
+      return `<div class="operator-empty"><h3>تیکتی نیست</h3><p>تیکت‌های مشتریان اینجا می‌آید.</p></div>`;
+    }
+    return `<div class="op-ticket-list">${rows.map((t) => `
+      <article class="business-workspace-card">
+        <div class="grow"><span class="badge muted">${esc(t.status||'')}</span>
+          <h3>${esc(t.subject||('تیکت '+t.id))}</h3>
+          <small>${esc(t.category||'')} · #${fa(t.id)}</small>
+        </div>
+        <button type="button" class="btn btn-soft" data-op-ticket-open="${t.id}">پاسخ</button>
+      </article>`).join('')}</div>`;
   }
 
   function renderOpBanners(rows) {
@@ -1213,6 +1245,23 @@
       await requestNewBanner();
     };
     const homeBannerCreate = $('#btnHomeBanner'); if (homeBannerCreate) homeBannerCreate.onclick = openNewBanner;
+    const topupBtn = $('#btnTopup');
+    if (topupBtn) topupBtn.onclick = async () => {
+      let minA = 10000, maxA = 1000000;
+      try { const info = await api('/pay/info'); if (info.ok) { minA = info.min_topup_toman || minA; maxA = info.max_topup_toman || maxA; } } catch (e) {}
+      openSheet(`<div class="sheet-handle"></div><h3 style="text-align:center">شارژ اعتبار</h3>` +
+        `<div class="field"><label>مبلغ (تومان)</label><input id="topupAmount" type="number" value="${minA}" /></div>` +
+        `<p class="hint">حداقل ${faNum(minA)} — حداکثر ${faNum(maxA)}</p>` +
+        `<button class="btn btn-primary btn-block" id="btnDoTopup">ارسال فاکتور به بازو</button>`);
+      const go = $('#btnDoTopup');
+      if (go) go.onclick = async () => {
+        const amount = Number(($('#topupAmount') || {}).value) || 0;
+        const d = await api('/topup', { method: 'POST', body: { amount } });
+        toast(d.message || (d.ok ? 'فاکتور ارسال شد' : 'خطا'));
+        if (d.ok) { closeSheet(); try { const w = window.Bale && Bale.WebApp; if (w && w.close) setTimeout(() => w.close(), 400); } catch (e) {} }
+      };
+    };
+
 
     const saveOp = $('#btnSaveOpSettings');
     if (saveOp) saveOp.onclick = async () => {
@@ -1289,6 +1338,35 @@
     const settingQueues = $('#btnSettingsQueues'); if (settingQueues) settingQueues.onclick = async () => { try { await Promise.allSettled([loadOpBanners(),loadOpPayouts(),loadOpAssignments()]); } catch(e) {} navigate('op-home'); };
 
     const emptyBannerCreate = $('#btnEmptyBannerCreate'); if (emptyBannerCreate) emptyBannerCreate.onclick = openNewBanner;
+    document.querySelectorAll('[data-op-ticket-open]').forEach((b) => {
+      b.onclick = async () => {
+        const id = Number(b.getAttribute('data-op-ticket-open'));
+        const d = await api('/tickets/' + id);
+        if (!d.ok) { toast(d.message || 'تیکت پیدا نشد'); return; }
+        const t = d.ticket || {};
+        const msgs = (t.messages || []).map((m) =>
+          `<div class="hint"><b>${m.is_staff ? 'پشتیبان' : 'مشتری'}:</b> ${esc(m.body)}</div>`
+        ).join('') || '<p class="hint">پیامی نیست</p>';
+        openSheet(`<div class="sheet-handle"></div><h3>${esc(t.subject||'')}</h3>${msgs}
+          <div class="field"><label>پاسخ</label><textarea id="opTicketReply" rows="3"></textarea></div>
+          <button class="btn btn-primary btn-block" id="btnOpTicketReply">ارسال پاسخ</button>
+          <button class="btn btn-soft btn-block" id="btnOpTicketClose" style="margin-top:8px">بستن تیکت</button>`);
+        const send = $('#btnOpTicketReply');
+        if (send) send.onclick = async () => {
+          const body = ($('#opTicketReply').value || '').trim();
+          if (!body) { toast('متن پاسخ خالی است'); return; }
+          const r = await api('/tickets/' + id, { method: 'POST', body: { message: body } });
+          toast(r.ok ? 'پاسخ ثبت شد' : (r.message || 'خطا'));
+          if (r.ok) { closeSheet(); await loadOpTickets(); render(); }
+        };
+        const cls = $('#btnOpTicketClose');
+        if (cls) cls.onclick = async () => {
+          await api('/tickets/' + id + '/close', { method: 'POST', body: {} });
+          closeSheet(); await loadOpTickets(); render();
+        };
+      };
+    });
+
 
     const submitTicket = $('#btnSubmitTicket');
     if (submitTicket) submitTicket.onclick = async () => {
@@ -1951,13 +2029,23 @@
     const bBtn = $('#payBot');
     if (bBtn) bBtn.onclick = () => run('bot');
     const cBtn = $('#payCard');
-    if (cBtn) cBtn.onclick = () => {
+    if (cBtn) cBtn.onclick = async () => {
+      let card = {};
+      try {
+        const info = await api('/pay/info');
+        if (info.ok) card = info.card || {};
+      } catch (e) {}
       openSheet(`
         <div class="sheet-handle"></div>
         <h3 style="text-align:center">کارت‌به‌کارت</h3>
-        <p class="hint">مبلغ سفارش را کارت‌به‌کارت کنید و در تیکت پشتیبانی رسید و شماره سفارش را بفرستید تا پشتیبان تأیید کند.</p>
-        <p class="hint">شماره سفارش: <b>#${fa(id)}</b> — مبلغ: <b>${faNum(total)}</b> تومان</p>
-        <button class="btn btn-primary btn-block" id="payCardTicket">باز کردن تیکت پرداخت</button>
+        <p class="hint">مبلغ <b>${faNum(total)}</b> تومان · سفارش <b>#${fa(id)}</b></p>
+        ${card.holder ? `<p class="hint">به‌نام: <b>${esc(card.holder)}</b></p>` : ''}
+        ${card.card_number ? `<p class="hint" dir="ltr">کارت: <b>${esc(card.card_number)}</b></p>` : ''}
+        ${card.iban ? `<p class="hint" dir="ltr">شبا: <b>${esc(card.iban)}</b></p>` : ''}
+        ${card.bank_name ? `<p class="hint">بانک: ${esc(card.bank_name)}</p>` : ''}
+        <p class="hint">${esc(card.note || 'پس از واریز، رسید را در تیکت بفرستید.')}</p>
+        ${!(card.card_number || card.iban) ? '<p class="hint">حساب هنوز در تنظیمات پشتیبان ثبت نشده است.</p>' : ''}
+        <button class="btn btn-primary btn-block" id="payCardTicket">ثبت تیکت + رسید</button>
       `);
       const t = $('#payCardTicket');
       if (t) t.onclick = () => {
@@ -2031,7 +2119,7 @@
     try {
       await loadMe();
       if (ST.role === 'manager') { ST.page = 'mgr-home'; await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs(), loadWallet()]); }
-      else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments(), loadOpSettings()]); }
+      else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments(), loadOpSettings(), loadOpTickets()]); }
       else ST.page = launchView === 'businesses' ? 'businesses' : 'home';
       await Promise.allSettled([loadCatalog(), loadBanners(), loadBusinesses({ refreshMetadata: launchView === 'businesses' }), loadOrders(), loadWallet()]);
       // ویزارد ورود: آگهی‌دهنده حداقل یک کسب‌وکار لازم دارد

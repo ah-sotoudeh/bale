@@ -25,3 +25,21 @@ def api_operator_settings(request: HttpRequest) -> JsonResponse:
     patch = body.get('settings') if isinstance(body.get('settings'), dict) else body
     updated = update_settings(patch or {})
     return JsonResponse({'ok': True, 'settings': updated})
+
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_public_pay_info(request: HttpRequest) -> JsonResponse:
+    """اطلاعات کارت‌به‌کارت برای مشتری (بدون نیاز به نقش پشتیبان)."""
+    user, err = _auth_user(request)
+    if err:
+        return err
+    from config.system_settings import public_card_info, get_settings
+    s = get_settings()
+    return JsonResponse({
+        'ok': True,
+        'card': public_card_info(),
+        'min_topup_toman': s.get('min_topup_toman'),
+        'max_topup_toman': s.get('max_topup_toman'),
+    })

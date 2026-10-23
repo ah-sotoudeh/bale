@@ -34,6 +34,7 @@ class WalletLedger(models.Model):
         ('spend', 'Spend'),  # use wallet balance on new order (future)
         ('escrow', 'Escrow'),  # پرداخت دیده‌شده؛ در موجودی قابل برداشت جمع نمی‌شود
         ('adjust', 'Adjust'),
+        ('topup', 'Topup'),  # شارژ اعتبار مشتری
     ]
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='ledger'

@@ -79,7 +79,7 @@ def balance_breakdown(user: User) -> Dict[str, int]:
     available = qs.exclude(entry_type__in=('escrow', 'refund')).aggregate(s=Sum('amount'))['s'] or 0
     # اعتبار مشتری = بازگشت‌ها + خرج‌ها (spend معمولاً منفی است)
     credit = (
-        qs.filter(entry_type__in=('refund', 'spend')).aggregate(s=Sum('amount'))['s'] or 0
+        qs.filter(entry_type__in=('refund', 'spend', 'topup')).aggregate(s=Sum('amount'))['s'] or 0
     )
     locked = (
         PayoutRequest.objects.filter(user=user, status='pending').aggregate(s=Sum('amount_toman'))[
