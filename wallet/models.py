@@ -99,6 +99,10 @@ class PayoutRequest(models.Model):
 
 
 class PayoutBatch(models.Model):
+    STATUS = [
+        ('open', 'open'),           # فایل ارسال شده، منتظر اکسل
+        ('processed', 'processed'), # اکسل پردازش شد
+    ]
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -109,6 +113,10 @@ class PayoutBatch(models.Model):
     paid_at = models.DateTimeField(null=True, blank=True)
     file_text = models.TextField(blank=True, default='')
     note = models.CharField(max_length=255, blank=True, default='')
+    file_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS, default='open')
+    operator_message_id = models.CharField(max_length=64, blank=True, default='')
+    result_summary = models.CharField(max_length=255, blank=True, default='')
 
     def __str__(self):
         return f'Batch #{self.id}'

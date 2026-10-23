@@ -365,6 +365,40 @@ def handle_update(update: dict) -> None:
             log.exception('successful_payment failed')
         return
 
+    # پشتیبان: اکسل گزارش بانک پس از «پرداخت شد»
+    if msg.get('document') and (msg.get('from') or {}).get('id'):
+        try:
+            from django.core.cache import cache
+            from wallet.services import is_operator, process_bank_report_for_batch
+            uid = str((msg.get('from') or {}).get('id') or '')
+            bid = cache.get(f'op_wait_excel:{uid}')
+            if bid and is_operator(uid):
+                # پارس ساده: خطوط payout_id,status
+                file_name = str((msg.get('document') or {}).get('file_name') or '')
+                caption = str(msg.get('caption') or '')
+                rows = []
+                for line in caption.splitlines():
+                    parts = [p.strip() for p in line.replace(';', ',').split(',')]
+                    if len(parts) >= 2 and parts[0].isdigit():
+                        rows.append({'payout_id': parts[0], 'status': parts[1]})
+                if not rows:
+                    # بدون پارس کامل اکسل: از پشتیبان بخواهید در کپشن نتیجه بنویسد
+                    bc.send_message(
+                        str((msg.get('chat') or {}).get('id') or ''),
+                        'فعلاً نتیجه را در کپشن فایل بنویسید: هر خط «شناسه,موفق» یا «شناسه,ناموفق». '
+                        f'(فایل {file_name or "اکسل"} دریافت شد — دسته #{bid})',
+                    )
+                    return
+                r = process_bank_report_for_batch(int(bid), rows)
+                cache.delete(f'op_wait_excel:{uid}')
+                bc.send_message(
+                    str((msg.get('chat') or {}).get('id') or ''),
+                    r.get('summary') or (r.get('message') or str(r)),
+                )
+                return
+        except Exception:
+            log.exception('op excel process')
+
     chat_id = str((msg.get('chat') or {}).get('id') or '')
     from_user = msg.get('from') or {}
     bale_uid = str(from_user.get('id') or '')

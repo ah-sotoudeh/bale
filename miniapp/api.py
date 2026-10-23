@@ -1565,6 +1565,48 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def api_cancel_payout(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    body = _json_body(request) or {}
+    try:
+        pid = int(body.get('payout_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields'}, status=200)
+    r = ws.cancel_payout_request(user, pid)
+    return JsonResponse(r, status=200)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_set_active_banner(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    body = _json_body(request) or {}
+    from orders.models import CustomerBanner, CustomerBusiness
+    try:
+        bid = int(body.get('banner_id'))
+        biz_id = int(body.get('business_id') or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields'}, status=200)
+    ban = CustomerBanner.objects.filter(id=bid, customer=user, is_active=True).first()
+    if not ban:
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=200)
+    if biz_id:
+        biz = CustomerBusiness.objects.filter(id=biz_id, customer=user, is_deleted=False).first()
+    else:
+        biz = ban.business
+    if not biz:
+        return JsonResponse({'ok': False, 'error': 'no_business'}, status=200)
+    biz.active_banner = ban
+    biz.save(update_fields=['active_banner', 'updated_at'])
+    return JsonResponse({'ok': True, 'business_id': biz.id, 'banner_id': ban.id, 'title': ban.display_title()})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def api_delete_bank(request: HttpRequest) -> JsonResponse:
     user, err = _auth_user(request)
     if err:

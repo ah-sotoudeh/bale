@@ -25,6 +25,10 @@ class CustomerBusiness(models.Model):
     )
     info_checked_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    active_banner = models.ForeignKey(
+        'CustomerBanner', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='active_for_businesses',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -76,11 +80,19 @@ class CustomerBanner(models.Model):
         return f'Banner #{self.id} user={self.customer_id}'
 
     def display_title(self) -> str:
+        import re
         if self.title:
             return self.title
         cap = (self.caption or '').strip().replace('\n', ' ')
+        # حذف مارک‌آپ ساده بله
+        cap = re.sub(r'[*_`\[\]()]', '', cap)
+        cap = re.sub(r'\s+', ' ', cap).strip()
         if cap:
             return (cap[:40] + '…') if len(cap) > 40 else cap
+        if (self.media_kind or '') in ('video', 'animation'):
+            return 'بنر ویدیویی'
+        if (self.media_kind or '') in ('photo', 'document', 'image'):
+            return 'بنر تصویری'
         return f'بنر #{self.id}'
 
 

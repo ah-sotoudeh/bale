@@ -1,3 +1,6 @@
+import os
+import logging
+logger = logging.getLogger(__name__)
 """Wallet balance, credits, payouts for managers and customers."""
 from __future__ import annotations
 
@@ -341,7 +344,9 @@ def request_payout(
 
 
 @transaction.atomic
-def build_payout_batch(operator: User) -> Dict[str, Any]:
+def build_payout_batch(operator: User | None = None) -> Dict[str, Any]:
+    """فقط درخواست‌های بدون batch؛ شناسه یکتا per خط برای تطبیق."""
+    import hashlib
     pending = list(
         PayoutRequest.objects.filter(status='pending', batch__isnull=True).select_related('user')
     )
@@ -350,15 +355,24 @@ def build_payout_batch(operator: User) -> Dict[str, Any]:
 
     lines: List[str] = []
     for pr in pending:
-        lines.append(f'{pr.amount_rial},{pr.iban},,{pr.holder_name}')
+        # شناسه درخواست در ابتدای خط برای تطبیق اکسل
+        lines.append(f'{pr.id},{pr.amount_rial},{pr.iban},,{pr.holder_name}')
 
     text = '\n'.join(lines)
-    batch = PayoutBatch.objects.create(created_by=operator, file_text=text)
+    file_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
+    if PayoutBatch.objects.filter(file_hash=file_hash).exists():
+        return {'ok': False, 'error': 'duplicate_file'}
+    batch = PayoutBatch.objects.create(
+        created_by=operator,
+        file_text=text,
+        file_hash=file_hash,
+        status='open',
+    )
     for pr in pending:
         pr.batch = batch
         pr.save(update_fields=['batch'])
 
-    return {'ok': True, 'batch': batch, 'count': len(pending), 'file_text': text}
+    return {'ok': True, 'batch': batch, 'count': len(pending), 'file_text': text, 'file_hash': file_hash}
 
 
 @transaction.atomic
@@ -448,3 +462,141 @@ def can_delete_bank(user: User, bank_id: int) -> Tuple[bool, str]:
     if PayoutRequest.objects.filter(user=user, status='pending', iban=bank.iban).exists():
         return False, 'pending_payout'
     return True, 'ok'
+
+
+@transaction.atomic
+def cancel_payout_request(user: User, payout_id: int) -> Dict[str, Any]:
+    """لغو درخواست تا قبل از قرار گرفتن در فایل پرداخت."""
+    pr = PayoutRequest.objects.select_for_update().filter(
+        id=payout_id, user=user, status='pending', batch__isnull=True,
+    ).first()
+    if not pr:
+        return {'ok': False, 'error': 'not_cancellable', 'message': 'این درخواست قابل لغو نیست (یا در فایل پرداخت آمده).'}
+    pr.status = 'cancelled'
+    pr.save(update_fields=['status'])
+    credit(
+        user,
+        int(pr.amount_toman),
+        'payout_unlock',
+        ref=f'payout_cancel:{pr.id}',
+        note='لغو درخواست برداشت توسط کاربر',
+        idempotency_key=f'payout_cancel:{pr.id}',
+    )
+    return {'ok': True, 'payout_id': pr.id}
+
+
+def send_daily_payout_file_to_operators() -> Dict[str, Any]:
+    """تولید فایل روز و ارسال به پشتیبان‌ها با دکمه پرداخت شد."""
+    from integrations import bale_client as bc
+    built = build_payout_batch(None)
+    if not built.get('ok'):
+        return built
+    batch = built['batch']
+    text = built['file_text']
+    count = built['count']
+    # فایل به‌صورت سند
+    import tempfile
+    from pathlib import Path as P
+    tmp = P(tempfile.gettempdir()) / f'payout_batch_{batch.id}.txt'
+    tmp.write_text(text, encoding='utf-8')
+    caption = (
+        f'فایل پرداخت گروهی #{batch.id}\n'
+        f'تعداد: {count} درخواست\n'
+        f'پس از انجام پایا، «پرداخت شد» را بزنید و فایل اکسل گزارش بانک را بفرستید.'
+    )
+    kb = {
+        'inline_keyboard': [[
+            {'text': f'پرداخت شد — فایل #{batch.id}', 'callback_data': f'paybatch:{batch.id}'},
+        ]]
+    }
+    sent = 0
+    for oid in _operator_ids():
+        try:
+            # send document if available else message with text
+            r = None
+            if hasattr(bc, 'send_document'):
+                r = bc.send_document(oid, str(tmp), caption=caption, reply_markup=kb)
+            if not r or r.get('error'):
+                bc.send_message(oid, caption + '\n\n```\n' + text[:3500] + '\n```', reply_markup=kb)
+            sent += 1
+        except Exception:
+            logger.exception('send payout batch to %s', oid)
+    return {'ok': True, 'batch_id': batch.id, 'sent': sent, 'count': count}
+
+
+def _operator_ids() -> list[str]:
+    ids: list[str] = []
+    for src in (
+        os.environ.get('OPERATOR_BALE_ID') or '',
+        os.environ.get('DEBUG_BALE_ID') or '',
+    ):
+        for part in str(src).replace(';', ',').split(','):
+            p = part.strip()
+            if p and p not in ids:
+                ids.append(p)
+    return ids
+
+
+def process_bank_report_for_batch(batch_id: int, rows: list[dict]) -> Dict[str, Any]:
+    """rows: [{payout_id, status: success|failed, bank_tx_id?}]"""
+    batch = PayoutBatch.objects.filter(id=batch_id).first()
+    if not batch:
+        return {'ok': False, 'error': 'batch_not_found'}
+    if batch.status == 'processed':
+        return {'ok': False, 'error': 'already_processed', 'message': 'این فایل قبلاً پردازش شده.'}
+    ok_n = fail_n = skip_n = 0
+    for row in rows:
+        try:
+            pid = int(row.get('payout_id') or 0)
+        except (TypeError, ValueError):
+            skip_n += 1
+            continue
+        st = str(row.get('status') or '').lower()
+        pr = PayoutRequest.objects.filter(id=pid, batch=batch, status='pending').first()
+        if not pr:
+            skip_n += 1
+            continue
+        if st in ('success', 'ok', 'paid', '1', 'موفق'):
+            mark_one_paid(pr, str(row.get('bank_tx_id') or ''))
+            ok_n += 1
+        elif st in ('failed', 'fail', '0', 'ناموفق'):
+            mark_payout_failed(pr.id, str(row.get('bank_tx_id') or ''))
+            fail_n += 1
+        else:
+            skip_n += 1
+    remaining = PayoutRequest.objects.filter(batch=batch, status='pending').count()
+    if remaining == 0:
+        batch.status = 'processed'
+        batch.paid_at = timezone.now()
+    batch.result_summary = f'موفق {ok_n} · ناموفق {fail_n} · بدون نتیجه {skip_n + remaining}'
+    batch.save()
+    return {
+        'ok': True,
+        'success': ok_n,
+        'failed': fail_n,
+        'pending': remaining,
+        'skipped': skip_n,
+        'summary': batch.result_summary,
+    }
+
+
+def mark_one_paid(pr: PayoutRequest, bank_tx_id: str = '') -> None:
+    if pr.status != 'pending':
+        return
+    from integrations import bale_client as bc
+    pr.status = 'paid'
+    pr.paid_at = timezone.now()
+    fields = ['status', 'paid_at']
+    if bank_tx_id:
+        pr.bank_tx_id = bank_tx_id[:64]
+        fields.append('bank_tx_id')
+    pr.save(update_fields=fields)
+    try:
+        uid = pr.user.bale_user_id
+        if uid:
+            bc.send_message(
+                uid,
+                f'مبلغ {pr.amount_toman:,} تومان در تاریخ {timezone.localdate().isoformat()} به حساب شما پایا شد.',
+            )
+    except Exception:
+        logger.exception('notify payout paid')

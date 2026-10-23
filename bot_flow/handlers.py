@@ -639,6 +639,34 @@ def try_handle_callback(
 ) -> bool:
     from bot_flow.calendar_ui import handle_free_callback
 
+    
+    if data.startswith('paybatch:'):
+        from wallet.services import is_operator
+        from wallet.models import PayoutBatch
+        if not is_operator(bale_user_id):
+            bc.answer_callback_query(str(cq_id), text='دسترسی ندارید')
+            return True
+        try:
+            bid = int(data.split(':', 1)[1])
+        except ValueError:
+            bc.answer_callback_query(str(cq_id), text='نامعتبر')
+            return True
+        batch = PayoutBatch.objects.filter(id=bid).first()
+        if not batch:
+            bc.answer_callback_query(str(cq_id), text='فایل پیدا نشد')
+            return True
+        if batch.status == 'processed':
+            bc.answer_callback_query(str(cq_id), text='قبلاً پردازش شده')
+            return True
+        from django.core.cache import cache
+        cache.set(f'op_wait_excel:{bale_user_id}', bid, timeout=3600 * 6)
+        bc.answer_callback_query(str(cq_id), text='فایل اکسل را بفرستید')
+        bc.send_message(
+            chat_id,
+            f'فایل اکسل گزارش بانک مربوط به دستهٔ پرداخت #{bid} را همین‌جا ارسال کنید.',
+        )
+        return True
+
     if handle_free_callback(chat_id, bale_user_id, data, cq_id=cq_id):
         return True
     if data == 'nav:start':

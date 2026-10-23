@@ -51,6 +51,8 @@ urlpatterns = [
     path('api/pay/invoice', api.api_invoice),
     path('api/topup', api.api_topup),
     path('api/banks/delete', api.api_delete_bank),
+    path('api/payouts/cancel', api.api_cancel_payout),
+    path('api/banners/set-active', api.api_set_active_banner),
     path('api/banners', api_shop.api_banners),
     path('api/banners/request-new', api_shop.api_banner_request_new),
     path('api/banners/draft', api_banner_draft.api_banner_draft),

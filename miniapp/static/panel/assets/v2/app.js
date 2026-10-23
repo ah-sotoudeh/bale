@@ -546,9 +546,14 @@
   function renderBanners() {
     const allBanners = ST.banners || [];
     const waitingBanners = 0;
+    const activeId = (ST.businesses || []).find((x) => x.active_banner_id)?.active_banner_id
+      || ST.activeBannerId;
     const rows = allBanners.map((b) => {
       const st = b.stage || b.status || 'ready';
-      const badge = (st === 'approved' || st === 'ok' || st === 'ready')
+      const isActive = activeId && Number(activeId) === Number(b.id);
+      const badge = isActive
+        ? '<span class="badge ok">بنر فعال</span>'
+        : (st === 'approved' || st === 'ok' || st === 'ready')
         ? '<span class="badge ok">آماده سفارش</span>'
         : st === 'rejected'
         ? '<span class="badge danger">رد شده</span>'
@@ -1338,6 +1343,15 @@ function renderOpTickets() {
     const settingQueues = $('#btnSettingsQueues'); if (settingQueues) settingQueues.onclick = async () => { try { await Promise.allSettled([loadOpBanners(),loadOpPayouts(),loadOpAssignments()]); } catch(e) {} navigate('op-home'); };
 
     const emptyBannerCreate = $('#btnEmptyBannerCreate'); if (emptyBannerCreate) emptyBannerCreate.onclick = openNewBanner;
+    document.querySelectorAll('[data-set-active-banner]').forEach((btn) => {
+      btn.onclick = async () => {
+        const id = Number(btn.getAttribute('data-set-active-banner'));
+        const d = await api('/banners/set-active', { method: 'POST', body: { banner_id: id, business_id: ST.selectedBusinessId || 0 } });
+        toast(d.ok ? 'بنر فعال شد' : (d.message || 'خطا'));
+        if (d.ok) { ST.activeBannerId = id; await loadBanners(); render(); }
+      };
+    });
+
     document.querySelectorAll('[data-op-ticket-open]').forEach((b) => {
       b.onclick = async () => {
         const id = Number(b.getAttribute('data-op-ticket-open'));

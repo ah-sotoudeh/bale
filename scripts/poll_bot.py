@@ -167,6 +167,20 @@ def run_background_jobs() -> None:
                 log.info('manager timeouts: %s', exp)
         except Exception:
             log.exception('expire_manager_timeouts')
+        try:
+            from django.core.cache import cache
+            from wallet.services import send_daily_payout_file_to_operators
+            import datetime as _dt
+            key = 'payout_daily_sent:' + _dt.date.today().isoformat()
+            if not cache.get(key):
+                r = send_daily_payout_file_to_operators()
+                if r.get('ok'):
+                    cache.set(key, 1, timeout=86400)
+                    log.info('daily payout file sent batch=%s', r.get('batch_id'))
+                elif r.get('error') != 'no_pending':
+                    log.info('daily payout: %s', r)
+        except Exception:
+            log.exception('daily payout file')
         pub = publish_due_items()
         if any(pub.get(k) for k in ('published', 'failed_channels', 'manual_reminded')):
             log.info('publish job: %s', pub)
