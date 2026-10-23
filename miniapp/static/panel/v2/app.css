@@ -999,3 +999,19 @@ html[data-theme="dark"] .header.operator-head {
   display: grid; place-items: center; background: var(--ok-soft); color: var(--ok);
 }
 html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
+
+/* onboard must always be visible */
+.lb-ob-root {
+  background: var(--bg, #F0F7F7) !important;
+  color: var(--text, #0B1220);
+}
+html[data-theme="dark"] .lb-ob-root {
+  background: #0B1220 !important;
+  color: #F1F5F9;
+}
+.loading {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--muted, #64748B);
+  font-size: .9rem;
+}

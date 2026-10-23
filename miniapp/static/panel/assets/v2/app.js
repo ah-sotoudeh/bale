@@ -1050,6 +1050,7 @@ function renderOpTickets() {
   }
 
   const TITLES = {
+    onboard: 'خوش آمدید',
     home: 'خانه',
     market: 'بازار تبلیغات',
     channel: 'جزئیات کانال',
@@ -1110,8 +1111,9 @@ function renderOpTickets() {
 
     let html = '';
     if (ST.loading) html = '<div class="loading">در حال بارگذاری…</div>';
-    else if (ST.page === 'home') html = renderHome();
-    else if (ST.page === 'market') html = renderMarket();
+    else if (ST.page === 'onboard') { try { html = renderOnboardPage(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در ویزارد</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
+    else if (ST.page === 'home') { try { html = renderHome(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در خانه</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
+    else if (ST.page === 'market') { try { html = renderMarket(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در بازار</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'channel') html = renderChannel();
     else if (ST.page === 'calendar') html = renderCalendar();
     else if (ST.page === 'banners') html = renderBanners();
@@ -1127,7 +1129,18 @@ function renderOpTickets() {
     else if (ST.page === 'op-home') html = renderOpHome();
     else html = ST.role === 'manager' ? renderMgrHome() : ST.role === 'operator' ? renderOpHome() : renderMarket();
 
-    root.innerHTML = html;
+    try {
+      root.innerHTML = html || '<div class="empty"><strong>محتوا بارگذاری نشد</strong><p>یک‌بار دیگر تلاش کنید.</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>';
+    } catch (err) {
+      console.error('render', err);
+      root.innerHTML = '<div class="empty"><strong>خطا در نمایش</strong><p>' + String((err && err.message) || err) + '</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>';
+    }
+    const rel = document.getElementById('btnReloadPage');
+    if (rel) rel.onclick = () => location.reload();
+    try {
+      const nav = document.getElementById('bottomNav');
+      if (nav) nav.style.display = (ST.page === 'onboard') ? 'none' : '';
+    } catch (e) {}
     renderNav();
     bindPage();
   }
@@ -2146,11 +2159,12 @@ function renderOpTickets() {
   }
 
   function bindGlobal() {
-    $('#btnBack').onclick = () => {
+    const btnBack = $('#btnBack');
+    if (btnBack) btnBack.onclick = () => {
       if (ST.page === 'calendar') navigate('channel');
       else if (ST.page === 'channel') navigate('market');
       else if (ST.page === 'mgr-channel') navigate('mgr-channels');
-      else if (ST.page === 'help' || ST.page === 'businesses') navigate('settings');
+      else if (ST.page === 'help' || ST.page === 'businesses' || ST.page === 'onboard') navigate('settings');
       else if (ST.role === 'manager') navigate('mgr-home');
       else if (ST.role === 'operator') navigate('op-home');
       else navigate('market');
@@ -2158,15 +2172,20 @@ function renderOpTickets() {
     const themeBtn = $('#btnTheme');
     if (themeBtn) {
       themeBtn.classList.add('tt');
-      if (!themeBtn.querySelector('.tt-core')) themeBtn.innerHTML = themeToggleSvg();
-      paintThemeButton(themeBtn);
+      try {
+        if (!themeBtn.querySelector('.tt-core')) themeBtn.innerHTML = themeToggleSvg();
+        paintThemeButton(themeBtn);
+      } catch (e) {}
       themeBtn.onclick = (e) => {
-        setTheme(document.documentElement.dataset.theme !== 'dark', e);
+        try { setTheme(document.documentElement.dataset.theme !== 'dark', e); } catch (err) {}
       };
     }
-    $('#btnProfile').onclick = () => navigate('settings');
-    $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') closeSheet(); };
-    $('#bottomNav').onclick = async (e) => {
+    const btnProfile = $('#btnProfile');
+    if (btnProfile) btnProfile.onclick = () => navigate('settings');
+    const sheet = $('#sheet');
+    if (sheet) sheet.onclick = (e) => { if (e.target.id === 'sheet') closeSheet(); };
+    const bottomNav = $('#bottomNav');
+    if (bottomNav) bottomNav.onclick = async (e) => {
       const btn = e.target.closest('[data-nav]');
       if (!btn) return;
       let id = btn.dataset.nav;
@@ -2438,7 +2457,7 @@ function renderOpTickets() {
       }
       if (act === 'finish') {
         OB.open = false;
-        renderOb();
+        try { renderOb(); } catch (e) {}
         ST.loading = true; render();
         try {
           if (ST.role === 'manager') {
@@ -2556,12 +2575,29 @@ function renderOpTickets() {
     };
   }
 
+
+  function renderOnboardPage() {
+    // Keep overlay code path for handlers; also paint into page
+    try { renderOb(); } catch (e) { console.error('renderOb', e); }
+    const root = document.getElementById('lb-ob-root');
+    if (root) {
+      // move visual into page flow: style overlay relative
+      root.style.position = 'relative';
+      root.style.inset = 'auto';
+      root.style.zIndex = '1';
+      root.style.minHeight = '70vh';
+      return ''; // content already in overlay attached to body
+    }
+    return '<div class="loading">آماده‌سازی ورود…</div>';
+  }
+
   function startOnboardingIfNeeded() {
     if (!obNeedShow()) return false;
     OB.open = true;
     OB.step = 'role';
     OB.role = '';
     OB.error = '';
+    OB.loading = false;
     OB.ch = { link: '', error: '', loading: false, id: 0, name: '' };
     OB.biz = { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] };
     OB.pmode = 'manual';
@@ -2574,19 +2610,24 @@ function renderOpTickets() {
         OB.role = 'advertiser'; OB.step = 'biz_name'; ST.role = 'advertiser';
       }
     } catch (e) {}
-    renderOb();
+    ST.page = 'onboard';
+    ST.loading = false;
+    try { render(); } catch (e) { console.error(e); }
     return true;
   }
 
+
   async function boot() {
+    try {
     const launchView = new URLSearchParams(location.search).get('view');
     if (launchView === 'businesses') ST.page = 'businesses';
     try {
       const saved = localStorage.getItem('lb.theme');
       if (saved) setTheme(saved === 'dark');
     } catch (e) {}
-    bindGlobal();
-    ST.loading = true; render();
+    try { bindGlobal(); } catch (e) { console.error('bindGlobal', e); }
+    ST.loading = true;
+    try { render(); } catch (e) { console.error('render1', e); }
     try {
       await loadMe();
       if (ST.role === 'manager') { ST.page = 'mgr-home'; await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs(), loadWallet()]); }
@@ -2604,8 +2645,15 @@ function renderOpTickets() {
       toast(e.message || 'ورود ناموفق — با ?debug_bale_id=… یا داخل بله باز کنید');
     }
     ST.loading = false;
-    render();
+    try { render(); } catch (e) { console.error('render2', e); }
     try { startOnboardingIfNeeded(); } catch (e) { console.error('onboard', e); }
+    } catch (fatal) {
+      console.error('boot fatal', fatal);
+      try {
+        const root = document.getElementById('pageContent');
+        if (root) root.innerHTML = '<div class="empty"><strong>خطای بارگذاری</strong><p>' + String(fatal && fatal.message || fatal) + '</p><button class="btn btn-primary" onclick="location.reload()">تلاش دوباره</button></div>';
+      } catch (e) {}
+    }
   }
 
   document.addEventListener('visibilitychange', () => {
