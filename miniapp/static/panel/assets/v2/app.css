@@ -1013,10 +1013,7 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 
 /* ——— Onboard layout: footer pinned bottom ——— */
 .main:has(.lb-ob-inline) {
-  padding-bottom: 0;
-  min-height: calc(100dvh - var(--header-h, 56px));
-  display: flex;
-  flex-direction: column;
+  padding-bottom: 12px;
 }
 .lb-ob-inline {
   display: flex !important;
@@ -1155,11 +1152,10 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
   box-sizing: border-box;
 }
 .nav button {
-  justify-content: flex-end !important;
-  padding: 0 0 6px !important;
+  justify-content: center !important;
+  padding: 6px 0 calc(4px + env(safe-area-inset-bottom, 0px)) !important;
   gap: 2px !important;
   font-size: .6rem !important;
-  min-height: 0 !important;
 }
 .nav button svg {
   width: 22px !important;
@@ -1190,8 +1186,12 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 }
 .header.brand #btnTheme.is-back { color: #fff; }
 /* Always hide standalone back — space reserved only for profile + title + trailing */
-#btnBack { display: none !important; width: 0 !important; min-width: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; overflow: hidden !important; }
+#btnBack { display: none !important; }
 .header { display: flex; align-items: center; gap: 8px; }
 .header .avatar { order: 0; }
 .header #pageTitle { order: 1; flex: 1; text-align: center; margin: 0; }
 .header #btnTheme { order: 2; }
+
+#pageContent { min-height: 40vh; color: var(--text); }
+.empty { color: var(--text); }
+.loading { color: var(--muted); padding: 32px; text-align: center; }

@@ -20,38 +20,38 @@
 
   /* ——— Jalali helpers ——— */
   const JMONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
-  function div(a, b) { return Math.floor(a / b); }
+  function _jdiv(a, b) { return Math.floor(a / b); }
   function gregorianToJalali(gy, gm, gd) {
     const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
     let gy2 = (gm > 2) ? (gy + 1) : gy;
-    let days = 355666 + (365 * gy) + div(gy2 + 3, 4) - div(gy2 + 99, 100) + div(gy2 + 399, 400) + gd + g_d_m[gm - 1];
-    let jy = -1595 + (33 * div(days, 12053));
+    let days = 355666 + (365 * gy) + _jdiv(gy2 + 3, 4) - _jdiv(gy2 + 99, 100) + _jdiv(gy2 + 399, 400) + gd + g_d_m[gm - 1];
+    let jy = -1595 + (33 * _jdiv(days, 12053));
     days %= 12053;
-    jy += 4 * div(days, 1461);
+    jy += 4 * _jdiv(days, 1461);
     days %= 1461;
     if (days > 365) {
-      jy += div(days - 1, 365);
+      jy += _jdiv(days - 1, 365);
       days = (days - 1) % 365;
     }
-    const jm = (days < 186) ? 1 + div(days, 31) : 7 + div(days - 186, 30);
+    const jm = (days < 186) ? 1 + _jdiv(days, 31) : 7 + _jdiv(days - 186, 30);
     const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
     return [jy, jm, jd];
   }
   function jalaliToGregorian(jy, jm, jd) {
     jy = +jy; jm = +jm; jd = +jd;
     const jy2 = jy + 1595;
-    let days = -355668 + (365 * jy2) + div(jy2, 33) * 8 + div((jy2 % 33) + 3, 4) + jd + ((jm < 7) ? (jm - 1) * 31 : ((jm - 7) * 30 + 186));
-    let gy = 400 * div(days, 146097);
+    let days = -355668 + (365 * jy2) + _jdiv(jy2, 33) * 8 + _jdiv((jy2 % 33) + 3, 4) + jd + ((jm < 7) ? (jm - 1) * 31 : ((jm - 7) * 30 + 186));
+    let gy = 400 * _jdiv(days, 146097);
     days %= 146097;
     if (days > 36524) {
-      gy += 100 * div(--days, 36524);
+      gy += 100 * _jdiv(--days, 36524);
       days %= 36524;
       if (days >= 365) days++;
     }
-    gy += 4 * div(days, 1461);
+    gy += 4 * _jdiv(days, 1461);
     days %= 1461;
     if (days > 365) {
-      gy += div(days - 1, 365);
+      gy += _jdiv(days - 1, 365);
       days = (days - 1) % 365;
     }
     let gd = days + 1;
@@ -893,7 +893,7 @@
     const dayMap={}; (ST.calDays||[]).forEach(x=>{dayMap[x.date]=x;});
     const busySet=new Set((ST.catalog?.busy||[]).filter(b=>b.tariff_id===t.id).map(b=>b.date));
     Object.keys(dayMap).forEach(iso=>{const st=dayMap[iso].status||(dayMap[iso].free?'free':'full');if(st!=='free'&&st!=='banner-hold')busySet.add(iso);});
-    const firstG=jalaliToGregorian(jy,jm,1); const first=new Date(firstG[0],firstG[1]-1,firstG[2]); const startDow=(first.getDay()+1)%7; const dim=jm<=6?31:jm<=11?30:29;
+    const firstG=jalaliToGregorian(jy,jm,1); const first=new Date(firstG[0],firstG[1]-1,firstG[2]); const startDow=(first.getDay()+1)%7; const dim=typeof jalaliMonthLength==='function'?jalaliMonthLength(jy,jm):(jm<=6?31:jm<=11?30:29);
     let cells=''; for(let i=0;i<startDow;i++) cells+='<div class="cal-day muted"></div>';
     for(let d=1;d<=dim;d++){const g=jalaliToGregorian(jy,jm,d);const iso=`${g[0]}-${String(g[1]).padStart(2,'0')}-${String(g[2]).padStart(2,'0')}`;const past=new Date(g[0],g[1]-1,g[2])<new Date(now.getFullYear(),now.getMonth(),now.getDate());const busy=busySet.has(iso);const sel=ST.selectedDay===iso;let cls='cal-day scenario-cal-day';if(past)cls+=' muted';else if(busy)cls+=' busy';if(sel)cls+=' sel';cells+=`<button type="button" class="${cls}" data-day="${iso}" ${past||busy?'disabled':''}>${fa(d)}${sel?'<i></i>':''}</button>`;}
     return `<section class="calendar-summary"><div class="calendar-summary-icon">${icon('calendar',22)}</div><div class="grow"><span class="eyebrow">تقویم انتشار</span><h2>${esc(t.owner||t.name)}</h2><p>${esc(t.name)} · ${fa(t.duration_hours)} ساعت نمایش</p></div><strong>${faNum(t.price)} <small>تومان</small></strong></section>
@@ -1486,17 +1486,26 @@ function renderOpTickets() {
 
   function render() {
     const root = $('#pageContent');
+    if (!root) return;
+    try {
     const back = !['home','market','orders','banners','wallet','settings','businesses','help','mgr-home','mgr-channels','mgr-tariffs','op-home','onboard'].includes(ST.page);
-    $('#pageTitle').textContent = TITLES[ST.page] || 'لینک‌بان';
-    // فلش برگشت جای دکمه تم می‌نشیند — پروفایل جابه‌جا نمی‌شود
+    try {
+      const pt = $('#pageTitle');
+      if (pt) pt.textContent = TITLES[ST.page] || 'لینک‌بان';
+    } catch (e) {}
     try {
       const btnBack = $('#btnBack');
       if (btnBack) btnBack.style.display = 'none';
-      updateHeaderTrailing(back);
+      if (typeof updateHeaderTrailing === 'function') updateHeaderTrailing(back);
     } catch (e) {}
-    $('#headerEl').classList.add('brand');
-    $('#headerEl').classList.toggle('manager-head', ST.role === 'manager');
-    $('#headerEl').classList.toggle('operator-head', ST.role === 'operator');
+    try {
+      const hdr = $('#headerEl');
+      if (hdr) {
+        hdr.classList.add('brand');
+        hdr.classList.toggle('manager-head', ST.role === 'manager');
+        hdr.classList.toggle('operator-head', ST.role === 'operator');
+      }
+    } catch (e) {}
 
     let html = '';
     if (ST.loading) html = '<div class="loading">در حال بارگذاری…</div>';
@@ -1532,8 +1541,14 @@ function renderOpTickets() {
       if (nav) nav.style.display = (ST.page === 'onboard') ? 'none' : '';
     } catch (e) {}
     try { paintHeaderProfile(); } catch (e) {}
-    renderNav();
-    bindPage();
+    try { renderNav(); } catch (e) { console.error('renderNav', e); }
+    try { bindPage(); } catch (e) { console.error('bindPage', e); }
+    } catch (fatalRender) {
+      console.error('render fatal', fatalRender);
+      try {
+        root.innerHTML = '<div class="empty" style="padding:24px;text-align:center"><strong>خطا در نمایش</strong><p style="color:#64748b;font-size:.85rem">' + String((fatalRender && fatalRender.message) || fatalRender) + '</p><button class="btn btn-primary" onclick="location.reload()">تلاش دوباره</button></div>';
+      } catch (e) {}
+    }
   }
 
   function navigate(page) {
@@ -2711,41 +2726,38 @@ function renderOpTickets() {
     if (!themeBtn) return;
     const want = !!showBack;
     const isBack = themeBtn.dataset.mode === 'back';
+    themeBtn.classList.remove('hdr-swap');
+    themeBtn.style.opacity = '';
+    themeBtn.style.transform = '';
     if (want === isBack) {
-      // ensure handler
-      if (want) {
-        themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
-      }
+      if (want) themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
       return;
     }
-    themeBtn.classList.add('hdr-swap');
-    window.setTimeout(() => {
-      if (want) {
-        themeBtn.dataset.mode = 'back';
-        themeBtn.setAttribute('aria-label', 'بازگشت');
-        themeBtn.title = 'بازگشت';
-        themeBtn.classList.remove('tt');
-        themeBtn.classList.add('is-back');
-        themeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 18-6-6 6-6"/></svg>';
-        themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
-      } else {
-        themeBtn.dataset.mode = 'theme';
-        themeBtn.setAttribute('aria-label', 'تم');
-        themeBtn.title = 'حالت تیره / روشن';
-        themeBtn.classList.add('tt');
-        themeBtn.classList.remove('is-back');
-        try {
+    const applyMode = () => {
+      try {
+        if (want) {
+          themeBtn.dataset.mode = 'back';
+          themeBtn.setAttribute('aria-label', 'بازگشت');
+          themeBtn.title = 'بازگشت';
+          themeBtn.classList.remove('tt');
+          themeBtn.classList.add('is-back');
+          themeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 18-6-6 6-6"/></svg>';
+          themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
+        } else {
+          themeBtn.dataset.mode = 'theme';
+          themeBtn.setAttribute('aria-label', 'تم');
+          themeBtn.title = 'حالت تیره / روشن';
+          themeBtn.classList.add('tt');
+          themeBtn.classList.remove('is-back');
           if (typeof themeToggleSvg === 'function') themeBtn.innerHTML = themeToggleSvg();
           if (typeof paintThemeButton === 'function') paintThemeButton(themeBtn);
-        } catch (e) {}
-        themeBtn.onclick = (e) => {
-          try { setTheme(document.documentElement.dataset.theme !== 'dark', e); } catch (err) {}
-        };
-      }
-      themeBtn.classList.remove('hdr-swap');
-      themeBtn.classList.add('hdr-swap-in');
-      window.setTimeout(() => themeBtn.classList.remove('hdr-swap-in'), 220);
-    }, 120);
+          themeBtn.onclick = (e) => {
+            try { setTheme(document.documentElement.dataset.theme !== 'dark', e); } catch (err) {}
+          };
+        }
+      } catch (e) { console.error('header trailing', e); }
+    };
+    applyMode();
   }
 
   function goBack() {
@@ -3225,11 +3237,18 @@ function renderOpTickets() {
     ST.loading = false;
     try { render(); } catch (e) { console.error('render2', e); }
     try { startOnboardingIfNeeded(); } catch (e) { console.error('onboard', e); }
+      // اگر محتوا خالی ماند، پیام بده
+      try {
+        const root = document.getElementById('pageContent');
+        if (root && !(root.innerHTML || '').trim()) {
+          root.innerHTML = '<div class="empty" style="padding:28px;text-align:center"><strong>بارگذاری انجام نشد</strong><p style="color:#64748b">یک‌بار دیگر تلاش کنید.</p><button class="btn btn-primary" onclick="location.reload()">تلاش دوباره</button></div>';
+        }
+      } catch (e) {}
     } catch (fatal) {
       console.error('boot fatal', fatal);
       try {
         const root = document.getElementById('pageContent');
-        if (root) root.innerHTML = '<div class="empty"><strong>خطای بارگذاری</strong><p>' + String(fatal && fatal.message || fatal) + '</p><button class="btn btn-primary" onclick="location.reload()">تلاش دوباره</button></div>';
+        if (root) root.innerHTML = '<div class="empty" style="padding:28px;text-align:center"><strong>خطای بارگذاری</strong><p style="color:#64748b">' + String(fatal && fatal.message || fatal) + '</p><button class="btn btn-primary" onclick="location.reload()">تلاش دوباره</button></div>';
       } catch (e) {}
     }
   }
