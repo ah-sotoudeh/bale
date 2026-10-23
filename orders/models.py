@@ -14,6 +14,8 @@ class CustomerBusiness(models.Model):
     kind = models.CharField(max_length=16, choices=KIND_CHOICES, default='bale', db_index=True)
     source_ref = models.CharField(max_length=255, blank=True, default='')
     name = models.CharField(max_length=160)
+    primary_topic = models.CharField(max_length=32, blank=True, default='', db_index=True)
+    secondary_topics = models.JSONField(default=list, blank=True)
     avatar_url = models.URLField(max_length=1000, blank=True, default='')
     # ساختار انتخابی: {"main": ["..."], "sub": ["..."]}
     categories = models.JSONField(default=dict, blank=True)

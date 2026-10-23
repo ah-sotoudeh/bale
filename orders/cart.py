@@ -183,7 +183,6 @@ def checkout(order: Order) -> Dict[str, Any]:
     CustomerDraft.objects.filter(order=order).delete()
 
     for it in items:
-        it.manager_status = 'pending'
         # مالک کانال را تازه از DB بخوان (انتساب پشتیبان / claim)
         if it.channel_id:
             try:
@@ -192,22 +191,22 @@ def checkout(order: Order) -> Dict[str, Any]:
                 pass
             if it.channel and it.channel.manager_id and it.manager_id != it.channel.manager_id:
                 it.manager_id = it.channel.manager_id
+        auto_banner = bool(getattr(it.channel, 'auto_approve_banner', False)) if it.channel_id else False
+        auto_time = bool(getattr(it.channel, 'auto_approve_time', False)) if it.channel_id else False
+        # اگر هر دو تأیید خودکار روشن باشد، آیتم مستقیم approved می‌شود
+        if auto_banner and auto_time:
+            it.manager_status = 'approved'
+        else:
+            it.manager_status = 'pending'
         it.save(update_fields=['manager_status', 'manager'] if it.manager_id else ['manager_status'])
 
     banner = order.customer_banner
-    ready = bool(banner and banner.from_linkbank)
+    # بنر مشتری بلافاصله ready است مگر صراحتاً رد شده باشد
+    ready = bool(banner and getattr(banner, 'is_active', True))
     if not ready:
         order.status = 'waiting_banner'
         order.managers_deadline = None
         order.save()
-        cust = order.customer.bale_user_id
-        if cust:
-            bc.send_message(
-                cust,
-                f'سفارش {fa_num(order.id)} ثبت شد.\n'
-                'بنر هنوز در انتظار بررسی است. تا تأیید پشتیبانی، برای کانال‌دار فرستاده نمی‌شود '
-                'و پولی از شما کم نمی‌شود.',
-            )
         return {'ok': True, 'order': order, 'count': len(items), 'held_for_banner': True}
 
     # اتصال کانال‌های ازپیش‌انتساب‌شده قبل از نوتیف
@@ -227,9 +226,17 @@ def checkout(order: Order) -> Dict[str, Any]:
     deadline = timezone.now() + timedelta(hours=MANAGER_HOURS)
     order.status = 'waiting_managers'
     order.managers_deadline = deadline
+    # اگر همه آیتم‌ها با تأیید خودکار approved شدند → مستقیم پرداخت
+    items = list(order.items.exclude(manager_status__in=('rejected', 'expired', 'customer_declined')))
+    if items and all(it.manager_status == 'approved' for it in items):
+        order.status = 'waiting_payment'
+        order.save(update_fields=['status', 'managers_deadline'])
+        return {'ok': True, 'order': order, 'deadline': deadline, 'count': len(items), 'auto_approved': True}
     order.save(update_fields=['status', 'managers_deadline'])
 
     for it in items:
+        if it.manager_status != 'pending':
+            continue
         if it.manager_id is None and it.channel_id and it.channel and it.channel.manager_id:
             it.manager = it.channel.manager
             it.save(update_fields=['manager'])

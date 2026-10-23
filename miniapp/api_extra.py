@@ -90,6 +90,22 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
         hay = f'{ch.name or ""}\n{ch.about or ""}\n{ch.description or ""}'.casefold()
         return needle in hay
 
+    # موضوع تبلیغ مشتری برای فیلتر کانال‌های ممنوع
+    customer_primary = (request.GET.get('topic') or body.get('topic') or '').strip()
+    customer_secondary = body.get('topics') or body.get('secondary_topics') or []
+    if isinstance(customer_secondary, str):
+        customer_secondary = [x.strip() for x in customer_secondary.split(',') if x.strip()]
+    if not customer_primary and user is not None:
+        try:
+            from orders.models import CustomerBusiness
+            biz = CustomerBusiness.objects.filter(customer=user).order_by('-id').first()
+            if biz:
+                customer_primary = (biz.primary_topic or '').strip()
+                customer_secondary = list(biz.secondary_topics or [])
+        except Exception:
+            pass
+    customer_topics_active = bool(customer_primary or customer_secondary)
+
     def _tariff_ok(t) -> bool:
         if t.channel_id:
             chans = [t.channel]
@@ -106,6 +122,13 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             return False
         if ready_only and (not chans or any(not _ready_publish(ch) for ch in chans)):
             return False
+        # فیلتر موضوع ممنوعه کانال در برابر موضوع کسب‌وکار/بنر مشتری
+        if customer_topics_active:
+            from config.categories import topics_blocked
+            for ch in chans:
+                banned = getattr(ch, 'forbidden_topics', None) or []
+                if topics_blocked(banned, customer_primary, customer_secondary):
+                    return False
         return True
 
     # اگر همهٔ تعرفه‌های یک کانال لیست‌شده خاموش شده‌اند (مثلاً بعد از audit ادمین)،

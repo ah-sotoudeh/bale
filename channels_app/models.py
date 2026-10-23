@@ -46,17 +46,28 @@ class Channel(models.Model):
     bale_peer_id = models.BigIntegerField(null=True, blank=True)
     about = models.TextField(blank=True, default='')
     language = models.CharField(max_length=16, blank=True, default='')
+    # کدها از config.categories.CHANNEL_CATEGORIES
     CATEGORY_CHOICES = [
+        ('economic', 'اقتصادی و مالی'),
+        ('education_art', 'آموزشی و هنری'),
+        ('news_politics', 'خبری و سیاسی'),
+        ('health', 'سلامت و پزشکی'),
+        ('lifestyle', 'سبک زندگی و خانواده'),
+        ('entertainment', 'سرگرمی و طنز'),
+        ('science_tech', 'علمی و فناوری'),
+        ('shop', 'فروشگاهی'),
+        ('religious', 'مذهبی و فرهنگی'),
+        ('sports', 'ورزشی'),
+        ('services', 'کاربردی و خدماتی'),
+        ('travel', 'گردشگری و طبیعت'),
+        ('other', 'سایر'),
+        # سازگاری با کدهای قدیمی
         ('news', 'خبری'),
         ('women', 'بانوان'),
-        ('entertainment', 'سرگرمی'),
         ('education', 'آموزشی'),
         ('business', 'کسب‌وکار'),
         ('tech', 'تکنولوژی'),
-        ('sports', 'ورزشی'),
-        ('lifestyle', 'سبک زندگی'),
         ('kids', 'کودک'),
-        ('other', 'سایر'),
     ]
     category = models.CharField(
         max_length=32,
@@ -64,7 +75,20 @@ class Channel(models.Model):
         blank=True,
         default='',
         db_index=True,
-        help_text='موضوع کانال برای فیلتر کاتالوگ',
+        help_text='دسته‌بندی موضوعی کانال',
+    )
+    forbidden_topics = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='کدهای موضوع تبلیغ ممنوع (از AD_TOPICS)',
+    )
+    auto_approve_banner = models.BooleanField(
+        default=False,
+        help_text='تأیید خودکار بنر — بدون بررسی دستی مدیر',
+    )
+    auto_approve_time = models.BooleanField(
+        default=False,
+        help_text='تأیید خودکار زمان — بدون بررسی دستی تاریخ',
     )
     members_count = models.PositiveIntegerField(default=0)
     avg_views = models.PositiveIntegerField(default=0)
@@ -105,6 +129,7 @@ class ChannelGroup(models.Model):
     """Package of channels sold/booked together (same manager, shared tariffs)."""
 
     name = models.CharField(max_length=200)
+    category = models.CharField(max_length=32, blank=True, default='')
     manager = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -152,6 +177,8 @@ class Tariff(models.Model):
         default=True,
         help_text='اگر ادمین لازم نباشد False می‌شود و از فهرست مشتری حذف می‌شود',
     )
+    # None یا [] = همه روزها؛ در غیر این صورت لیست 0=شنبه ... 6=جمعه (جلالی)
+    allowed_weekdays = models.JSONField(default=list, blank=True)
 
     class Meta:
         constraints = [

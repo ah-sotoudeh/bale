@@ -636,6 +636,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
                 peer = int(info['id'])
             except (TypeError, ValueError):
                 peer = None
+        cat = str(body.get('category') or '').strip()[:32]
         ch = Channel.objects.create(
             name=name,
             link=link,
@@ -643,6 +644,9 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
             publish_mode=Channel.PUBLISH_MANUAL,
             bale_peer_id=peer,
             about=bio[:4000],
+            category=cat if cat else '',
+            auto_approve_banner=bool(body.get('auto_approve_banner')),
+            auto_approve_time=bool(body.get('auto_approve_time')),
         )
     try:
         from integrations.channel_stats import refresh_channel
@@ -694,6 +698,27 @@ def api_channel_refresh_admin(request: HttpRequest) -> JsonResponse:
     except Exception:
         logger.exception('refresh linkyar admin')
     ch.refresh_from_db()
+    deactivated = False
+    # اگر دسترسی مدیریت قطع شده: تعرفه‌ها غیرفعال (نه حذف)
+    needs_admin = (ch.publish_mode or 'bot') in ('bot', 'linkyar')
+    has_admin = bool(ch.bot_is_admin) or bool(ch.linkyar_is_admin)
+    if needs_admin and not has_admin:
+        from channels_app.models import Tariff
+        n = Tariff.objects.filter(channel=ch, is_active=True).update(is_active=False)
+        deactivated = n > 0
+        msg = (
+            'دسترسی مدیریت لینک‌یار/بازو قطع شده. تعرفه‌ها موقتاً از دید مشتری پنهان شدند. '
+            'پس از مدیر کردن مجدد، «بررسی دسترسی» را بزنید.'
+        )
+    elif ch.bot_is_admin or ch.linkyar_is_admin:
+        from channels_app.models import Tariff
+        Tariff.objects.filter(channel=ch, is_active=False).update(is_active=True)
+        msg = 'دسترسی مدیریت تأیید شد. تعرفه‌ها فعال‌اند.'
+    else:
+        msg = (
+            'بازو ادمین است.' if ch.bot_is_admin else
+            'بازو هنوز ادمین این کانال نیست — در تنظیمات کانال، بازو را مدیر کنید.'
+        )
     return JsonResponse({
         'ok': True,
         'channel_id': ch.id,
@@ -701,10 +726,8 @@ def api_channel_refresh_admin(request: HttpRequest) -> JsonResponse:
         'bot_state': bot_state,
         'linkyar_is_admin': bool(ch.linkyar_is_admin),
         'linkyar_state': ly_state,
-        'message': (
-            'بازو ادمین است.' if ch.bot_is_admin else
-            'بازو هنوز ادمین این کانال نیست — در تنظیمات کانال، بازو را مدیر کنید.'
-        ),
+        'tariffs_deactivated': deactivated,
+        'message': msg,
     })
 
 
@@ -724,11 +747,13 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
     ch = Channel.objects.filter(id=cid, manager=user).first()
     if not ch:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
-    name = str(body.get('name') or '').strip()
-    if not name:
-        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=200)
-    ch.name = name[:200]
-    fields = ['name']
+    fields = []
+    if 'name' in body:
+        name = str(body.get('name') or '').strip()
+        if not name:
+            return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'نام کانال را بنویسید.'}, status=200)
+        ch.name = name[:200]
+        fields.append('name')
     if 'category' in body:
         cat = str(body.get('category') or '').strip()[:32]
         allowed = {c[0] for c in getattr(Channel, 'CATEGORY_CHOICES', [])}
@@ -736,6 +761,22 @@ def api_channel_update(request: HttpRequest) -> JsonResponse:
             return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'موضوع کانال نامعتبر است.'}, status=200)
         ch.category = cat
         fields.append('category')
+    if 'forbidden_topics' in body:
+        raw = body.get('forbidden_topics') or []
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.split(',') if x.strip()]
+        from config.categories import valid_ad_topic
+        cleaned = [str(x)[:32] for x in raw if valid_ad_topic(str(x))]
+        ch.forbidden_topics = cleaned
+        fields.append('forbidden_topics')
+    if 'auto_approve_banner' in body:
+        ch.auto_approve_banner = bool(body.get('auto_approve_banner'))
+        fields.append('auto_approve_banner')
+    if 'auto_approve_time' in body:
+        ch.auto_approve_time = bool(body.get('auto_approve_time'))
+        fields.append('auto_approve_time')
+    if not fields:
+        return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': 'چیزی برای ذخیره نبود.'}, status=200)
     ch.save(update_fields=fields)
     try:
         payload = _channel_payload(ch)
@@ -774,11 +815,23 @@ def api_channel_delete(request: HttpRequest) -> JsonResponse:
         )
     )
     if related.filter(open_q).exists():
+        # سناریو: از کاتالوگ جدید خارج شود؛ سفارش‌های قبلی تا تکمیل می‌مانند
+        if not body.get('force_archive'):
+            return JsonResponse({
+                'ok': False,
+                'error': 'has_orders',
+                'message': 'این کانال سفارش باز دارد. می‌توانید آرشیو کنید تا از سفارش‌های جدید حذف شود؛ سفارش‌های قبلی تا تکمیل ادامه دارند.',
+                'can_archive': True,
+            }, status=200)
+        ch.is_listed = False
+        ch.save(update_fields=['is_listed'])
+        Tariff.objects.filter(channel=ch, is_active=True).update(is_active=False)
         return JsonResponse({
-            'ok': False,
-            'error': 'has_orders',
-            'message': 'این کانال سفارش باز دارد؛ بعد از اتمام یا لغو سفارش می‌توانید حذف کنید.',
-        }, status=200)
+            'ok': True,
+            'channel_id': ch.id,
+            'archived': True,
+            'message': 'کانال از فهرست جدید خارج شد؛ سفارش‌های قبلی تا تکمیل ادامه دارند.',
+        })
     cid = ch.id
     from channels_app.models import Tariff
     # قلم‌های بسته‌شده را از کانال جدا کن تا CASCADE مانع نشود
@@ -2480,3 +2533,16 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
     })
 
 
+
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def api_categories(request: HttpRequest) -> JsonResponse:
+    """فهرست دسته‌بندی کانال و موضوعات تبلیغ."""
+    from config.categories import CHANNEL_CATEGORIES, AD_TOPICS
+    return JsonResponse({
+        'ok': True,
+        'channel_categories': [{'id': a, 'label': b} for a, b in CHANNEL_CATEGORIES],
+        'ad_topics': [{'id': a, 'label': b} for a, b in AD_TOPICS],
+    })
