@@ -269,11 +269,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 
 /* HEADER_SOLID_OVERRIDE */
-.header.brand,
-html[data-theme="dark"] .header.brand,
-html[data-theme="light"] .header.brand {
+.header.brand, .header.manager-head, .header.operator-head,
+html[data-theme="dark"] .header.brand, html[data-theme="dark"] .header.manager-head, html[data-theme="dark"] .header.operator-head {
   background: #0E4A5C !important;
   background-image: none !important;
   box-shadow: none !important;
 }
-.header.brand::after { display: none !important; content: none !important; }
+.header.brand::after, .header.manager-head::after, .header.operator-head::after { display: none !important; content: none !important; }
+

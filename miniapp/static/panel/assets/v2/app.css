@@ -633,11 +633,11 @@ input, textarea, select { color: var(--text); }
    and support operations surface. Presentation only; API contracts retained.
    ═══════════════════════════════════════════════════════════════════════ */
 :root { --bg:#f3f7fb; --surface:#fff; --text:#10243d; --muted:#6b7e95; --line:#e1eaf2; --teal:#05b9ae; --teal-strong:#008f89; --navy:#063f70; }
-.header.manager-head { background:linear-gradient(110deg,#062e55,#075486 68%,#087b87); color:#fff; border:0; }
+.header.manager-head { background:#0E4A5C; color:#fff; border:0; box-shadow:none; }
 .header.manager-head h1 { color:#fff; }
 .header.manager-head .icon-btn { color:#fff; background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.18); }
 .header.manager-head .avatar { background:linear-gradient(135deg,#2de0ca,#08a5a4); }
-.header.operator-head { background:linear-gradient(110deg,#152b48,#254f78); color:#fff; border:0; }
+.header.operator-head { background:#0E4A5C; color:#fff; border:0; box-shadow:none; }
 .header.operator-head h1 { color:#fff; }
 .header.operator-head .icon-btn { color:#fff; background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.15); }
 .main { padding:13px 13px calc(var(--nav-h) + env(safe-area-inset-bottom) + 23px); }
@@ -874,3 +874,128 @@ input, textarea, select { color: var(--text); }
   background: #1e293b;
   color: #f1f5f9;
 }
+
+
+/* HEADER_ALL_SOLID */
+.header.brand,
+.header.manager-head,
+.header.operator-head,
+html[data-theme="dark"] .header.brand,
+html[data-theme="dark"] .header.manager-head,
+html[data-theme="dark"] .header.operator-head {
+  background: #0E4A5C !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+
+/* ——— Onboarding wizard ——— */
+.lb-ob-root {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.lb-ob-progress {
+  height: 3px; background: var(--track); flex-shrink: 0;
+}
+.lb-ob-progress > i {
+  display: block; height: 100%; background: var(--teal);
+  transition: width .25s ease;
+}
+.lb-ob-body {
+  flex: 1; overflow-y: auto; padding: 20px 18px 28px;
+  -webkit-overflow-scrolling: touch;
+}
+.lb-ob-logo {
+  width: 64px; height: 64px; border-radius: 18px; overflow: hidden;
+  margin: 8px auto 18px; background: #0E4A5C;
+  display: grid; place-items: center;
+  box-shadow: 0 8px 24px rgba(14,74,92,.2);
+}
+.lb-ob-logo img { width: 100%; height: 100%; object-fit: cover; }
+.lb-ob-logo span { color: #fff; font-weight: 800; font-size: 1.2rem; }
+.lb-ob-title {
+  font-size: 1.15rem; font-weight: 800; color: var(--text);
+  text-align: center; margin: 0 0 8px; line-height: 1.5;
+}
+.lb-ob-sub {
+  text-align: center; color: var(--muted); font-size: .82rem;
+  line-height: 1.8; margin: 0 0 20px;
+}
+.lb-ob-cards { display: flex; flex-direction: column; gap: 10px; }
+.lb-ob-card {
+  display: flex; align-items: center; gap: 12px; text-align: right;
+  padding: 14px 14px; border-radius: 16px; border: 1px solid var(--line);
+  background: var(--surface); cursor: pointer; font: inherit; color: inherit;
+  transition: border-color .15s, box-shadow .15s;
+}
+.lb-ob-card:active { transform: scale(.98); }
+.lb-ob-card.on, .lb-ob-card:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 25%, transparent);
+}
+.lb-ob-card-ico {
+  width: 44px; height: 44px; border-radius: 14px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--teal-soft); color: var(--teal-strong);
+}
+.lb-ob-card b { display: block; font-size: .95rem; font-weight: 800; }
+.lb-ob-card small { display: block; color: var(--muted); font-size: .75rem; margin-top: 3px; line-height: 1.5; }
+.lb-ob-field { margin-bottom: 12px; }
+.lb-ob-field label {
+  display: block; font-size: .72rem; font-weight: 700; color: var(--muted); margin-bottom: 6px;
+}
+.lb-ob-field input, .lb-ob-field select, .lb-ob-field textarea {
+  width: 100%; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  font: inherit; outline: 0;
+}
+.lb-ob-field input:focus, .lb-ob-field select:focus {
+  border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+.lb-ob-opts { display: flex; flex-direction: column; gap: 8px; }
+.lb-ob-opt {
+  display: flex; align-items: flex-start; gap: 10px; text-align: right;
+  padding: 12px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--surface); cursor: pointer; font: inherit; color: inherit;
+}
+.lb-ob-opt.on { border-color: var(--teal); background: color-mix(in srgb, var(--teal-soft) 55%, var(--surface)); }
+.lb-ob-opt .radio {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line);
+  flex-shrink: 0; margin-top: 2px;
+}
+.lb-ob-opt.on .radio {
+  border-color: var(--teal); background: var(--teal);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+.lb-ob-opt b { display: block; font-size: .88rem; }
+.lb-ob-opt span { display: block; font-size: .72rem; color: var(--muted); margin-top: 2px; line-height: 1.6; }
+.lb-ob-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.lb-ob-chip {
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--muted); font-size: .75rem; font-weight: 700; cursor: pointer;
+}
+.lb-ob-chip.on { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-strong); }
+.lb-ob-hint, .lb-ob-note {
+  font-size: .75rem; color: var(--muted); line-height: 1.7; margin: 8px 0 0;
+  padding: 10px 12px; border-radius: 12px; background: var(--track);
+}
+.lb-ob-err {
+  margin-top: 10px; padding: 10px 12px; border-radius: 12px;
+  background: var(--danger-soft); color: var(--danger); font-size: .8rem; font-weight: 700;
+}
+.lb-ob-foot {
+  flex-shrink: 0; padding: 12px 18px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line); background: var(--surface);
+  display: flex; gap: 8px;
+}
+.lb-ob-foot .btn { flex: 1; }
+.lb-ob-done {
+  text-align: center; padding: 24px 12px;
+}
+.lb-ob-done .ok-ico {
+  width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 14px;
+  display: grid; place-items: center; background: var(--ok-soft); color: var(--ok);
+}
+html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
