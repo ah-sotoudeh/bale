@@ -1,5 +1,3 @@
-import logging
-logger = logging.getLogger(__name__)
 """Customer cart → order lifecycle helpers."""
 from __future__ import annotations
 

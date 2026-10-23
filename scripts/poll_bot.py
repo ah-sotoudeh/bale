@@ -34,8 +34,12 @@ from bot_flow.dispatch import handle_update  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
-from orders.cart import expire_manager_timeouts,  # noqa: F401
-from orders.cart import cancel_unpaid_orders, expire_timed_out_items, release_abandoned_carts  # noqa: E402
+from orders.cart import (  # noqa: E402
+    cancel_unpaid_orders,
+    expire_manager_timeouts,
+    expire_timed_out_items,
+    release_abandoned_carts,
+)
 from orders.execution import (  # noqa: E402
     escalate_unconfirmed,
     send_publish_reminders,
