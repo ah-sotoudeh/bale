@@ -474,7 +474,7 @@ def api_channels(request: HttpRequest) -> JsonResponse:
                 'id': ch.id,
                 'name': ch.name or ch.link or f'#{ch.id}',
                 'link': ch.link or '',
-                'publish_mode': ch.publish_mode or 'manual',
+                'publish_mode': ch.publish_mode or 'bot',
             })
 
     groups = []
@@ -666,7 +666,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
                 'name': name,
                 'link': link,
                 'manager': user,
-                'publish_mode': Channel.PUBLISH_MANUAL,
+                'publish_mode': Channel.PUBLISH_BOT,
             }
             field_names = {f.name for f in Channel._meta.get_fields() if hasattr(f, 'name')}
             if 'bale_peer_id' in field_names and peer is not None:
@@ -690,7 +690,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
                     name=name,
                     link=link,
                     manager=user,
-                    publish_mode=Channel.PUBLISH_MANUAL,
+                    publish_mode=Channel.PUBLISH_BOT,
                 )
     except Exception as e:
         logger.exception('api_add_channel failed')
@@ -1114,7 +1114,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
     if not ch:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
     mode = body.get('publish_mode')
-    if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
+    if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR):
         return _fail('bad_mode')
     ch.publish_mode = mode
     ch.save(update_fields=['publish_mode'])
@@ -1985,8 +1985,19 @@ def api_channel_avatar(request: HttpRequest, channel_id: int) -> HttpResponse:
         return HttpResponse(status=404)
 
     info = get_channel_info(ch.link)
-    photo = (info.get('raw') or {}).get('photo') or {}
-    file_id = photo.get('small_file_id') or photo.get('big_file_id') or ''
+    raw = info.get('raw') or {}
+    photo = raw.get('photo') or info.get('photo') or {}
+    if isinstance(photo, dict):
+        file_id = (
+            photo.get('small_file_id')
+            or photo.get('big_file_id')
+            or photo.get('file_id')
+            or ''
+        )
+    else:
+        file_id = ''
+    if not file_id:
+        file_id = str(info.get('photo_file_id') or info.get('avatar_file_id') or '')
     if not file_id:
         return _miss()
     meta = get_file(str(file_id))
@@ -2085,7 +2096,7 @@ def api_operator_assign_manager(request: HttpRequest) -> JsonResponse:
             ch = Channel(
                 name=display_name,
                 link=link,
-                publish_mode=Channel.PUBLISH_MANUAL,
+                publish_mode=Channel.PUBLISH_BOT,
                 ownership_verified=True,
                 bale_peer_id=peer,
                 about=about,
@@ -2643,7 +2654,7 @@ def api_operator_test_banners(request: HttpRequest) -> JsonResponse:
             'id': ch.id,
             'name': ch.name or ch.link or f'#{ch.id}',
             'link': ch.link,
-            'publish_mode': ch.publish_mode or 'manual',
+            'publish_mode': ch.publish_mode or 'bot',
             'bot_is_admin': bool(ch.bot_is_admin),
             'linkyar_is_admin': bool(ch.linkyar_is_admin),
             'is_listed': bool(getattr(ch, 'is_listed', True)),

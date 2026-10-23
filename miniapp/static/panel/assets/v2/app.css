@@ -1074,3 +1074,37 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 }
 /* hide header back during first-run role step is optional */
 .header .avatar { border-radius: 50% !important; }
+
+
+/* —— کارت فشرده کانال مدیر —— */
+.manager-channel-card.compact{padding:12px 12px 10px}
+.manager-channel-card.compact .manager-channel-row{display:flex;gap:11px;align-items:flex-start}
+.manager-channel-card.compact .manager-channel-avatar{
+  position:static;width:48px;height:48px;border-radius:14px;border:0;
+  flex-shrink:0;box-shadow:none;background:#e8f4f2;color:#0a6b6a;
+  font-size:1rem;overflow:hidden;display:grid;place-items:center
+}
+.manager-channel-card.compact .manager-channel-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.manager-channel-card.compact .mgr-ava-fallback{width:100%;height:100%;display:grid;place-items:center;font-weight:800}
+.manager-channel-card.compact .manager-channel-main{flex:1;min-width:0}
+.manager-channel-card.compact .manager-channel-name-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.manager-channel-card.compact .manager-channel-name-row h3{font-size:.82rem;margin:0;font-weight:850;line-height:1.3}
+.manager-channel-card.compact .mgr-handle{margin:3px 0 0;font-size:.68rem;color:var(--muted);direction:ltr;unicode-bidi:isolate;text-align:start}
+.manager-channel-card.compact .manager-channel-state{
+  position:static;padding:4px 8px;border-radius:999px;font-size:.58rem;font-weight:700;
+  background:rgba(8,140,130,.12);color:#0a7a74;white-space:nowrap
+}
+.manager-channel-card.compact .manager-channel-state.paused{background:rgba(100,116,139,.12);color:#64748b}
+.manager-channel-card.compact .manager-channel-meta-line{
+  display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:8px;align-items:center
+}
+.manager-channel-card.compact .manager-channel-meta-line>span{
+  display:inline-flex;align-items:center;gap:4px;font-size:.62rem;color:var(--muted)
+}
+.manager-channel-card.compact .manager-channel-meta-line svg{width:13px;height:13px;color:var(--teal-strong,#0a8f8a)}
+.manager-channel-card.compact .manager-method-badge{
+  margin-inline-start:auto;padding:3px 8px;border-radius:8px;font-size:.58rem;
+  background:var(--track,#f1f5f9);color:var(--text,#0f2740);font-weight:700
+}
+.manager-channel-card.compact .manager-channel-actions{margin-top:10px;gap:8px}
+.manager-channel-card.compact .manager-channel-actions .btn{min-height:36px;padding:7px 10px;font-size:.68rem}

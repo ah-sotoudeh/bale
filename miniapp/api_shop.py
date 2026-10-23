@@ -185,7 +185,7 @@ def api_set_publish_mode(request: HttpRequest) -> JsonResponse:
         if not ch:
             return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کانال پیدا نشد.'}, status=200)
         mode = body.get('publish_mode')
-        if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR, Channel.PUBLISH_MANUAL):
+        if mode not in (Channel.PUBLISH_BOT, Channel.PUBLISH_LINKYAR):
             return JsonResponse({'ok': False, 'error': 'bad_mode', 'message': 'روش انتشار نامعتبر است.'}, status=200)
         ch.publish_mode = mode
         fields = ['publish_mode']

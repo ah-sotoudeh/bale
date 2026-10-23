@@ -662,7 +662,7 @@
     const c = g.channel || {};
     const tariffs = g.tariffs.map((t,index) => `<button type="button" class="tariff-row scenario-tariff-row ${ST.tariffId===t.id?'on':''}" data-tariff="${t.id}"><span class="scenario-tariff-check">${ST.tariffId===t.id?icon('check',15):''}</span><span class="grow"><strong>${esc(t.name || (t.duration_hours + ' ساعته'))}</strong><small>${fa(t.duration_hours)} ساعت نمایش · ${t.start_hour != null ? 'شروع '+fa(t.start_hour)+':۰۰' : 'زمان‌بندی با هماهنگی'}</small></span><span class="scenario-tariff-price">${faNum(t.price)} <small>تومان</small></span></button>`).join('');
     const av = g.avatar ? `<img src="${esc(g.avatar)}" alt="" onerror="this.parentNode.textContent='${esc((g.name||'ک').slice(0,1))}'"/>` : esc((g.name||'ک').slice(0,1));
-    return `<section class="channel-detail-hero"><div class="channel-detail-cover"><div class="channel-detail-orbit"></div><span class="channel-detail-mode">${icon(c.ready_publish?'check':'hand',13)} ${c.ready_publish?'آمادهٔ انتشار':'انتشار دستی'}</span><div class="channel-detail-avatar">${av}</div><span class="channel-detail-cover-art">${icon('megaphone',28)}</span></div><div class="channel-detail-title"><span class="eyebrow">جایگاه تبلیغاتی</span><h2>${esc(g.name)}</h2><p>${c.link ? '@'+esc(String(c.link).replace(/^@/,'')) : 'کانال منتخب برای تبلیغ'}</p></div><div class="channel-detail-stats"><div><span>${icon('users',16)}</span><strong>${faK(g.members)}</strong><small>عضو</small></div><div><span>${icon('chart',16)}</span><strong>${faK(g.views)}</strong><small>میانگین بازدید</small></div><div><span>${icon('clock',16)}</span><strong>${g.ready?'خودکار':'هماهنگی'}</strong><small>روش انتشار</small></div></div></section>
+    return `<section class="channel-detail-hero"><div class="channel-detail-cover"><div class="channel-detail-orbit"></div><span class="channel-detail-mode">${icon(c.ready_publish?'check':'hand',13)} ${c.ready_publish?'آمادهٔ انتشار':'هماهنگی'}</span><div class="channel-detail-avatar">${av}</div><span class="channel-detail-cover-art">${icon('megaphone',28)}</span></div><div class="channel-detail-title"><span class="eyebrow">جایگاه تبلیغاتی</span><h2>${esc(g.name)}</h2><p>${c.link ? '@'+esc(String(c.link).replace(/^@/,'')) : 'کانال منتخب برای تبلیغ'}</p></div><div class="channel-detail-stats"><div><span>${icon('users',16)}</span><strong>${faK(g.members)}</strong><small>عضو</small></div><div><span>${icon('chart',16)}</span><strong>${faK(g.views)}</strong><small>میانگین بازدید</small></div><div><span>${icon('clock',16)}</span><strong>${g.ready?'خودکار':'هماهنگی'}</strong><small>روش انتشار</small></div></div></section>
       <div class="channel-proof-note">${icon('shield-check',16)} <span>زمان و تعرفه پیش از ثبت نهایی قابل بررسی است.</span></div>
       <div class="home-section-head channel-tariff-heading"><div><span class="eyebrow">انتخاب هوشمند</span><h2>تعرفهٔ مناسب را انتخاب کن</h2></div><span class="market-total">${fa(g.tariffs.length)} گزینه</span></div>
       <div class="channel-tariff-list">${tariffs || `<div class="scenario-empty compact-scenario-empty"><span>${icon('wallet',23)}</span><h3>تعرفه‌ای در دسترس نیست</h3><p>در حال حاضر برای این کانال تعرفهٔ فعالی ثبت نشده است.</p></div>`}</div>
@@ -671,7 +671,7 @@
   }
 
   function modeLabel(m) {
-    return ({ bot: 'ارسال خودکار (ربات)', linkyar: 'ارسال با لینک‌یار', manual: 'انتشار دستی' })[m] || m;
+    return ({ bot: 'ارسال با بازو', linkyar: 'ارسال با دستیار', manual: 'نیاز به تنظیم' })[m] || m;
   }
 
   function renderBanners() {
@@ -808,7 +808,7 @@
           <div class="manager-history-value"><span>سهم این انتشار</span><strong>${faNum(it.price)} <small>تومان</small></strong></div>
           ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',14)} زمان پیشنهادی: ${esc(it.proposed_date)}</div>`:''}
           ${it.published_link ? `<a href="${esc(it.published_link)}" target="_blank" rel="noopener" class="manager-published-link">مشاهدهٔ لینک انتشار ${icon('arrow-up-left',14)}</a>`:''}
-          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}${it.manager_status==='approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',14)} ثبت انتشار انجام‌شده</button>`:''}</div>
+          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}</div>
         </article>`).join('') : `<div class="scenario-empty"><span>${icon('inbox',27)}</span><h3>هنوز سفارشی ثبت نشده</h3><p>به‌محض ثبت سفارش برای کانال‌هایت، سابقه و وضعیت آن اینجا نمایش داده می‌شود.</p><button class="btn btn-soft" id="btnMgrOrdersGoHome">بازگشت به میزکار</button></div>`;
       return `<section class="orders-overview manager-orders-overview"><div><span class="eyebrow">سابقهٔ جایگاه‌ها</span><h2>سفارش‌های کانال</h2><p>از درخواست جدید تا اعلام انتشار، وضعیت هر جایگاه را دنبال کن.</p></div><div class="orders-overview-metrics"><div><strong>${fa(list.length)}</strong><span>همه</span></div><div><strong>${fa(waiting.length)}</strong><span>در انتظار</span></div><div><strong>${fa(publish.length)}</strong><span>آمادهٔ انتشار</span></div></div></section><div class="manager-content-heading"><div><span class="eyebrow">نمایش همهٔ موارد</span><h2>سابقهٔ درخواست‌ها</h2></div><button class="manager-refresh" id="btnRefreshOrders">${icon('refresh-cw',16)}</button></div>${rows}`;
     }
@@ -1020,7 +1020,7 @@
         ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',15)} زمان پیشنهادی فعلی: ${esc(it.proposed_date)}</div>` : ''}
         <div class="manager-request-actions">
           ${it.manager_status === 'pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',15)} تأیید درخواست</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',15)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',17)}</button>` : ''}
-          ${it.manager_status === 'approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',15)} اعلام انتشار</button>` : ''}
+          
         </div>
       </article>`).join('')}</div>`;
   }
@@ -1030,12 +1030,34 @@
     if (!chs.length) return `<div class="manager-empty-state"><div class="manager-empty-art channel-empty-art"><div class="empty-orbit"></div><span>${icon('building-2',31)}</span><i></i><b></b></div><span class="manager-empty-label">شبکهٔ کانال‌ها</span><h3>هنوز کانالی به میزکارت وصل نشده</h3><p>نام کاربری بله‌ات را در «توضیحات کانال» بنویس، بعد لینک یا @شناسه را اینجا ثبت کن. پس از تأیید می‌توانی نام کاربری را از توضیحات حذف کنی.</p><div class="manager-empty-actions"><button class="btn btn-primary" id="btnMgrAddChannelEmpty">افزودن کانال</button><button class="btn btn-ghost" id="btnMgrRefreshChannelsEmpty">بررسی دوباره</button></div><div class="manager-connect-hint">${icon('shield-check',15)} کانال باید عمومی باشد و حداقل ۱۰۰۰ عضو داشته باشد.</div></div>`;
     return `<div class="manager-channel-list">${chs.map((c,index) => {
       const letter = esc((c.name || 'ک').slice(0,1));
-      const ava = c.avatar_url || c.photo_url ? `<img src="${esc(c.avatar_url || c.photo_url)}" alt="" onerror="this.parentNode.textContent='${letter}'"/>` : letter;
-      return `<article class="manager-channel-card" style="--card-order:${Math.min(index,8)}">
-        <div class="manager-channel-cover"><div class="manager-channel-cover-ornament"></div><div class="manager-channel-avatar">${ava}</div><span class="manager-channel-state ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیوشده':'در بازار'}</span><span class="manager-channel-cover-symbol">${icon('megaphone',25)}</span></div>
-        <div class="manager-channel-body"><div class="manager-channel-name-row"><div><h3>${esc(c.name)}</h3><p>${c.link ? '@' + esc(String(c.link).replace(/^@/,'')) : 'شناسهٔ کانال ثبت نشده'}</p></div><span class="manager-method-badge">${esc(modeLabel(c.publish_mode))}</span></div>
-          <div class="manager-channel-metrics"><div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div><div><span>${icon('chart',15)} میانگین بازدید</span><strong>${faK(c.avg_views)}</strong></div><div><span>${icon('wallet',15)} تعرفه‌ها</span><strong>${fa(c.tariff_count || 0)}</strong></div></div>
-          <div class="manager-channel-actions"><button class="btn btn-primary" data-mgr-ch="${c.id}">مدیریت کانال ${icon('chevron-left',15)}</button><button class="btn btn-ghost" data-mgr-mode="${c.id}">${icon('sliders',15)} روش انتشار</button></div>
+      const src = c.avatar_url || c.photo_url || '';
+      const ava = src
+        ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span class="mgr-ava-fallback" style="display:none">${letter}</span>`
+        : `<span class="mgr-ava-fallback">${letter}</span>`;
+      const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\\.ir\\//i, '')) : '';
+      const mode = (c.publish_mode === 'linkyar') ? 'linkyar' : (c.publish_mode === 'bot' ? 'bot' : 'bot');
+      return `<article class="manager-channel-card compact" style="--card-order:${Math.min(index,8)}">
+        <div class="manager-channel-row">
+          <div class="manager-channel-avatar">${ava}</div>
+          <div class="manager-channel-main">
+            <div class="manager-channel-name-row">
+              <div>
+                <h3>${esc(c.name)}</h3>
+                <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسه ثبت نشده'}</p>
+              </div>
+              <span class="manager-channel-state ${c.is_listed===false?'paused':''}">${c.is_listed===false?'آرشیو':'در بازار'}</span>
+            </div>
+            <div class="manager-channel-meta-line">
+              <span>${icon('users',13)} ${faK(c.members_count)}</span>
+              <span>${icon('chart',13)} ${faK(c.avg_views)}</span>
+              <span>${icon('tags',13)} ${fa(c.tariff_count || 0)}</span>
+              <span class="manager-method-badge">${esc(modeLabel(c.publish_mode === 'manual' ? 'bot' : c.publish_mode))}</span>
+            </div>
+          </div>
+        </div>
+        <div class="manager-channel-actions">
+          <button class="btn btn-primary" data-mgr-ch="${c.id}">مدیریت</button>
+          <button class="btn btn-ghost" data-mgr-mode="${c.id}">${icon('sliders',14)} انتشار</button>
         </div>
       </article>`;
     }).join('')}</div><button class="btn btn-soft btn-block manager-list-refresh" id="btnMgrRefreshChannelsList">${icon('refresh-cw',15)} به‌روزرسانی آمار کانال‌ها</button>`;
@@ -1050,8 +1072,12 @@
     const c = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
     if (!c) return '<div class="empty">کانال پیدا نشد</div>';
     const letter = esc((c.name||'ک').slice(0,1));
-    const ava = c.avatar_url || c.photo_url ? `<img src="${esc(c.avatar_url || c.photo_url)}" alt="" onerror="this.parentNode.textContent='${letter}'"/>` : letter;
-    return `<section class="manager-detail-hero"><div class="manager-detail-cover"><div class="manager-channel-cover-ornament"></div><span class="manager-detail-icon">${ava}</span><span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span></div><div class="manager-detail-copy"><span class="eyebrow">کانال تحت مدیریت</span><h2>${esc(c.name)}</h2><p>${c.link ? '@'+esc(String(c.link).replace(/^@/,'')) : 'شناسهٔ کانال ثبت نشده'}</p></div><div class="manager-channel-metrics detail-metrics"><div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div><div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div><div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(c.tariff_count||0)}</strong></div></div></section>
+    const src = c.avatar_url || c.photo_url || '';
+    const ava = src
+      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span style="display:none;place-items:center;width:100%;height:100%;font-weight:800">${letter}</span>`
+      : letter;
+    const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i,'')) : '';
+    return `<section class="manager-detail-hero"><div class="manager-detail-cover"><div class="manager-channel-cover-ornament"></div><span class="manager-detail-icon">${ava}</span><span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span></div><div class="manager-detail-copy"><span class="eyebrow">کانال تحت مدیریت</span><h2>${esc(c.name)}</h2><p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسهٔ کانال ثبت نشده'}</p></div><div class="manager-channel-metrics detail-metrics"><div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div><div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div><div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(c.tariff_count||0)}</strong></div></div></section>
       <div class="manager-content-heading"><div><span class="eyebrow">تنظیمات جایگاه</span><h2>مدیریت کانال</h2></div></div>
       <div class="manager-detail-action-list"><button class="manager-detail-action" id="btnAddTariffForCh"><span class="manager-detail-action-icon tariff-icon">${icon('plus',19)}</span><span><b>افزودن تعرفه</b><small>ایجاد بستهٔ جدید برای این کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" data-mgr-mode="${c.id}"><span class="manager-detail-action-icon channel-icon">${icon('sliders',19)}</span><span><b>روش انتشار</b><small>${esc(modeLabel(c.publish_mode))}</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnManageAvailability"><span class="manager-detail-action-icon request-icon">${icon('calendar',19)}</span><span><b>تقویم و روزهای آزاد</b><small>مدیریت ظرفیت روزانهٔ انتشار</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnRefreshOne"><span class="manager-detail-action-icon business-icon">${icon('refresh-cw',19)}</span><span><b>به‌روزرسانی آمار</b><small>دریافت دوبارهٔ مشخصات کانال</small></span><span>${icon('chevron-left',17)}</span></button></div><p class="manager-footnote">${icon('shield-check',14)} تغییرات تعرفه و تقویم روی زمان‌های قابل رزرو در بازار اثر می‌گذارند.</p>`;
   }
@@ -1839,10 +1865,10 @@ function renderOpTickets() {
       openSheet(`
         <div class="sheet-handle"></div>
         <h3 style="margin:0 0 12px;text-align:center">روش انتشار</h3>
+        <p class="hint" style="text-align:center;margin:0 0 12px">انتشار فقط به‌صورت خودکار انجام می‌شود.</p>
         <div class="seg" id="modeSeg">
-          <button type="button" data-m="bot" class="on">ربات</button>
-          <button type="button" data-m="linkyar">لینک‌یار</button>
-          <button type="button" data-m="manual">دستی</button>
+          <button type="button" data-m="bot" class="on">بازو</button>
+          <button type="button" data-m="linkyar">دستیار</button>
         </div>
         <button class="btn btn-primary btn-block" id="btnSaveMode">ذخیره</button>`);
       let mode = 'bot';
@@ -2373,7 +2399,7 @@ function renderOpTickets() {
     role: '',
     biz: { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] },
     ch: { link: '', error: '', loading: false, id: 0, name: '' },
-    pmode: 'manual',
+    pmode: 'bot',
     tariff: { name: '۲۴ ساعته', duration_hours: 24, price: '' },
     error: '',
     loading: false,
@@ -2488,7 +2514,6 @@ function renderOpTickets() {
         <div class="lb-ob-title">تبلیغ‌ها چطور منتشر شوند؟</div>
         <p class="lb-ob-sub">برای کانال «${esc(OB.ch.name || 'شما')}» یکی را انتخاب کنید.</p>
         <div class="lb-ob-opts">
-          <button type="button" class="lb-ob-opt ${OB.pmode==='manual'?'on':''}" data-ob="pmode-manual"><span class="radio"></span><div><b>خودم می‌فرستم</b><span>در زمان توافق‌شده خودتان در کانال پست می‌گذارید</span></div></button>
           <button type="button" class="lb-ob-opt ${OB.pmode==='bot'?'on':''}" data-ob="pmode-bot"><span class="radio"></span><div><b>خودکار با بازو</b><span>بازو را ادمین کانال کنید تا خودش بفرستد</span></div></button>
           <button type="button" class="lb-ob-opt ${OB.pmode==='linkyar'?'on':''}" data-ob="pmode-linkyar"><span class="radio"></span><div><b>خودکار با حساب دستیار</b><span>حساب دستیار لینک‌بان را ادمین کانال کنید</span></div></button>
         </div>`;
@@ -2724,7 +2749,7 @@ function renderOpTickets() {
     OB.loading = false;
     OB.ch = { link: '', error: '', loading: false, id: 0, name: '' };
     OB.biz = { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] };
-    OB.pmode = 'manual';
+    OB.pmode = 'bot';
     OB.tariff = { name: '۲۴ ساعته', duration_hours: 24, price: '' };
     // فقط اگر کاربر قبلاً در همین حساب نقش را انتخاب کرده و ثبت‌نامش ناتمام است، ادامه بده
     try {

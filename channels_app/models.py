@@ -11,7 +11,7 @@ class Channel(models.Model):
     PUBLISH_MODE_CHOICES = [
         (PUBLISH_BOT, 'ارسال خودکار با لینک‌ساز'),
         (PUBLISH_LINKYAR, 'ارسال خودکار با لینک‌یار'),
-        (PUBLISH_MANUAL, 'ارسال دستی توسط خودم'),
+        (PUBLISH_MANUAL, 'قدیمی — فقط بازو یا دستیار'),
     ]
 
     name = models.CharField(max_length=200)
