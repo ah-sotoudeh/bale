@@ -1,6 +1,3 @@
-import os
-import logging
-logger = logging.getLogger(__name__)
 """Wallet balance, credits, payouts for managers and customers."""
 from __future__ import annotations
 
