@@ -20,6 +20,34 @@ from users.models import User
 logger = logging.getLogger(__name__)
 
 MANAGER_HOURS = int(os.environ.get('MANAGER_RESPONSE_HOURS', '12'))
+def _cart_err(code: str, **extra):
+    """خطای ساخت‌یافته با پیام فارسی برای مینی‌اپ و بازو."""
+    messages = {
+        'empty_cart': 'سبد خرید خالی است.',
+        'need_new_start': 'تاریخ شروع را دوباره انتخاب کنید.',
+        'past': 'این زمان گذشته است.',
+        'manager_not_found': 'مدیر کانال پیدا نشد.',
+        'bad_amount': 'مبلغ نامعتبر است.',
+        'not_item_manager': 'این سفارش مربوط به کانال شما نیست.',
+        'already_handled': 'این درخواست قبلاً پاسخ داده شده است.',
+        'item_not_found': 'آیتم سفارش پیدا نشد.',
+        'already_refunded': 'قبلاً به اعتبار برگشته است.',
+        'not_customer': 'این کار فقط برای آگهی‌دهنده است.',
+        'not_paid': 'سفارش هنوز پرداخت نشده است.',
+        'order_not_found': 'سفارش پیدا نشد.',
+        'inactive_tariff': 'این تعرفه غیرفعال است.',
+        'not_awaiting': 'الان منتظر این اقدام نیست.',
+        'slot_conflict': 'این روز پر است.',
+        'no_channel': 'کانالی به تعرفه وصل نیست.',
+        'invalid_action': 'این عملیات مجاز نیست.',
+        'no_banner': 'ابتدا یک بنر انتخاب کنید.',
+        'not_pending': 'این درخواست دیگر منتظر پاسخ نیست.',
+    }
+    out = {'ok': False, 'error': code, 'message': messages.get(code) or code}
+    out.update(extra)
+    return out
+
+
 def _payment_hold_hours() -> int:
     try:
         from config.system_settings import get_settings
@@ -87,10 +115,10 @@ def add_to_cart(
     day,
 ) -> Dict[str, Any]:
     if not tariff.is_active:
-        return {'ok': False, 'error': 'inactive_tariff'}
+        return _cart_err('inactive_tariff')
     release_abandoned_carts(customer)
     if is_past_slot(tariff, day):
-        return {'ok': False, 'error': 'past'}
+        return _cart_err('past')
     start, end = slot_for_day(tariff, day)
     channel = tariff.channel
     if tariff.group_id:
@@ -100,7 +128,7 @@ def add_to_cart(
         channel_ids = [tariff.channel_id] if tariff.channel_id else []
         channel = tariff.channel
     if not channel:
-        return {'ok': False, 'error': 'no_channel'}
+        return _cart_err('no_channel')
 
     if has_slot_conflict(
         tariff,
@@ -108,7 +136,7 @@ def add_to_cart(
         end,
         channel=None if tariff.group_id else channel,
     ):
-        return {'ok': False, 'error': 'slot_conflict'}
+        return _cart_err('slot_conflict')
 
     order = get_or_create_draft(customer)
 
@@ -126,7 +154,7 @@ def add_to_cart(
             booked_channel_ids=channel_ids,
         )
     except SlotConflict:
-        return {'ok': False, 'error': 'slot_conflict'}
+        return _cart_err('slot_conflict')
     order.recompute_total()
     order.managers_deadline = cart_hold_until()
     order.save(update_fields=['managers_deadline'])
@@ -165,9 +193,9 @@ def checkout(order: Order) -> Dict[str, Any]:
         order.items.filter(manager_status='cart').select_related('tariff', 'channel', 'manager')
     )
     if not items:
-        return {'ok': False, 'error': 'empty_cart'}
+        return _cart_err('empty_cart')
     if not order.banner_message_id:
-        return {'ok': False, 'error': 'no_banner'}
+        return _cart_err('no_banner')
 
     for it in items:
         if has_slot_conflict(
@@ -316,17 +344,17 @@ def process_manager_item(
             'tariff__group', 'manager',
         ).get(id=item_id)
     except OrderItem.DoesNotExist:
-        return {'ok': False, 'error': 'item_not_found'}
+        return _cart_err('item_not_found')
 
     try:
         manager = User.objects.get(bale_user_id=str(manager_bale_id))
     except User.DoesNotExist:
-        return {'ok': False, 'error': 'manager_not_found'}
+        return _cart_err('manager_not_found')
 
     if not _manager_may_answer(manager, item):
-        return {'ok': False, 'error': 'not_item_manager'}
+        return _cart_err('not_item_manager')
     if item.manager_status not in ('pending', 'no_response'):
-        return {'ok': False, 'error': 'already_handled'}
+        return _cart_err('already_handled')
 
     order = item.order
     if action == 'approve':
@@ -337,7 +365,7 @@ def process_manager_item(
             channel=item.channel,
             exclude_item_id=item.id,
         ):
-            return {'ok': False, 'error': 'slot_conflict'}
+            return _cart_err('slot_conflict')
         item.manager_status = 'approved'
         item.save()
         ManagerResponse.objects.create(order_item=item, manager=manager, action='approve')
@@ -347,18 +375,18 @@ def process_manager_item(
         ManagerResponse.objects.create(order_item=item, manager=manager, action='reject')
     elif action == 'edit':
         if not new_start:
-            return {'ok': False, 'error': 'need_new_start'}
+            return _cart_err('need_new_start')
         new_end = new_start + timedelta(hours=item.booked_duration())
         if has_slot_conflict(
             item.tariff, new_start, new_end, channel=item.channel, exclude_item_id=item.id
         ):
-            return {'ok': False, 'error': 'slot_conflict'}
+            return _cart_err('slot_conflict')
         item.manager_edited_start = new_start
         item.manager_status = 'edited'
         try:
             item.save()
         except SlotConflict:
-            return {'ok': False, 'error': 'slot_conflict'}
+            return _cart_err('slot_conflict')
         ManagerResponse.objects.create(
             order_item=item,
             manager=manager,
@@ -367,7 +395,7 @@ def process_manager_item(
         )
         _ask_customer_confirm(order, item)
     else:
-        return {'ok': False, 'error': 'invalid_action'}
+        return _cart_err('invalid_action')
 
     return maybe_finalize_order(order.id)
 
@@ -403,11 +431,11 @@ def customer_confirm_edit(item_id: int, customer_bale_id: str, accept: bool) -> 
             id=item_id
         )
     except OrderItem.DoesNotExist:
-        return {'ok': False, 'error': 'item_not_found'}
+        return _cart_err('item_not_found')
     if str(item.order.customer.bale_user_id) != str(customer_bale_id):
-        return {'ok': False, 'error': 'not_customer'}
+        return _cart_err('not_customer')
     if item.manager_status != 'edited':
-        return {'ok': False, 'error': 'not_awaiting'}
+        return _cart_err('not_awaiting')
 
     if accept:
         item.manager_status = 'approved'
@@ -417,7 +445,7 @@ def customer_confirm_edit(item_id: int, customer_bale_id: str, accept: bool) -> 
         try:
             item.save()
         except SlotConflict:
-            return {'ok': False, 'error': 'slot_conflict'}
+            return _cart_err('slot_conflict')
     else:
         item.manager_status = 'customer_declined'
         item.save()
@@ -457,7 +485,7 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
             id=order_id
         )
     except Order.DoesNotExist:
-        return {'ok': False, 'error': 'order_not_found'}
+        return _cart_err('order_not_found')
 
     if order.status not in ('waiting_managers', 'waiting_customer_confirm'):
         return {'ok': True, 'order_status': order.status, 'skipped': True}
@@ -643,17 +671,17 @@ def refund_paid_order(order: Order, amount: Optional[int] = None, *, reason: str
     with transaction.atomic():
         order = Order.objects.select_for_update().select_related('customer').get(pk=order.pk)
         if order.status != 'paid':
-            return {'ok': False, 'error': 'not_paid'}
+            return _cart_err('not_paid')
         items = _open_items(order)
         remaining = 0
         for it in items:
             already = _refunded_so_far(it.id)
             remaining += max(0, int(it.price) - already)
         if remaining <= 0:
-            return {'ok': False, 'error': 'already_refunded'}
+            return _cart_err('already_refunded')
         pay = remaining if amount is None else min(int(amount), remaining)
         if pay <= 0:
-            return {'ok': False, 'error': 'bad_amount'}
+            return _cart_err('bad_amount')
         full = pay >= remaining
         left = pay
         credited = 0

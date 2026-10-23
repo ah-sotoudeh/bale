@@ -28,9 +28,28 @@ logger = logging.getLogger(__name__)
 
 def _json_body(request: HttpRequest) -> Dict[str, Any]:
     try:
-        return json.loads(request.body.decode('utf-8') or '{}')
+        raw = request.body.decode('utf-8') or '{}'
+        data = json.loads(raw) if raw.strip().startswith('{') else {}
+        if not isinstance(data, dict):
+            data = {}
     except Exception:
-        return {}
+        data = {}
+    # multipart / form fields
+    try:
+        if request.POST:
+            for k in request.POST:
+                if k not in data or data.get(k) in (None, ''):
+                    data[k] = request.POST.get(k)
+    except Exception:
+        pass
+    # soft_user may arrive as JSON string from FormData
+    su = data.get('soft_user')
+    if isinstance(su, str) and su.strip().startswith('{'):
+        try:
+            data['soft_user'] = json.loads(su)
+        except Exception:
+            pass
+    return data
 
 
 def _init_from_request(request: HttpRequest) -> str:
@@ -924,6 +943,7 @@ def api_channel_archive(request: HttpRequest) -> JsonResponse:
         'channel_id': ch.id,
         'is_listed': ch.is_listed,
         'archived': not ch.is_listed,
+        'message': 'از بازار مخفی شد.' if not ch.is_listed else 'دوباره در بازار نمایش داده می‌شود.',
     })
 
 
@@ -1228,8 +1248,12 @@ def api_add_tariff(request: HttpRequest) -> JsonResponse:
         start_hour = int(start_hour) if start_hour is not None and str(start_hour) != '' else None
     except (TypeError, ValueError):
         return _fail('bad_fields')
-    if not name or duration <= 0 or price < 0:
-        return _fail('bad_fields')
+    if not name or duration <= 0 or duration > 720 or price < 1000:
+        return JsonResponse({
+            'ok': False,
+            'error': 'bad_fields',
+            'message': 'نام، مدت (۱ تا ۷۲۰ ساعت) و قیمت (حداقل ۱۰۰۰ تومان) را درست وارد کنید.',
+        }, status=200)
     t = Tariff.objects.create(
         channel=ch,
         group=group,

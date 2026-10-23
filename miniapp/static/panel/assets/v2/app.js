@@ -108,8 +108,8 @@
     const softUser = baleClientUser();
     if (initData) headers['X-Bale-Init-Data'] = initData;
     const dbg = debugId();
-    if (dbg) headers['X-Bale-User-Id'] = dbg;
-    else if (softUser && softUser.id) headers['X-Bale-User-Id'] = String(softUser.id);
+    const uid = dbg || (softUser && softUser.id ? String(softUser.id) : '');
+    if (uid) headers['X-Bale-User-Id'] = uid;
 
     let body = opts.body;
     if (body && !(body instanceof FormData) && typeof body === 'object') {
@@ -117,13 +117,18 @@
       const extra = {};
       if (dbg && !body.debug_bale_id) extra.debug_bale_id = dbg;
       if (softUser && softUser.id && !body.soft_user) extra.soft_user = softUser;
+      if (initData && !body.initData) extra.initData = initData;
       if (Object.keys(extra).length) body = Object.assign({}, extra, body);
       body = JSON.stringify(body);
-    } else if (body instanceof FormData && dbg) {
-      body.append('debug_bale_id', dbg);
+    } else if (body instanceof FormData) {
+      if (dbg && !body.get('debug_bale_id')) body.append('debug_bale_id', dbg);
+      if (softUser && softUser.id && !body.get('soft_user')) {
+        try { body.append('soft_user', JSON.stringify(softUser)); } catch (e) {}
+      }
+      if (initData && !body.get('initData')) body.append('initData', initData);
     } else if (method !== 'GET' && softUser && softUser.id && (body == null || body === undefined)) {
       headers['Content-Type'] = 'application/json';
-      body = JSON.stringify({ soft_user: softUser, ...(dbg ? { debug_bale_id: dbg } : {}) });
+      body = JSON.stringify({ soft_user: softUser, ...(dbg ? { debug_bale_id: dbg } : {}), ...(initData ? { initData } : {}) });
     }
 
     let url = path.startsWith('http') ? path : API + path;
@@ -131,22 +136,37 @@
       url += (url.includes('?') ? '&' : '?') + 'debug_bale_id=' + encodeURIComponent(dbg);
     }
 
+    /* مهلت پیش‌فرض ۲۰ثانیه تا صفحه روی «بارگذاری» گیر نکند */
+    const timeoutMs = opts.timeoutMs != null ? Number(opts.timeoutMs) : 20000;
     let res;
-    const controller = opts.timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), Number(opts.timeoutMs)) : null;
-    try { res = await fetch(url, { method, headers, body, credentials: 'same-origin', ...(controller ? { signal: controller.signal } : {}) }); }
-    catch (networkError) {
-      if (networkError && networkError.name === 'AbortError') throw new Error('مهلت دریافت اطلاعات به پایان رسید.');
+    const controller = timeoutMs > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body,
+        credentials: 'same-origin',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+    } catch (networkError) {
+      if (networkError && networkError.name === 'AbortError') throw new Error('مهلت دریافت اطلاعات به پایان رسید. دوباره تلاش کنید.');
       throw new Error('ارتباط با سرور برقرار نشد. اتصال اینترنت را بررسی و دوباره تلاش کنید.');
-    } finally { if (timeout) clearTimeout(timeout); }
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
     let data;
     try {
       data = await res.json();
     } catch (e) {
-      data = { ok: false, error: 'bad_json', message: 'پاسخ نامعتبر از سرور' };
+      data = { ok: false, error: 'bad_json', message: res.status === 401 ? 'نشست بله منقضی شده. مینی‌اپ را از داخل بله دوباره باز کنید.' : 'پاسخ نامعتبر از سرور' };
     }
     if (!res.ok && !data.message) {
       data.message = data.error || ('خطا ' + res.status);
+    }
+    if (res.status === 401) {
+      data.ok = false;
+      data.message = data.message || 'نشست بله منقضی شده. مینی‌اپ را از داخل بله دوباره باز کنید.';
     }
     return data;
   }
@@ -429,10 +449,18 @@
 
   async function loadCatalog() {
     const q = ST.q ? '?q=' + encodeURIComponent(ST.q) : '';
-    const d = await api('/catalog' + q);
-    if (!d.ok) throw new Error(d.message || 'catalog');
-    ST.catalog = d;
-    return d;
+    try {
+      const d = await api('/catalog' + q);
+      if (!d || !d.ok) {
+        ST.catalog = ST.catalog || { channels: [], tariffs: [] };
+        throw new Error((d && (d.message || d.error)) || 'دریافت بازار ناموفق بود');
+      }
+      ST.catalog = d;
+      return d;
+    } catch (e) {
+      ST.catalog = ST.catalog || { channels: [], tariffs: [] };
+      throw e;
+    }
   }
 
   async function loadBusinesses({ refreshMetadata = false } = {}) {
@@ -495,9 +523,14 @@
   }
 
   async function loadWallet() {
-    const d = await api('/wallet');
-    if (d.ok) ST.wallet = d.wallet || d;
-    return ST.wallet;
+    try {
+      const d = await api('/wallet');
+      if (d && d.ok) ST.wallet = d.wallet || d;
+      return ST.wallet;
+    } catch (e) {
+      console.error('loadWallet', e);
+      return ST.wallet;
+    }
   }
 
   async function loadCalendarDays(tariffId) {
@@ -1117,7 +1150,7 @@
     const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i,'')) : '';
     return `<section class="manager-detail-hero"><div class="manager-detail-cover"><div class="manager-channel-cover-ornament"></div><span class="manager-detail-icon">${ava}</span><span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span></div><div class="manager-detail-copy"><span class="eyebrow">کانال تحت مدیریت</span><h2>${esc(c.name)}</h2><p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسهٔ کانال ثبت نشده'}</p></div><div class="manager-channel-metrics detail-metrics"><div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div><div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div><div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(c.tariff_count||0)}</strong></div></div></section>
       <div class="manager-content-heading"><div><span class="eyebrow">تنظیمات جایگاه</span><h2>مدیریت کانال</h2></div></div>
-      <div class="manager-detail-action-list"><button class="manager-detail-action" id="btnAddTariffForCh"><span class="manager-detail-action-icon tariff-icon">${icon('plus',19)}</span><span><b>افزودن تعرفه</b><small>ایجاد بستهٔ جدید برای این کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" data-mgr-mode="${c.id}"><span class="manager-detail-action-icon channel-icon">${icon('sliders',19)}</span><span><b>روش انتشار</b><small>${esc(modeLabel(c.publish_mode))}</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnManageAvailability"><span class="manager-detail-action-icon request-icon">${icon('calendar',19)}</span><span><b>تقویم و روزهای آزاد</b><small>مدیریت ظرفیت روزانهٔ انتشار</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnRefreshOne"><span class="manager-detail-action-icon business-icon">${icon('refresh-cw',19)}</span><span><b>به‌روزرسانی آمار</b><small>دریافت دوبارهٔ مشخصات کانال</small></span><span>${icon('chevron-left',17)}</span></button></div><p class="manager-footnote">${icon('shield-check',14)} تغییرات تعرفه و تقویم روی زمان‌های قابل رزرو در بازار اثر می‌گذارند.</p>`;
+      <div class="manager-detail-action-list"><button class="manager-detail-action" id="btnAddTariffForCh"><span class="manager-detail-action-icon tariff-icon">${icon('plus',19)}</span><span><b>افزودن تعرفه</b><small>ایجاد بستهٔ جدید برای این کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" data-mgr-mode="${c.id}"><span class="manager-detail-action-icon channel-icon">${icon('sliders',19)}</span><span><b>روش انتشار</b><small>${esc(modeLabel(c.publish_mode === 'manual' ? 'bot' : c.publish_mode))}</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnManageAvailability"><span class="manager-detail-action-icon request-icon">${icon('calendar',19)}</span><span><b>تقویم و روزهای آزاد</b><small>مدیریت ظرفیت روزانهٔ انتشار</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnRefreshOne"><span class="manager-detail-action-icon business-icon">${icon('refresh-cw',19)}</span><span><b>به‌روزرسانی آمار</b><small>دریافت دوبارهٔ مشخصات کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnToggleArchiveCh"><span class="manager-detail-action-icon">${icon('store',19)}</span><span><b>${c.is_listed===false?'بازگشت به بازار':'آرشیو کانال'}</b><small>${c.is_listed===false?'دوباره در کاتالوگ نمایش داده شود':'از کاتالوگ مخفی می‌شود؛ سفارش‌ها می‌مانند'}</small></span><span>${icon('chevron-left',17)}</span></button></div><p class="manager-footnote">${icon('shield-check',14)} تغییرات تعرفه و تقویم روی زمان‌های قابل رزرو در بازار اثر می‌گذارند.</p>`;
   }
 
   function renderOpHome() {
@@ -1446,14 +1479,20 @@ function renderOpTickets() {
       ST.orderTab = b.dataset.t; render();
     });
     $$('[data-pay]').forEach((b) => b.onclick = () => payOrder(b.dataset.pay));
-    $$('[data-answer-item]').forEach((b) => b.onclick = async () => {
-      const d = await api('/orders/answer', {
-        method: 'POST',
-        body: { item_id: Number(b.dataset.answerItem), accept: b.dataset.accept === '1' },
-      });
-      toast(d.message || (d.ok ? 'ثبت شد' : (d.error || 'خطا')));
-      await loadOrders(); render();
+        $$('[data-answer-item]').forEach((b) => b.onclick = async () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      try {
+        const d = await api('/orders/answer', {
+          method: 'POST',
+          body: { item_id: Number(b.dataset.answerItem), accept: b.dataset.accept === '1' },
+        });
+        toast(d.message || (d.ok ? 'ثبت شد' : (d.error || 'خطا')));
+        if (d.ok) { await loadOrders(); render(); }
+        else b.disabled = false;
+      } catch (e) { toast(e.message || 'خطا'); b.disabled = false; }
     });
+
     $$('[data-cancel]').forEach((b) => b.onclick = async () => {
       const d = await api('/orders/cancel', { method: 'POST', body: { order_id: Number(b.dataset.cancel) } });
       toast(d.message || (d.ok ? 'لغو شد' : (d.error || 'خطا')));
@@ -1853,14 +1892,22 @@ function renderOpTickets() {
       ST.loading = false; render();
     };
     $$('[data-mgr-approve]').forEach((b) => b.onclick = async () => {
-      const d = await api('/orders/approve', { method: 'POST', body: { item_id: Number(b.dataset.mgrApprove) } });
-      toast(d.message || (d.ok ? 'تأیید شد' : (d.error || 'خطا')));
-      await loadMgrOrders(); render();
+      if (b.disabled) return;
+      b.disabled = true;
+      try {
+        const d = await api('/orders/approve', { method: 'POST', body: { item_id: Number(b.dataset.mgrApprove) } });
+        toast(d.message || (d.ok ? 'تأیید شد' : (d.error || 'خطا')));
+        await loadMgrOrders(); render();
+      } catch (e) { toast(e.message || 'خطا'); b.disabled = false; }
     });
     $$('[data-mgr-reject]').forEach((b) => b.onclick = async () => {
-      const d = await api('/orders/reject', { method: 'POST', body: { item_id: Number(b.dataset.mgrReject) } });
-      toast(d.message || (d.ok ? 'رد شد' : (d.error || 'خطا')));
-      await loadMgrOrders(); render();
+      if (b.disabled) return;
+      b.disabled = true;
+      try {
+        const d = await api('/orders/reject', { method: 'POST', body: { item_id: Number(b.dataset.mgrReject) } });
+        toast(d.message || (d.ok ? 'رد شد' : (d.error || 'خطا')));
+        await loadMgrOrders(); render();
+      } catch (e) { toast(e.message || 'خطا'); b.disabled = false; }
     });
     $$('[data-mgr-suggest]').forEach((b) => b.onclick = () => {
       const itemId = Number(b.dataset.mgrSuggest);
@@ -1900,16 +1947,18 @@ function renderOpTickets() {
     });
     $$('[data-mgr-mode]').forEach((b) => b.onclick = () => {
       const chId = Number(b.dataset.mgrMode);
+      const ch = (ST.myChannels || []).find(x => Number(x.id) === chId);
+      const current = (ch && ch.publish_mode === 'linkyar') ? 'linkyar' : 'bot';
       openSheet(`
         <div class="sheet-handle"></div>
         <h3 style="margin:0 0 12px;text-align:center">روش انتشار</h3>
-        <p class="hint" style="text-align:center;margin:0 0 12px">انتشار فقط به‌صورت خودکار انجام می‌شود.</p>
+        <p class="hint" style="text-align:center;margin:0 0 12px">انتشار فقط خودکار است. بازو یا حساب دستیار باید ادمین کانال باشد.</p>
         <div class="seg" id="modeSeg">
-          <button type="button" data-m="bot" class="on">بازو</button>
-          <button type="button" data-m="linkyar">دستیار</button>
+          <button type="button" data-m="bot" class="${current==='bot'?'on':''}">بازو</button>
+          <button type="button" data-m="linkyar" class="${current==='linkyar'?'on':''}">دستیار</button>
         </div>
         <button class="btn btn-primary btn-block" id="btnSaveMode">ذخیره</button>`);
-      let mode = 'bot';
+      let mode = current;
       $$('#modeSeg button').forEach((x) => x.onclick = () => {
         mode = x.dataset.m;
         $$('#modeSeg button').forEach((y) => y.classList.toggle('on', y === x));
@@ -1943,6 +1992,10 @@ function renderOpTickets() {
           duration_hours: Number($('#tDur').value) || 24,
           price: Number($('#tPrice').value) || 0,
         };
+        if (!body.name) { toast('نام تعرفه را بنویسید'); return; }
+        if (!body.channel_id) { toast('کانال را انتخاب کنید'); return; }
+        if (!body.price || body.price < 1000) { toast('قیمت باید حداقل ۱٬۰۰۰ تومان باشد'); return; }
+        if (body.duration_hours < 1 || body.duration_hours > 720) { toast('مدت تعرفه نامعتبر است'); return; }
         const d = await api('/tariffs/add', { method: 'POST', body });
         toast(d.message || (d.ok ? 'تعرفه ثبت شد' : (d.error || 'خطا')));
         if (d.ok) { closeSheet(); await Promise.allSettled([loadMyChannels(), loadMgrTariffs()]); render(); }
@@ -1988,9 +2041,32 @@ function renderOpTickets() {
 
     const refOne = $('#btnRefreshOne');
     if (refOne) refOne.onclick = async () => {
-      const d = await api('/channels/refresh', { method: 'POST', body: { channel_id: ST.selectedMgrChannel, force: true } });
-      toast(d.message || (d.ok ? 'آمار به‌روز شد' : (d.error || 'خطا')));
-      await loadMyChannels(); render();
+      refOne.disabled = true;
+      try {
+        const d = await api('/channels/refresh', { method: 'POST', body: { channel_id: ST.selectedMgrChannel, force: true } });
+        toast(d.message || (d.ok ? 'آمار به‌روز شد' : (d.error || 'خطا')));
+        await loadMyChannels(); render();
+      } catch (e) { toast(e.message || 'به‌روزرسانی نشد'); }
+      finally { refOne.disabled = false; }
+    };
+    const archBtn = $('#btnToggleArchiveCh');
+    if (archBtn) archBtn.onclick = async () => {
+      const ch = (ST.myChannels || []).find(x => Number(x.id) === Number(ST.selectedMgrChannel));
+      const listed = !(ch && ch.is_listed === false);
+      const msg = listed
+        ? 'کانال از بازار مخفی شود؟ سفارش‌های قبلی می‌مانند و تعرفه‌های فعال خاموش می‌شوند.'
+        : 'کانال دوباره در بازار نمایش داده شود؟';
+      if (!confirm(msg)) return;
+      archBtn.disabled = true;
+      try {
+        const d = await api('/channels/archive', {
+          method: 'POST',
+          body: { channel_id: ST.selectedMgrChannel, is_listed: !listed },
+        });
+        toast(d.message || (d.ok ? (d.archived ? 'آرشیو شد' : 'به بازار برگشت') : (d.error || 'خطا')));
+        if (d.ok) { await loadMyChannels(); render(); }
+      } catch (e) { toast(e.message || 'انجام نشد'); }
+      finally { archBtn.disabled = false; }
     };
 
     // —— Operator ——
