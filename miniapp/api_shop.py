@@ -43,7 +43,7 @@ ERR_FA = {
     'bad_fields': 'نام، ساعت، مدت و قیمت را کامل بنویسید.',
     'bad_date': 'این تاریخ درست نیست. یک روز دیگر را انتخاب کنید.',
     'empty_cart': 'هنوز روزی انتخاب نکرده‌اید.',
-    'no_banner': 'اول یک بنر تأییدشده از لینک‌بانک لازم است. بدون بنر آماده نمی‌توانید روز بگیرید یا سفارش ثبت کنید.',
+    'no_banner': 'برای ثبت سفارش باید یک بنر از فهرست بنرهایتان انتخاب کنید.',
     'slot_conflict': 'این روز پر است. روز دیگری را انتخاب کنید.',
     'no_channel': 'برای این تعرفه کانالی وصل نیست. اول کانال را اضافه کنید.',
     'already_pending': 'یک درخواست تسویه باز دارید. بعد از واریز همان، دوباره درخواست بدهید.',
@@ -240,7 +240,7 @@ def api_calendar(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'تعرفه پیدا نشد.'}, status=200)
     elif t is False:
         return JsonResponse({'ok': False, 'error': 'forbidden', 'message': _NOT_YOUR_TARIFF}, status=200)
-    ready_banner = True if not customer else viewer_has_ready_banner(user)
+    ready_banner = True  # بنر فقط موقع افزودن به سبد اجباری است؛ تقویم را قفل نکن
     try:
         span = int(request.GET.get('days') or body.get('days') or 42)
     except (TypeError, ValueError):
@@ -906,11 +906,47 @@ def api_cart_add(request: HttpRequest) -> JsonResponse:
         day = _parse_day(body)
         if not day:
             return JsonResponse({'ok': False, 'error': 'bad_date', 'message': 'تاریخ نامعتبر است.'}, status=200)
+
+        # بنر اجباری برای هر افزودن به سبد
+        try:
+            bid = int(body.get('banner_id') or 0)
+        except (TypeError, ValueError):
+            bid = 0
+        from orders.banner_publish import banner_stage
+        from orders.models import CustomerBanner
+        banner = None
+        if bid:
+            banner = CustomerBanner.objects.filter(id=bid, customer=user, is_active=True).first()
+        if not banner or banner_stage(banner) == 'rejected':
+            return JsonResponse({
+                'ok': False,
+                'error': 'no_banner',
+                'message': ERR_FA.get('no_banner') or 'بنر سفارش را انتخاب کنید.',
+            }, status=200)
+
         r = cart_svc.add_to_cart(user, t, day)
         if not r.get('ok'):
             code = r.get('error') or 'slot_conflict'
             return JsonResponse({'ok': False, 'error': code, 'message': ERR_FA.get(code) or 'این روز قابل رزرو نیست.'}, status=200)
-        return JsonResponse({'ok': True, 'item_id': r['item'].id, 'order_id': r['order'].id})
+
+        order = r['order']
+        order.customer_banner = banner
+        order.banner_caption = (banner.caption or '')[:2000]
+        if banner.linkbank_message_id:
+            order.banner_message_id = str(banner.linkbank_message_id)
+            order.banner_from_chat_id = str(banner.linkbank_chat_id or '')
+        elif banner.storage_message_id:
+            order.banner_message_id = str(banner.storage_message_id)
+            order.banner_from_chat_id = str(banner.storage_chat_id or '')
+        order.save(update_fields=[
+            'customer_banner', 'banner_caption', 'banner_message_id', 'banner_from_chat_id',
+        ])
+        return JsonResponse({
+            'ok': True,
+            'item_id': r['item'].id,
+            'order_id': order.id,
+            'banner_id': banner.id,
+        })
     except Exception as exc:
         logger.exception('api_cart_add')
         return JsonResponse({'ok': False, 'error': 'server', 'message': 'افزودن به سبد نشد: ' + type(exc).__name__}, status=200)
@@ -990,6 +1026,12 @@ def api_checkout(request: HttpRequest) -> JsonResponse:
         order = Order.objects.filter(customer=user, status='draft').order_by('-id').first()
         if not order:
             return JsonResponse({'ok': False, 'error': 'empty_cart', 'message': 'سبد خالی است.'}, status=200)
+        if not order.customer_banner_id and not order.banner_message_id:
+            return JsonResponse({
+                'ok': False,
+                'error': 'no_banner',
+                'message': ERR_FA.get('no_banner') or 'بنر سفارش را انتخاب کنید.',
+            }, status=200)
         r = cart_svc.checkout(order)
         if not r.get('ok'):
             code = r.get('error') or 'empty_cart'

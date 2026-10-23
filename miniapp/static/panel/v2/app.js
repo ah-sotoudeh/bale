@@ -356,9 +356,10 @@
 
   async function loadCalendarDays(tariffId) {
     if (!tariffId) return [];
-    const d = await api('/calendar?tariff_id=' + encodeURIComponent(tariffId) + '&for=customer');
+    const d = await api('/calendar?tariff_id=' + encodeURIComponent(tariffId) + '&for=customer&days=62');
     if (!d.ok) return [];
-    return d.days || [];
+    ST.calDays = d.days || [];
+    return ST.calDays;
   }
 
 
@@ -624,7 +625,7 @@
     const [jy,jm] = ST.calMonth || gregorianToJalali(now.getFullYear(),now.getMonth()+1,now.getDate()); ST.calMonth=[jy,jm];
     const dayMap={}; (ST.calDays||[]).forEach(x=>{dayMap[x.date]=x;});
     const busySet=new Set((ST.catalog?.busy||[]).filter(b=>b.tariff_id===t.id).map(b=>b.date));
-    Object.keys(dayMap).forEach(iso=>{const st=dayMap[iso].status||(dayMap[iso].free?'free':'full');if(st!=='free')busySet.add(iso);});
+    Object.keys(dayMap).forEach(iso=>{const st=dayMap[iso].status||(dayMap[iso].free?'free':'full');if(st!=='free'&&st!=='banner-hold')busySet.add(iso);});
     const firstG=jalaliToGregorian(jy,jm,1); const first=new Date(firstG[0],firstG[1]-1,firstG[2]); const startDow=(first.getDay()+1)%7; const dim=jm<=6?31:jm<=11?30:29;
     let cells=''; for(let i=0;i<startDow;i++) cells+='<div class="cal-day muted"></div>';
     for(let d=1;d<=dim;d++){const g=jalaliToGregorian(jy,jm,d);const iso=`${g[0]}-${String(g[1]).padStart(2,'0')}-${String(g[2]).padStart(2,'0')}`;const past=new Date(g[0],g[1]-1,g[2])<new Date(now.getFullYear(),now.getMonth(),now.getDate());const busy=busySet.has(iso);const sel=ST.selectedDay===iso;let cls='cal-day scenario-cal-day';if(past)cls+=' muted';else if(busy)cls+=' busy';if(sel)cls+=' sel';cells+=`<button type="button" class="${cls}" data-day="${iso}" ${past||busy?'disabled':''}>${fa(d)}${sel?'<i></i>':''}</button>`;}
@@ -651,7 +652,7 @@
           <div class="manager-history-value"><span>سهم این انتشار</span><strong>${faNum(it.price)} <small>تومان</small></strong></div>
           ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',14)} زمان پیشنهادی: ${esc(it.proposed_date)}</div>`:''}
           ${it.published_link ? `<a href="${esc(it.published_link)}" target="_blank" rel="noopener" class="manager-published-link">مشاهدهٔ لینک انتشار ${icon('arrow-up-left',14)}</a>`:''}
-          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}${it.manager_status==='approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',14)} ثبت انتشار انجام‌شده</button>`:''}</div>
+          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}${it.manager_status==='approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published-disabled="${it.id}">${icon('check',14)} ثبت انتشار انجام‌شده</button>`:''}</div>
         </article>`).join('') : `<div class="scenario-empty"><span>${icon('inbox',27)}</span><h3>هنوز سفارشی ثبت نشده</h3><p>به‌محض ثبت سفارش برای کانال‌هایت، سابقه و وضعیت آن اینجا نمایش داده می‌شود.</p><button class="btn btn-soft" id="btnMgrOrdersGoHome">بازگشت به میزکار</button></div>`;
       return `<section class="orders-overview manager-orders-overview"><div><span class="eyebrow">سابقهٔ جایگاه‌ها</span><h2>سفارش‌های کانال</h2><p>از درخواست جدید تا اعلام انتشار، وضعیت هر جایگاه را دنبال کن.</p></div><div class="orders-overview-metrics"><div><strong>${fa(list.length)}</strong><span>همه</span></div><div><strong>${fa(waiting.length)}</strong><span>در انتظار</span></div><div><strong>${fa(publish.length)}</strong><span>آمادهٔ انتشار</span></div></div></section><div class="manager-content-heading"><div><span class="eyebrow">نمایش همهٔ موارد</span><h2>سابقهٔ درخواست‌ها</h2></div><button class="manager-refresh" id="btnRefreshOrders">${icon('refresh-cw',16)}</button></div>${rows}`;
     }
@@ -859,7 +860,7 @@
         ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',15)} زمان پیشنهادی فعلی: ${esc(it.proposed_date)}</div>` : ''}
         <div class="manager-request-actions">
           ${it.manager_status === 'pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',15)} تأیید درخواست</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',15)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',17)}</button>` : ''}
-          ${it.manager_status === 'approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',15)} اعلام انتشار</button>` : ''}
+          ${it.manager_status === 'approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published-disabled="${it.id}">${icon('check',15)} اعلام انتشار</button>` : ''}
         </div>
       </article>`).join('')}</div>`;
   }
@@ -1474,7 +1475,8 @@
         <h3 style="margin:0 0 12px;text-align:center">پیشنهاد روز دیگر</h3>
         <div class="field"><label>تاریخ (YYYY-MM-DD)</label>
           <input id="suggestDate" type="date" /></div>
-        <button class="btn btn-primary btn-block" id="btnDoSuggest">ارسال پیشنهاد</button>`);
+        <p class="hint">می‌توانید روز دیگری انتخاب کنید (نه فقط همان روز).</p>
+        <button class="btn btn-primary btn-block" id="btnDoSuggest">ارسال پیشنهاد زمان</button>`);
       $('#btnDoSuggest').onclick = async () => {
         const day = $('#suggestDate').value;
         if (!day) { toast('تاریخ را وارد کنید'); return; }
@@ -1483,11 +1485,7 @@
         if (d.ok) { closeSheet(); await loadMgrOrders(); render(); }
       };
     });
-    $$('[data-mgr-published]').forEach((b) => b.onclick = async () => {
-      const d = await api('/orders/published', { method: 'POST', body: { item_id: Number(b.dataset.mgrPublished) } });
-      toast(d.message || (d.ok ? 'انتشار ثبت شد' : (d.error || 'خطا')));
-      await loadMgrOrders(); render();
-    });
+    /* انتشار دستی مدیر حذف شد — فقط زمان‌بندی خودکار */
     $$('[data-mgr-ch]').forEach((b) => b.onclick = () => {
       ST.selectedMgrChannel = Number(b.dataset.mgrCh);
       navigate('mgr-channel');
@@ -1819,6 +1817,7 @@
 
   async function addToCart() {
     if (!ST.tariffId || !ST.selectedDay) return;
+    try { await loadBanners(); } catch (e) {}
     const approvedBanners = (ST.banners || []).filter((b) => {
       if (b.is_active === false) return false;
       const s = String(b.stage || b.status || 'ready').toLowerCase();
@@ -1826,41 +1825,77 @@
     });
     openSheet(`
       <div class="sheet-handle"></div>
-      <h3 style="margin:0 0 12px;text-align:center">تأیید سبد</h3>
+      <h3 style="margin:0 0 12px;text-align:center">ثبت در سبد</h3>
       <p class="hint">روز ${esc(ST.selectedDay)} · تعرفه #${fa(ST.tariffId)}</p>
-      <div class="field"><label>بنر تأییدشده</label>
+      <div class="field"><label>بنر این جایگاه <span style="color:var(--danger,#c00)">*</span></label>
         <select id="cartBanner">
-          ${approvedBanners.map((b)=>`<option value="${b.id}">${esc(b.title||('بنر '+b.id))}</option>`).join('') || '<option value="">بنر آماده‌ای ندارید</option>'}
+          ${approvedBanners.map((b)=>`<option value="${b.id}">${esc(b.title||('بنر '+b.id))}</option>`).join('') || '<option value="">بنری ندارید — اول بنر بسازید</option>'}
         </select>
       </div>
-      ${approvedBanners.length ? '<button class="btn btn-primary btn-block" id="btnConfirmCart">ثبت در سبد و ارسال</button>' : '<button class="btn btn-soft btn-block" id="btnGoBanners">ثبت بنر برای تأیید</button>'}
+      ${approvedBanners.length
+        ? '<button class="btn btn-primary btn-block" id="btnConfirmCart">افزودن به سبد و ارسال به مدیر</button><button class="btn btn-soft btn-block" id="btnAddOnly" style="margin-top:8px">فقط افزودن به سبد (ادامه خرید)</button>'
+        : '<button class="btn btn-soft btn-block" id="btnGoBanners">ثبت بنر جدید</button>'}
     `);
     const goBanners = $('#btnGoBanners');
-    if (goBanners) { goBanners.onclick = () => { closeSheet(); navigate('banners'); }; return; }
-    $('#btnConfirmCart').onclick = async () => {
+    if (goBanners) {
+      goBanners.onclick = async () => {
+        closeSheet();
+        await requestNewBanner();
+      };
+      return;
+    }
+    const doAdd = async (andCheckout) => {
       const bannerId = Number($('#cartBanner').value) || 0;
-      const body = { tariff_id: ST.tariffId, date: ST.selectedDay };
-      if (bannerId) body.banner_id = bannerId;
-      let d = await api('/cart/add', { method: 'POST', body });
+      if (!bannerId) { toast('بنر را انتخاب کنید'); return; }
+      const body = { tariff_id: ST.tariffId, date: ST.selectedDay, day: ST.selectedDay, banner_id: bannerId };
+      const d = await api('/cart/add', { method: 'POST', body });
       if (!d.ok) {
-        d = await api('/cart/add', { method: 'POST', body: Object.assign({}, body, { day: ST.selectedDay }) });
+        toast(d.message || d.error || 'خطا در سبد');
+        return;
       }
-      if (d.ok) {
-        if (bannerId) await api('/cart/banner', { method: 'POST', body: { banner_id: bannerId } });
+      if (andCheckout) {
         const chk = await api('/checkout', { method: 'POST', body: {} });
-        toast(chk.ok ? 'درخواست برای مدیر ارسال شد' : (d.message || 'به سبد اضافه شد'));
+        toast(chk.ok ? 'درخواست برای مدیر ارسال شد' : (chk.message || 'به سبد اضافه شد — برای ارسال، پرداخت/تأیید را کامل کنید'));
         closeSheet();
         await loadOrders();
         navigate('orders');
       } else {
-        toast(d.message || d.error || 'خطا در سبد');
+        toast('به سبد اضافه شد — می‌توانید کانال دیگری هم انتخاب کنید');
+        closeSheet();
+        navigate('market');
       }
     };
+    const btn = $('#btnConfirmCart');
+    if (btn) btn.onclick = () => doAdd(true);
+    const only = $('#btnAddOnly');
+    if (only) only.onclick = () => doAdd(false);
   }
 
   async function payOrder(id) {
     const d = await api('/pay/invoice', { method: 'POST', body: { order_id: Number(id) } });
-    toast(d.message || (d.ok ? 'فاکتور ارسال شد' : (d.error || 'خطا')));
+    if (!d.ok) {
+      toast(d.message || d.error || 'صدور فاکتور ناموفق بود');
+      return;
+    }
+    // فاکتور بله — در صورت وجود لینک در مینی‌اپ باز شود
+    const link = d.invoice_link || d.link || (d.invoice && d.invoice.link) || '';
+    try {
+      const w = window.Bale && Bale.WebApp;
+      if (link && w && typeof w.openInvoice === 'function') {
+        w.openInvoice(link, function (status) {
+          toast(status === 'paid' ? 'پرداخت ثبت شد' : (status || 'فاکتور بسته شد'));
+          loadOrders().then(render);
+          loadWallet().then(render);
+        });
+        return;
+      }
+      if (link && w && typeof w.openLink === 'function') {
+        w.openLink(link);
+        toast('صفحه پرداخت باز شد');
+        return;
+      }
+    } catch (e) {}
+    toast(d.message || 'فاکتور در گفتگوی بازو ارسال شد');
   }
 
   function esc(s) {
