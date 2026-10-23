@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>لینک‌بان</title>
-  <link rel="stylesheet" href="/miniapp/assets/v2/app.css?v=20261023-theme1" />
+  <link rel="stylesheet" href="/miniapp/assets/v2/app.css?v=20261023-hdr1" />
   <script>
     window.__MEDIA_BASE = "/miniapp/media";
     window.__LIVE_API = "/miniapp/api";
@@ -21,6 +21,7 @@
           try { if (typeof w.ready === "function") w.ready(); } catch (e) {}
           /* no expand — keep Bale mini-app chrome */
           window.__LB_BALE = w;
+          try { if (typeof w.setHeaderColor === 'function') w.setHeaderColor('#0E4A5C'); } catch (e) {}
           if (w.initDataUnsafe && w.initDataUnsafe.user) window.__LB_USER = w.initDataUnsafe.user;
           if (w.initData || window.__LB_USER) { resolve(w); return; }
         }
@@ -86,6 +87,6 @@
   </div>
   <div class="sheet" id="sheet"><div class="sheet-panel"><div id="sheetBody"></div></div></div>
   <div class="toast" id="toast"></div>
-  <script src="/miniapp/assets/v2/app.js?v=20261023-theme1"></script>
+  <script src="/miniapp/assets/v2/app.js?v=20261023-hdr1"></script>
 </body>
 </html>

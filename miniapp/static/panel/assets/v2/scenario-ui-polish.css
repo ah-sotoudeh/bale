@@ -266,3 +266,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .manager-context-row span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .manager-context-row .i { flex: 0 0 auto; color: var(--teal); }
 @media (max-width: 360px) { .manager-context-row { gap: 5px 9px; padding: 8px 9px; font-size: 11px; } }
+
+
+/* HEADER_SOLID_OVERRIDE */
+.header.brand,
+html[data-theme="dark"] .header.brand,
+html[data-theme="light"] .header.brand {
+  background: #0E4A5C !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+.header.brand::after { display: none !important; content: none !important; }

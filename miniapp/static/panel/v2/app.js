@@ -247,7 +247,7 @@
       try {
         const w = window.Bale && Bale.WebApp;
         if (w && typeof w.setHeaderColor === 'function') {
-          w.setHeaderColor(dark ? '#0B1220' : '#005088');
+          w.setHeaderColor('#0E4A5C');
         }
       } catch (e) {}
     };

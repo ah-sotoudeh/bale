@@ -74,7 +74,7 @@ a { color: var(--teal); }
 }
 .header h1 { flex: 1; margin: 0; font-size: 1.05rem; font-weight: 700; text-align: center; }
 .header.brand {
-  background: var(--navy); color: #fff; border: 0;
+  background: #0E4A5C; color: #fff; border: 0;
 }
 .header.brand h1 { color: #fff; }
 .icon-btn {
@@ -338,13 +338,10 @@ body { letter-spacing: -.12px; }
 }
 .header h1 { font-size: .98rem; letter-spacing: -.3px; }
 .header.brand {
-  background: linear-gradient(115deg, #06345d 0%, #07558b 54%, #087f89 100%);
-  box-shadow: 0 5px 18px rgba(4,57,91,.16);
+  background: #0E4A5C;
+  box-shadow: none;
 }
-.header.brand::after {
-  content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(42,232,212,.85), transparent);
-}
+.header.brand::after { display: none !important; content: none !important; }
 .header.brand .avatar { background: linear-gradient(145deg, #25d6c5, #00a59f); box-shadow: 0 4px 14px rgba(0,220,200,.18); }
 .header:not(.brand) { box-shadow: 0 2px 12px rgba(18,42,68,.025); }
 .icon-btn { transition: transform .18s ease, background .18s ease; }
@@ -841,7 +838,7 @@ input, textarea, select { color: var(--text); }
 [data-theme="dark"] body,
 [data-theme="dark"] #app { background: var(--bg); color: var(--text); }
 [data-theme="dark"] .header.brand {
-  background: linear-gradient(135deg, #0f2740, #0a3d4a);
+  background: #0E4A5C;
   color: #fff;
 }
 [data-theme="dark"] .card,
