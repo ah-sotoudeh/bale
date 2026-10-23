@@ -267,6 +267,23 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
                 items[-1]['channel_rating_avg'] = cr['avg'] if cr['show_in_list'] else None
                 items[-1]['channel_rating_count'] = cr['count']
                 items[-1]['channel_popularity'] = cr['popularity']
+            # هشدار موضوع ممنوعه (مخفی نکن)
+            try:
+                from config.categories import flatten_selected, topic_label
+                cust_topics = flatten_selected(customer_primary, customer_secondary)
+                forb = set()
+                for ch in chans:
+                    forb |= set(getattr(ch, 'forbidden_topics', None) or [])
+                overlap = sorted(cust_topics & forb)
+                if overlap:
+                    items[-1]['forbidden_warn'] = {
+                        'count': len(overlap),
+                        'topics': [{'code': c, 'label': topic_label(c)} for c in overlap],
+                        'message': f'{len(overlap)} موضوع از دسته‌بندی‌های شما در این کانال تبلیغ نمی‌شود',
+                    }
+            except Exception:
+                pass
+
         except Exception:
             pass
 

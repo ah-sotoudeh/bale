@@ -25,6 +25,11 @@ class CustomerBusiness(models.Model):
     )
     info_checked_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0, db_index=True)
+    last_opened_at = models.DateTimeField(null=True, blank=True)
+    display_name = models.CharField(max_length=160, blank=True, default='')  # شخصی‌سازی
+    channel_unreachable = models.BooleanField(default=False)
+    members_count = models.PositiveIntegerField(null=True, blank=True)
     active_banner = models.ForeignKey(
         'CustomerBanner', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='active_for_businesses',

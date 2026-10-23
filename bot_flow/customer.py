@@ -305,9 +305,14 @@ def _apply_banner_to_draft(
 
 def _banner_rules() -> str:
     return (
-        'بنر خود را همین‌جا برای بازو بازارسال کنید '
-        '(عکس یا ویدیو به‌همراه متن زیر آن).'
+        'قوانین بنر (خلاصه):\n'
+        '• متن خالی، تصویر+متن، یا فیلم+متن\n'
+        '• فقط یک تصویر یا یک فیلم (آلبوم ممنوع)\n'
+        '• متن: حداکثر ۱۰۰۰ کاراکتر (بدون رسانه) یا ۶۰۰ کاراکتر (با تصویر/فیلم)\n'
+        '• ارسال مستقیم یا فوروارد مجاز است\n'
+        '• پس از تأیید، بنر به فهرست همان کسب‌وکار اضافه می‌شود'
     )
+
 
 
 def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, from_reference: bool = True) -> None:
@@ -346,8 +351,24 @@ def _confirm_banner(chat_id: str, bale_user_id: str, banner: CustomerBanner, *, 
 
 def handle_banner_message(chat_id: str, bale_user_id: str, message: dict) -> bool:
     sess = get_session(bale_user_id)
-    caption = (message.get('caption') or message.get('text') or '')[:800]
+    if message.get('media_group_id'):
+        bc.send_message(
+            str(chat_id),
+            'آلبوم چندتصویری مجاز نیست. یک بنر با حداکثر یک تصویر یا یک فیلم بفرستید.',
+        )
+        return True
+    caption = (message.get('caption') or message.get('text') or '')
     has_media = _has_banner_media(message)
+    max_chars = 600 if has_media else 1000
+    if len(caption) > max_chars:
+        bc.send_message(
+            str(chat_id),
+            f'متن بنر بیش از حد مجاز است.\n'
+            f'سقف مجاز: {max_chars} کاراکتر · متن شما: {len(caption)} کاراکتر.\n'
+            f'متن را کوتاه‌تر کنید و دوباره بفرستید.',
+        )
+        return True
+    caption = caption[:max_chars]
     is_fwd = bool(
         message.get('forward_date')
         or message.get('forward_from_chat')

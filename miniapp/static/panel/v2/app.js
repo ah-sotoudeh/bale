@@ -544,7 +544,20 @@
   }
 
   function renderBanners() {
-    const allBanners = ST.banners || [];
+    const q = (ST.bannerQuery || '').trim();
+    const kind = ST.bannerKind || 'all';
+    let allBanners = (ST.banners || []).filter((b) => {
+      if (kind === 'text' && b.media_kind && b.media_kind !== 'text') return false;
+      if (kind === 'photo' && !(b.media_kind || '').match(/photo|image|document/)) return false;
+      if (kind === 'video' && !(b.media_kind || '').match(/video|animation/)) return false;
+      if (q && !(String(b.title || b.caption || '')).includes(q)) return false;
+      return true;
+    });
+    // فقط تأییدشده‌ها در مینی‌اپ
+    allBanners = allBanners.filter((b) => {
+      const st = b.stage || b.status || 'ready';
+      return st === 'ready' || st === 'approved' || st === 'ok' || !b.stage;
+    });
     const waitingBanners = 0;
     const activeId = (ST.businesses || []).find((x) => x.active_banner_id)?.active_banner_id
       || ST.activeBannerId;
@@ -2150,6 +2163,11 @@ function renderOpTickets() {
     render();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  if (document.readyState === 'loading') document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    try { loadAll(true); } catch (e) {}
+  }
+});
+document.addEventListener('DOMContentLoaded, boot);
   else boot();
 })();

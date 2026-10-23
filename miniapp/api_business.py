@@ -114,7 +114,13 @@ def _row(b):
         'id': b.id,
         'kind': b.kind,
         'source_ref': b.source_ref,
-        'name': b.name,
+        'name': (b.display_name or b.name),
+        'raw_name': b.name,
+        'display_name': b.display_name or '',
+        'channel_unreachable': bool(getattr(b, 'channel_unreachable', False)),
+        'members_count': b.members_count,
+        'active_banner_id': b.active_banner_id,
+        'sort_order': getattr(b, 'sort_order', 0) or 0,
         'avatar_url': b.avatar_url,
         'categories': b.categories or {'main': [], 'sub': []},
         'info_source': b.info_source,
@@ -133,7 +139,7 @@ def api_businesses(request: HttpRequest) -> JsonResponse:
         return err
     assert user is not None
     if request.method == 'GET':
-        rows = CustomerBusiness.objects.filter(customer=user, is_deleted=False)
+        rows = CustomerBusiness.objects.filter(customer=user, is_deleted=False).order_by('sort_order', '-last_opened_at', '-id')
         return JsonResponse({'ok': True, 'businesses': [_row(b) for b in rows]})
 
     body = _json_body(request)
@@ -227,7 +233,8 @@ def api_business_delete(request: HttpRequest, business_id: int) -> JsonResponse:
         return JsonResponse({'ok': False, 'error': 'not_found', 'message': 'کسب‌وکار پیدا نشد.'}, status=404)
     # Soft-delete: preserve banners and historical orders; a later re-registration is a fresh profile.
     b.is_deleted = True
-    b.save(update_fields=['is_deleted', 'updated_at'])
+    b.active_banner = None
+    b.save(update_fields=['is_deleted', 'active_banner', 'updated_at'])
     return JsonResponse({'ok': True, 'business_id': b.id, 'deleted': True, 'message': 'کسب‌وکار از فهرست شما حذف شد؛ بنرها و سفارش‌های قبلی حفظ می‌شوند.'})
 
 
@@ -297,3 +304,36 @@ def api_business_metadata(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'ok': True, 'business': _row(business),
                              'metadata': {'name': title, 'avatar_url': avatar_url, 'source_ref': normalized}})
     return JsonResponse({'ok': True, 'metadata': {'name': title, 'avatar_url': '', 'source_ref': normalized}})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_business_open(request: HttpRequest, business_id: int) -> JsonResponse:
+    from miniapp.api import _auth_user
+    from django.utils import timezone
+    user, err = _auth_user(request)
+    if err:
+        return err
+    b = CustomerBusiness.objects.filter(id=business_id, customer=user, is_deleted=False).first()
+    if not b:
+        return JsonResponse({'ok': False, 'error': 'not_found'}, status=200)
+    b.last_opened_at = timezone.now()
+    b.save(update_fields=['last_opened_at', 'updated_at'])
+    return JsonResponse({'ok': True, 'business_id': b.id})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def api_business_reorder(request: HttpRequest) -> JsonResponse:
+    from miniapp.api import _auth_user, _json_body
+    user, err = _auth_user(request)
+    if err:
+        return err
+    body = _json_body(request) or {}
+    ids = body.get('ids') or []
+    for i, bid in enumerate(ids):
+        try:
+            CustomerBusiness.objects.filter(id=int(bid), customer=user, is_deleted=False).update(sort_order=i)
+        except (TypeError, ValueError):
+            continue
+    return JsonResponse({'ok': True})

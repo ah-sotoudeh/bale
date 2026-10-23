@@ -1,7 +1,6 @@
-"""فهرست استاندارد دسته‌بندی کانال و موضوع تبلیغ."""
+"""فهرست سلسله‌مراتبی دسته کانال و موضوع کسب‌وکار/ممنوعه."""
 from __future__ import annotations
 
-# دسته‌بندی خود کانال (یک انتخاب)
 CHANNEL_CATEGORIES: list[tuple[str, str]] = [
     ('economic', 'اقتصادی و مالی'),
     ('education_art', 'آموزشی و هنری'),
@@ -18,55 +17,85 @@ CHANNEL_CATEGORIES: list[tuple[str, str]] = [
     ('other', 'سایر'),
 ]
 
-# موضوع تبلیغ مشتری (اصلی + فرعی از همین فهرست جزئی‌تر)
-AD_TOPICS: list[tuple[str, str]] = [
-    ('clothing', 'پوشاک و مد'),
-    ('beauty', 'زیبایی و آرایشی'),
-    ('food', 'خوراکی و رستوران'),
-    ('digital', 'کالای دیجیتال'),
-    ('home', 'خانه و آشپزخانه'),
-    ('education', 'آموزش و دوره'),
-    ('health', 'سلامت و درمان'),
-    ('finance', 'مالی و سرمایه‌گذاری'),
-    ('realestate', 'ملک و املاک'),
-    ('auto', 'خودرو و موتور'),
-    ('travel', 'سفر و گردشگری'),
-    ('entertainment', 'سرگرمی و رسانه'),
-    ('kids', 'کودک و نوزاد'),
-    ('pets', 'حیوانات خانگی'),
-    ('services', 'خدمات شهری و محلی'),
-    ('jobs', 'استخدام و کاریابی'),
-    ('religious', 'مذهبی و فرهنگی'),
-    ('ngo', 'خیریه و اجتماعی'),
-    ('politics', 'سیاسی و خبری'),
-    ('other', 'سایر'),
+# ساختار سلسله‌مراتبی: (کد اصلی, برچسب, [(کد فرعی, برچسب), ...])
+AD_TOPIC_TREE: list[tuple[str, str, list[tuple[str, str]]]] = [
+    ('fashion', 'پوشاک و مد', [
+        ('fashion_clothes', 'لباس'), ('fashion_shoes', 'کفش'), ('fashion_accessories', 'اکسسوری'),
+    ]),
+    ('beauty', 'زیبایی و آرایشی', [
+        ('beauty_cosmetic', 'آرایشی'), ('beauty_skin', 'مراقبت پوست'), ('beauty_hair', 'مو'),
+    ]),
+    ('food', 'خوراکی و رستوران', [
+        ('food_restaurant', 'رستوران'), ('food_cafe', 'کافه'), ('food_product', 'محصول غذایی'),
+    ]),
+    ('digital', 'کالای دیجیتال', [
+        ('digital_phone', 'موبایل'), ('digital_pc', 'کامپیوتر'), ('digital_accessory', 'لوازم جانبی'),
+    ]),
+    ('home', 'خانه و آشپزخانه', [
+        ('home_furniture', 'مبلمان'), ('home_appliance', 'لوازم خانگی'), ('home_decor', 'دکوراسیون'),
+    ]),
+    ('education', 'آموزش و دوره', [
+        ('edu_course', 'دوره آنلاین'), ('edu_school', 'آموزشگاه'), ('edu_book', 'کتاب'),
+    ]),
+    ('health', 'سلامت و درمان', [
+        ('health_clinic', 'خدمات درمانی'), ('health_herb', 'داروهای گیاهی'), ('health_equip', 'تجهیزات پزشکی'),
+    ]),
+    ('finance', 'مالی و سرمایه‌گذاری', [
+        ('finance_invest', 'سرمایه‌گذاری'), ('finance_insurance', 'بیمه'), ('finance_loan', 'وام و اعتبار'),
+    ]),
+    ('realestate', 'ملک و املاک', [
+        ('re_sale', 'خرید و فروش'), ('re_rent', 'اجاره'), ('re_agency', 'مشاوره املاک'),
+    ]),
+    ('auto', 'خودرو و موتور', [
+        ('auto_car', 'خودرو'), ('auto_motor', 'موتور'), ('auto_parts', 'قطعات'),
+    ]),
+    ('travel', 'سفر و گردشگری', [
+        ('travel_tour', 'تور'), ('travel_hotel', 'اقامت'), ('travel_ticket', 'بلیط'),
+    ]),
+    ('entertainment', 'سرگرمی و رسانه', [
+        ('ent_media', 'رسانه'), ('ent_game', 'بازی'), ('ent_event', 'رویداد'),
+    ]),
+    ('kids', 'کودک و نوزاد', [
+        ('kids_product', 'محصول کودک'), ('kids_edu', 'آموزش کودک'),
+    ]),
+    ('services', 'خدمات شهری و محلی', [
+        ('svc_repair', 'تعمیرات'), ('svc_cleaning', 'نظافت'), ('svc_other', 'سایر خدمات'),
+    ]),
+    ('jobs', 'استخدام و کاریابی', [
+        ('jobs_hire', 'استخدام'), ('jobs_freelance', 'فریلنس'),
+    ]),
+    ('religious', 'مذهبی و فرهنگی', [
+        ('rel_content', 'محتوای مذهبی'), ('rel_event', 'مراسم'),
+    ]),
+    ('other', 'سایر', [
+        ('other_misc', 'متفرقه'),
+    ]),
 ]
 
+# سازگاری عقب‌رو: فهرست تخت
+AD_TOPICS: list[tuple[str, str]] = []
+for code, label, subs in AD_TOPIC_TREE:
+    AD_TOPICS.append((code, label))
+    for sc, sl in subs:
+        AD_TOPICS.append((sc, sl))
 
-def channel_category_labels() -> dict[str, str]:
-    return dict(CHANNEL_CATEGORIES)
-
-
-def ad_topic_labels() -> dict[str, str]:
-    return dict(AD_TOPICS)
-
-
-def valid_channel_category(code: str) -> bool:
-    return code in channel_category_labels()
+FORBIDDEN_TOPIC_CODES = {c for c, _ in AD_TOPICS}
 
 
-def valid_ad_topic(code: str) -> bool:
-    return code in ad_topic_labels()
+def topic_label(code: str) -> str:
+    for c, l in AD_TOPICS:
+        if c == code:
+            return l
+    return code
 
 
-def topics_blocked(channel_forbidden: list | None, primary: str, secondary: list | None) -> bool:
-    """اگر موضوع اصلی یا فرعی تبلیغ در ممنوعه کانال باشد True."""
-    banned = set(channel_forbidden or [])
-    if not banned:
-        return False
-    if primary and primary in banned:
-        return True
-    for t in secondary or []:
-        if t in banned:
-            return True
-    return False
+def flatten_selected(primary: list[str] | str, secondary: list[str] | None = None) -> set[str]:
+    """فقط کدهای انتخاب‌شدهٔ مشتری (بدون بسط خودکار زیر‌دسته)."""
+    out: set[str] = set()
+    if isinstance(primary, str) and primary:
+        out.add(primary)
+    elif isinstance(primary, (list, tuple)):
+        out.update(str(x) for x in primary if x)
+    if secondary:
+        out.update(str(x) for x in secondary if x)
+    return out
