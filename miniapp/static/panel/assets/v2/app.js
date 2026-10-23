@@ -68,7 +68,9 @@
     opBanners: [],
     opPayouts: [],
     opAssignments: [],
-    opTab: 'banners', // banners | payouts | assign
+    opTab: 'banners', // banners|payouts|assign|settings
+    opSettings: null,
+    // banners | payouts | assign
     demoTickets: [],
   };
 
@@ -246,6 +248,13 @@
     return ST.mgrTariffs;
   }
 
+  async function loadOpSettings() {
+    try {
+      const d = await api('/operator/settings');
+      if (d.ok) ST.opSettings = d.settings || {};
+    } catch (e) { ST.opSettings = null; }
+  }
+
   async function loadOpBanners() {
     const d = await api('/operator/banners');
     if (!d.ok) { ST.opBanners = []; return; }
@@ -308,7 +317,25 @@
     if (!d.ok) { ST.banners = []; return; }
     ST.banners = d.banners || d.items || [];
     if (d.fee_policy) ST.bannerFeePolicy = d.fee_policy;
+    // سناریو: فعلاً رایگان
+    ST.bannerFeePolicy = Object.assign({}, ST.bannerFeePolicy || {}, { next_banner_fee_toman: 0, first_free_available: true });
     return ST.banners;
+  }
+
+
+  async function requestNewBanner() {
+    try {
+      const d = await api('/banners/request-new', { method: 'POST', body: {} });
+      if (!d.ok) throw new Error(d.message || d.error || 'request-new');
+      toast(d.message || 'پیام بازو ارسال شد؛ بنر را در گفتگو بفرستید.');
+      try {
+        if (window.Bale && Bale.WebApp && typeof Bale.WebApp.close === 'function') {
+          setTimeout(function () { try { Bale.WebApp.close(); } catch (e) {} }, 400);
+        }
+      } catch (e) {}
+    } catch (e) {
+      toast(e.message || 'ارسال درخواست بنر ناموفق بود');
+    }
   }
 
   async function loadOrders() {
@@ -345,16 +372,14 @@
   function filteredTariffs() {
     let list = ST.catalog?.tariffs || [];
     const ch = channelMap();
-    if (ST.filter === 'ready') list = list.filter((t) => {
-      if (t.channel_id) return ch[t.channel_id]?.ready_publish;
-      return true;
-    });
-    if (ST.filter === 'auto') list = list.filter((t) => {
-      const c = ch[t.channel_id];
-      return c && (c.publish_mode === 'bot' || c.publish_mode === 'linkyar');
-    });
-    if (ST.filter === 'manual') list = list.filter((t) => ch[t.channel_id]?.publish_mode === 'manual');
     if (ST.filter === 'pkg') list = list.filter((t) => t.is_package);
+    if (ST.filter === 'cheap') {
+      list = list.slice().sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+    } else if (ST.filter === 'views') {
+      list = list.slice().sort((a, b) => (Number(b.avg_views || ch[b.channel_id]?.avg_views) || 0) - (Number(a.avg_views || ch[a.channel_id]?.avg_views) || 0));
+    } else if (ST.filter === 'members') {
+      list = list.slice().sort((a, b) => (Number(b.members_count || ch[b.channel_id]?.members_count) || 0) - (Number(a.members_count || ch[a.channel_id]?.members_count) || 0));
+    }
     return list;
   }
 
@@ -394,7 +419,7 @@
     const active = orders.filter(o => !['completed','cancelled','rejected'].includes(o.status));
     const waiting = orders.filter(o => ['waiting_managers','waiting_customer_confirm','waiting_payment'].includes(o.status));
     const published = orders.filter(o => ['published','completed','paid'].includes(o.status));
-    const approvedBanners = (ST.banners || []).filter(b => ['approved','ok','active'].includes(String(b.stage||b.status||'').toLowerCase()) || b.approved === true).length;
+    const approvedBanners = (ST.banners || []).filter(b => (b.stage || b.status || 'ready') !== 'rejected' && b.is_active !== false).length;
     const suggestions = groupByChannel(filteredTariffs()).slice(0, 2);
     const miniCards = suggestions.map(g => {
       const minPrice = Math.min(...g.tariffs.map(t => Number(t.price)||0));
@@ -426,7 +451,7 @@
       </section>
       <section class="home-banner-callout">
         <div class="home-banner-visual"><div class="home-banner-poster">${icon('image',28)}<span>AD</span></div><i></i><i></i></div>
-        <div class="home-banner-copy"><span class="home-banner-label">کتابخانهٔ خلاقیت</span><strong>بنرت آمادهٔ انتشار است؟</strong><p>${approvedBanners ? `${fa(approvedBanners)} بنر تأییدشده برای سفارش داری.` : 'بنرت را ثبت کن تا پس از ثبت، در سفارش‌ها از آن استفاده کنی.'}</p><button id="btnHomeManageBanners">مدیریت بنرها ${icon('chevron-left',14)}</button></div>
+        <div class="home-banner-copy"><span class="home-banner-label">کتابخانهٔ خلاقیت</span><strong>بنرت آمادهٔ انتشار است؟</strong><p>${approvedBanners ? `${fa(approvedBanners)} بنر آماده برای سفارش داری.` : 'بنرت را ثبت کن تا پس از ثبت، در سفارش‌ها از آن استفاده کنی.'}</p><button id="btnHomeManageBanners">مدیریت بنرها ${icon('chevron-left',14)}</button></div>
       </section>
       <div class="home-section-head"><div><span class="eyebrow">پیشنهادهای بازار</span><h2>کانال‌های منتخب</h2></div><button class="text-action" id="btnHomeMarketAll">مشاهدهٔ بازار ${icon('chevron-left',15)}</button></div>
       <div class="home-channel-list">${miniCards || `<div class="home-soft-empty"><span>${icon('search',21)}</span><div><strong>هنوز پیشنهادی نداریم</strong><small>بازار را باز کن تا جایگاه‌های موجود را ببینی.</small></div><button id="btnHomeMarketEmpty">${icon('chevron-left',15)}</button></div>`}</div>
@@ -435,7 +460,7 @@
 
   function renderMarket() {
     const list = groupByChannel(filteredTariffs());
-    const readyCount = list.filter((g) => g.ready).length;
+    const tariffCount = (ST.catalog?.tariffs || []).length;
     const cards = list.length
       ? list.map((g, index) => {
           const minPrice = Math.min(...g.tariffs.map((t) => Number(t.price) || 0));
@@ -443,7 +468,6 @@
           const av = g.avatar
             ? `<img src="${esc(g.avatar)}" alt="" onerror="this.parentNode.textContent='${esc(letter)}'"/>`
             : `<span>${esc(letter)}</span>`;
-          const mode = g.mode ? modeLabel(g.mode) : (g.ready ? 'آمادهٔ انتشار' : 'انتشار دستی');
           return `<article class="market-card" data-open-ch="${g.key}" style="--card-order:${Math.min(index,10)}">
             <div class="market-card-main">
               <div class="ch-ava market-avatar">${av}</div>
@@ -451,14 +475,14 @@
                 <div class="market-title-row"><h3 class="ch-title">${esc(g.name)}</h3>${g.isPkg ? '<span class="badge package-badge">بسته</span>' : ''}</div>
                 <div class="ch-sub market-handle">${g.link ? icon('at',13) + '<span>' + esc(String(g.link).replace(/^@/, '')) + '</span>' : '<span>مشخصات کانال</span>'}</div>
                 <div class="market-badges">
-                  <span class="badge ${g.ready ? 'ok' : 'muted'}">${icon(g.ready ? 'check' : 'hand',12)}${g.ready ? 'آماده انتشار' : 'دستی'}</span>
                   <span class="badge muted">${icon('users',12)}${faK(g.members)} عضو</span>
                   ${g.views ? `<span class="badge muted">${icon('chart',12)}${faK(g.views)} بازدید</span>` : ''}
+                  <span class="badge muted">${fa(g.tariffs.length)} تعرفه</span>
                 </div>
               </div>
             </div>
             <div class="market-card-footer">
-              <div class="market-card-note"><span class="market-status-dot ${g.ready ? 'is-ready' : ''}"></span><span>${esc(mode)}</span></div>
+              <div class="market-card-note"><span class="market-status-dot is-ready"></span><span>انتشار خودکار پس از پرداخت</span></div>
               <div class="market-price"><span class="market-price-label">شروع از</span><strong>${faNum(minPrice)} <small>تومان</small></strong></div>
               <span class="market-open" aria-hidden="true">${icon('chevron-left',17)}</span>
             </div>
@@ -476,7 +500,7 @@
           <div class="market-hero-stats">
             <div><strong>${fa(list.length)}</strong><span>کانال و بسته</span></div>
             <i></i>
-            <div><strong>${fa(readyCount)}</strong><span>آمادهٔ انتشار</span></div>
+            <div><strong>${fa(tariffCount)}</strong><span>تعرفه فعال</span></div>
           </div>
         </div>
         <div class="market-hero-art" aria-hidden="true"><div class="hero-art-disc">${icon('megaphone',36)}</div><span class="art-spark spark-a">✦</span><span class="art-spark spark-b">✧</span><span class="art-pill">تبلیغ هوشمند</span></div>
@@ -484,7 +508,7 @@
       <div class="market-section-heading"><div><span class="eyebrow">انتخاب با شماست</span><h2>کشف کانال‌ها</h2></div><span class="market-total">${fa(list.length)} مورد</span></div>
       <div class="search market-search">${icon('search')}<input id="qInput" placeholder="نام کانال یا موضوع را جستجو کن…" value="${esc(ST.q)}"/></div>
       <div class="filters market-filters" id="homeFilters">
-        ${[['all','همه'],['ready','آماده انتشار'],['auto','خودکار'],['manual','دستی'],['pkg','بسته']].map(([k,l]) =>
+        ${[['all','همه'],['members','پربازدید عضو'],['views','بازدید'],['cheap','اقتصادی'],['pkg','بسته']].map(([k,l]) =>
           `<button class="chip ${ST.filter===k?'on':''}" data-f="${k}">${l}</button>`).join('')}
       </div>
       <div class="market-list-heading"><strong>کانال‌های پیشنهادی</strong><span>${icon('arrow-down-up',14)} شروع قیمت‌ها</span></div>
@@ -513,11 +537,11 @@
 
   function renderBanners() {
     const allBanners = ST.banners || [];
-    const waitingBanners = allBanners.filter((b) => ['pending', 'review', 'in_review'].includes(b.stage || b.status || (b.approved ? 'approved' : 'pending'))).length;
+    const waitingBanners = 0;
     const rows = allBanners.map((b) => {
-      const st = b.stage || b.status || (b.approved ? 'approved' : 'pending');
-      const badge = st === 'approved' || st === 'ok'
-        ? '<span class="badge ok">تأییدشده</span>'
+      const st = b.stage || b.status || 'ready';
+      const badge = (st === 'approved' || st === 'ok' || st === 'ready')
+        ? '<span class="badge ok">آماده سفارش</span>'
         : st === 'rejected'
         ? '<span class="badge danger">رد شده</span>'
         : '<span class="badge warn">در انتظار</span>';
@@ -878,12 +902,32 @@
     return `<section class="operator-hero"><div class="operator-hero-art"><div class="operator-orbit"></div><span>${icon('headset',31)}</span></div><div class="operator-hero-copy"><span class="manager-eyebrow">میز پشتیبانی</span><h2>مرکز عملیات لینک‌بان</h2><p>صف‌های بررسی را اولویت‌بندی کن و وضعیت هر درخواست را روشن نگه دار.</p><span class="operator-security">${icon('shield-check',14)} دسترسی پشتیبان</span></div></section>
       <div class="operator-queue-grid"><button data-op-shortcut="banners" class="operator-queue-card ${ST.opTab==='banners'?'on':''}"><span class="operator-queue-icon banner-queue">${icon('image',19)}</span><small>بررسی بنر</small><strong>${fa(banners.length)}</strong><span>مورد در صف</span></button><button data-op-shortcut="payouts" class="operator-queue-card ${ST.opTab==='payouts'?'on':''}"><span class="operator-queue-icon payout-queue">${icon('wallet',19)}</span><small>تسویه‌ها</small><strong>${fa(payouts.length)}</strong><span>درخواست پرداخت</span></button><button data-op-shortcut="assign" class="operator-queue-card ${ST.opTab==='assign'?'on':''}"><span class="operator-queue-icon manager-queue">${icon('building-2',19)}</span><small>اتصال مدیران</small><strong>${fa(assigns.length)}</strong><span>تخصیص ثبت‌شده</span></button></div>
       <div class="operator-content-heading"><div><span class="eyebrow">صف کاری</span><h2>${ST.opTab==='banners'?'بررسی و تأیید بنرها':ST.opTab==='payouts'?'درخواست‌های برداشت':'مدیریت اتصال کانال‌ها'}</h2></div><button class="manager-refresh" id="btnOpRefresh" aria-label="به‌روزرسانی">${icon('refresh-cw',16)}</button></div>
-      <div class="seg operator-tabs" id="opTabs"><button class="${ST.opTab==='banners'?'on':''}" data-t="banners">بنرها ${banners.length?`<em>${fa(banners.length)}</em>`:''}</button><button class="${ST.opTab==='payouts'?'on':''}" data-t="payouts">تسویه‌ها ${payouts.length?`<em>${fa(payouts.length)}</em>`:''}</button><button class="${ST.opTab==='assign'?'on':''}" data-t="assign">مدیران</button></div>
-      <div class="operator-panel">${ST.opTab === 'banners' ? renderOpBanners(banners) : ST.opTab === 'payouts' ? renderOpPayouts(payouts) : renderOpAssignments(assigns)}</div>`;
+      <div class="seg operator-tabs" id="opTabs"><button class="${ST.opTab==='banners'?'on':''}" data-t="banners">بنرها ${banners.length?`<em>${fa(banners.length)}</em>`:''}</button><button class="${ST.opTab==='payouts'?'on':''}" data-t="payouts">تسویه‌ها ${payouts.length?`<em>${fa(payouts.length)}</em>`:''}</button><button class="${ST.opTab==='assign'?'on':''}" data-t="assign">مدیران</button><button class="${ST.opTab==='settings'?'on':''}" data-t="settings">تنظیمات</button></div>
+      <div class="operator-panel">${ST.opTab === 'banners' ? renderOpBanners(banners) : ST.opTab === 'payouts' ? renderOpPayouts(payouts) : ST.opTab === 'settings' ? renderOpSettings() : renderOpAssignments(assigns)}</div>`;
+  }
+
+  function renderOpSettings() {
+    const s = ST.opSettings || {};
+    const row = (key, label, hint) => `
+      <div class="field"><label>${label}</label>
+        <input type="number" data-setting="${key}" value="${esc(s[key] ?? '')}" inputmode="numeric"/>
+        <small class="field-help">${hint}</small></div>`;
+    return `<div class="operator-settings">
+      <section class="form-sheet-hero"><div><span class="eyebrow">پیکربندی سامانه</span><h3>اعداد قابل تنظیم</h3>
+        <p>مهلت پرداخت، کارمزد و هزینهٔ بنر. فعلاً کارمزد و بنر صفر است.</p></div></section>
+      ${row('payment_hold_hours', 'مهلت پرداخت (ساعت)', 'بعد از قبول مدیر تا پرداخت')}
+      ${row('banner_fee_toman', 'هزینه بنر بعدی (تومان)', '۰ = رایگان')}
+      ${row('service_fee_toman', 'کارمزد سفارش (تومان)', '۰ = رایگان')}
+      ${row('publish_retry_minutes', 'حداکثر تلاش انتشار (دقیقه)', 'پیش‌فرض ۳۰')}
+      ${row('publish_retry_interval_sec', 'فاصله تلاش انتشار (ثانیه)', 'پیش‌فرض ۶۰')}
+      ${row('min_topup_toman', 'حداقل شارژ (تومان)', '')}
+      ${row('max_topup_toman', 'سقف شارژ (تومان)', '')}
+      <button class="btn btn-primary btn-block" id="btnSaveOpSettings">ذخیره تنظیمات</button>
+    </div>`;
   }
 
   function renderOpBanners(rows) {
-    if (!rows.length) return `<div class="operator-empty"><span class="operator-empty-icon">${icon('image',27)}</span><h3>صف بررسی بنر خالی است</h3><p>درخواست‌های جدید پس از ثبت مشتری در این قسمت نمایش داده می‌شوند.</p><button class="btn btn-soft" id="btnOpRefreshEmpty">${icon('refresh-cw',15)} تازه‌سازی صف</button></div>`;
+    if (!rows.length) return `<div class="operator-empty"><span class="operator-empty-icon">${icon('image',27)}</span><h3>صف بنر خالی است</h3><p>بنرها بدون تأیید پشتیبان ثبت می‌شوند؛ این صف برای موارد خاص/اختلاف است.</p><button class="btn btn-soft" id="btnOpRefreshEmpty">${icon('refresh-cw',15)} تازه‌سازی صف</button></div>`;
     return `<div class="operator-banner-list">${rows.map((r,index)=>`<article class="operator-banner-card" style="--card-order:${Math.min(index,8)}"><div class="operator-banner-top"><span class="operator-request-id">درخواست #${fa(r.id)}</span><span class="badge warn">در انتظار بررسی</span></div><div class="operator-banner-content"><div class="operator-banner-preview">${r.media_url?`<img src="${esc(r.media_url)}" alt=""/>`:icon('image',25)}</div><div class="operator-banner-info"><h3>${esc(r.title || 'بنر تبلیغاتی')}</h3><p>${esc(r.customer || 'مشتری لینک‌بان')}</p><small>${esc(r.business_name || 'کسب‌وکار مشخص نشده')}</small></div></div><p class="operator-banner-caption">${esc(r.caption || 'برای این بنر توضیحی ثبت نشده است.')}</p>${r.fee_toman?`<div class="operator-fee-row"><span>هزینه پس از تأیید</span><strong>${faNum(r.fee_toman)} تومان</strong></div>`:''}<div class="operator-banner-actions"><button class="btn btn-primary" data-op-approve="${r.id}">${icon('check',15)} تأیید و انتشار</button><button class="btn btn-ghost operator-reject" data-op-reject="${r.id}">${icon('close',15)} رد درخواست</button></div></article>`).join('')}</div><button class="btn btn-ghost btn-block manager-list-refresh" id="btnOpRefreshEmpty">${icon('refresh-cw',15)} تازه‌سازی صف</button>`;
   }
 
@@ -1158,11 +1202,31 @@
     });
     const openNewBanner = async () => {
       try { await Promise.allSettled([loadBusinesses(), loadBanners()]); } catch(e) {}
-      navigate('banners');
-      if (getBannerDraft() && !confirm('یک پیش‌نویس ثبت بنر وجود دارد. همان را ادامه می‌دهی؟')) return;
-      openSheet(renderBannerForm()); bindBannerForm();
+      if (!(ST.businesses || []).length) {
+        ST.forceBusinessSetup = true;
+        navigate('businesses');
+        toast('اول یک کسب‌وکار بساز، بعد بنر را ثبت کن.');
+        return;
+      }
+      // مسیر اصلی: بازو بنر را می‌گیرد و ثبت فوری می‌کند
+      await requestNewBanner();
     };
     const homeBannerCreate = $('#btnHomeBanner'); if (homeBannerCreate) homeBannerCreate.onclick = openNewBanner;
+
+    const saveOp = $('#btnSaveOpSettings');
+    if (saveOp) saveOp.onclick = async () => {
+      const patch = {};
+      document.querySelectorAll('[data-setting]').forEach((el) => {
+        patch[el.getAttribute('data-setting')] = el.value;
+      });
+      try {
+        const d = await api('/operator/settings', { method: 'POST', body: { settings: patch } });
+        if (!d.ok) throw new Error(d.message || 'settings');
+        ST.opSettings = d.settings || patch;
+        toast('تنظیمات ذخیره شد');
+      } catch (e) { toast(e.message || 'ذخیره تنظیمات ناموفق'); }
+    };
+
     const homeBannerList = $('#btnHomeManageBanners'); if (homeBannerList) homeBannerList.onclick = async () => { try { await loadBanners(); } catch(e) {} navigate('banners'); };
     ['#btnHomeOrders','#btnHomeWaiting','#btnHomeActive','#btnHomeDone'].forEach(sel => {
       const b = $(sel); if (b) b.onclick = async () => {
@@ -1756,8 +1820,9 @@
   async function addToCart() {
     if (!ST.tariffId || !ST.selectedDay) return;
     const approvedBanners = (ST.banners || []).filter((b) => {
-      const s = String(b.stage || b.status || '').toLowerCase();
-      return s === 'approved' || s === 'ok' || s === 'active' || b.approved === true;
+      if (b.is_active === false) return false;
+      const s = String(b.stage || b.status || 'ready').toLowerCase();
+      return s !== 'rejected';
     });
     openSheet(`
       <div class="sheet-handle"></div>
@@ -1765,7 +1830,7 @@
       <p class="hint">روز ${esc(ST.selectedDay)} · تعرفه #${fa(ST.tariffId)}</p>
       <div class="field"><label>بنر تأییدشده</label>
         <select id="cartBanner">
-          ${approvedBanners.map((b)=>`<option value="${b.id}">${esc(b.title||('بنر '+b.id))}</option>`).join('') || '<option value="">بنر تأییدشده‌ای ندارید</option>'}
+          ${approvedBanners.map((b)=>`<option value="${b.id}">${esc(b.title||('بنر '+b.id))}</option>`).join('') || '<option value="">بنر آماده‌ای ندارید</option>'}
         </select>
       </div>
       ${approvedBanners.length ? '<button class="btn btn-primary btn-block" id="btnConfirmCart">ثبت در سبد و ارسال</button>' : '<button class="btn btn-soft btn-block" id="btnGoBanners">ثبت بنر برای تأیید</button>'}
@@ -1856,7 +1921,7 @@
     try {
       await loadMe();
       if (ST.role === 'manager') { ST.page = 'mgr-home'; await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs(), loadWallet()]); }
-      else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments()]); }
+      else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments(), loadOpSettings()]); }
       else ST.page = launchView === 'businesses' ? 'businesses' : 'home';
       await Promise.allSettled([loadCatalog(), loadBanners(), loadBusinesses({ refreshMetadata: launchView === 'businesses' }), loadOrders(), loadWallet()]);
       // ویزارد ورود: آگهی‌دهنده حداقل یک کسب‌وکار لازم دارد

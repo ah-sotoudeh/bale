@@ -27,6 +27,17 @@ from wallet.services import (
 logger = logging.getLogger(__name__)
 
 
+
+def _publish_retry_window():
+    """(max_minutes, interval_sec) از تنظیمات سامانه."""
+    try:
+        from config.system_settings import get_settings
+        s = get_settings()
+        return int(s.get('publish_retry_minutes') or 30), int(s.get('publish_retry_interval_sec') or 60)
+    except Exception:
+        return 30, 60
+
+
 def _bot_numeric_id() -> Optional[int]:
     me = bc.get_me()
     result = me.get('result') or me
@@ -736,18 +747,14 @@ def publish_due_items() -> Dict[str, int]:
 
         for ch in channels:
             mode = ch.publish_mode or Channel.PUBLISH_BOT
+            # محصول: انتشار فقط خودکار — حالت دستی را به bot/linkyar نگاشت کن
             if mode == Channel.PUBLISH_MANUAL:
-                any_manual = True
-                if item.manager and item.manager.bale_user_id:
-                    kb = bc.inline_keyboard([[{
-                        'text': '✅ منتشر شد', 'callback_data': f'published:{item.id}:{ch.id}'
-                    }]])
-                    bc.send_message(
-                        item.manager.bale_user_id,
-                        f'⏰ زمان انتشار #{item.id} — «{ch.name}»',
-                        reply_markup=kb,
-                    )
-                continue
+                if getattr(ch, 'bot_is_admin', False):
+                    mode = Channel.PUBLISH_BOT
+                elif getattr(ch, 'linkyar_is_admin', False):
+                    mode = Channel.PUBLISH_LINKYAR
+                else:
+                    mode = Channel.PUBLISH_BOT
 
             if mode == Channel.PUBLISH_BOT:
                 state = check_bot_admin(ch)
@@ -841,6 +848,15 @@ def publish_due_items() -> Dict[str, int]:
         elif not any_manual:
             item.execution_status = 'failed_publish'
             item.save(update_fields=['execution_status'])
+            try:
+                if item.manager and item.manager.bale_user_id:
+                    bc.send_message(
+                        item.manager.bale_user_id,
+                        f'⚠️ اجرای تبلیغ #{item.id} در «{item.channel.name if item.channel_id else "کانال"}» ناموفق بود '
+                        f'(خطا در ارسال). وضعیت: اجرا نشده.',
+                    )
+            except Exception:
+                logger.exception('notify manager failed_publish item=%s', item.id)
             _refund_failed_item(item)
             from orders.execution import settle_paid_order
 

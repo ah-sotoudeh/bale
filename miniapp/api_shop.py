@@ -611,8 +611,10 @@ def api_banners(request: HttpRequest) -> JsonResponse:
             'id': b.id,
             'title': b.display_title(),
             'caption': b.caption or '',
+            'business_id': getattr(b, 'business_id', None),
             'from_linkbank': stage == 'ready',
             'stage': stage,
+            'is_active': bool(b.is_active),
             'reject_reason': (
                 'متن یا محتوای بنر تأیید نشد. متن را اصلاح کنید و دوباره بفرستید.'
                 if stage == 'rejected'
@@ -622,7 +624,20 @@ def api_banners(request: HttpRequest) -> JsonResponse:
             'media_url': media_url,
             'poster_url': '' if b.media_kind in ('video', 'animation') else media_url,
         })
-    return JsonResponse({'ok': True, 'banners': rows})
+    try:
+        from config.system_settings import get_settings
+        _cfg = get_settings()
+        _fee = int(_cfg.get('banner_fee_toman') or 0)
+    except Exception:
+        _fee = 0
+    return JsonResponse({
+        'ok': True,
+        'banners': rows,
+        'fee_policy': {
+            'first_free_available': True,
+            'next_banner_fee_toman': _fee,
+        },
+    })
 
 
 @csrf_exempt
