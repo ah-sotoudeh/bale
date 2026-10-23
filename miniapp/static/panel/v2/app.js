@@ -2196,11 +2196,15 @@ function renderOpTickets() {
 
 
   /* ——— Onboarding (اولین ورود) ——— */
+  const OB_CATS = [
+    'خبری', 'سرگرمی', 'بانوان', 'آموزش', 'فروشگاهی', 'سلامت و زیبایی',
+    'املاک', 'خودرو', 'فناوری', 'غذا و رستوران', 'پوشاک', 'مسافرت', 'کسب‌وکار', 'سایر'
+  ];
   const OB = {
     open: false,
     step: 'role',
     role: '',
-    biz: { name: '', kind: 'bale', source_ref: '', categories: [] },
+    biz: { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] },
     ch: { link: '', error: '', loading: false, id: 0, name: '' },
     pmode: 'manual',
     tariff: { name: '۲۴ ساعته', duration_hours: 24, price: '' },
@@ -2208,38 +2212,50 @@ function renderOpTickets() {
     loading: false,
   };
 
-  function obDoneLocal() {
+  function obUid() {
     try {
-      if (localStorage.getItem('lb_role_chosen') !== '1') return false;
-      const role = localStorage.getItem('lb_role') || '';
-      if (role === 'manager') return localStorage.getItem('lb_manager_onboarded') === '1';
-      if (role === 'advertiser' || role === 'customer') {
-        return localStorage.getItem('lb_customer_onboarded') === '1';
+      const id = (ST.me && (ST.me.bale_user_id || ST.me.id)) || debugId() || '';
+      return String(id || '').trim();
+    } catch (e) { return ''; }
+  }
+  function obKey(k) {
+    const u = obUid();
+    return u ? ('lb.' + u + '.' + k) : ('lb.' + k);
+  }
+  function obMarkDone(role) {
+    try {
+      localStorage.setItem(obKey('onboard_done'), '1');
+      localStorage.setItem(obKey('role_chosen'), '1');
+      if (role === 'manager') localStorage.setItem(obKey('manager_onboarded'), '1');
+      if (role === 'advertiser' || role === 'customer') localStorage.setItem(obKey('customer_onboarded'), '1');
+      if (role) {
+        const r = role === 'customer' ? 'advertiser' : role;
+        localStorage.setItem(obKey('role'), r);
+        localStorage.setItem('lb.role', r);
       }
-      if (role === 'operator') return true;
     } catch (e) {}
-    return false;
   }
 
   function obNeedShow() {
-    if (obDoneLocal()) return false;
-    // اگر از قبل کانال/کسب‌وکار دارد، ویزارد لازم نیست
-    if (ST.role === 'manager' && (ST.myChannels || []).length > 0) {
-      try { localStorage.setItem('lb_manager_onboarded', '1'); localStorage.setItem('lb_role_chosen', '1'); localStorage.setItem('lb_role', 'manager'); } catch (e) {}
-      return false;
-    }
-    if ((ST.role === 'advertiser' || ST.role === 'customer') && (ST.businesses || []).length > 0) {
-      try { localStorage.setItem('lb_customer_onboarded', '1'); localStorage.setItem('lb_role_chosen', '1'); localStorage.setItem('lb_role', 'advertiser'); } catch (e) {}
-      return false;
-    }
+    try {
+      if (new URLSearchParams(location.search).get('onboard') === '1') return true;
+    } catch (e) {}
+    // دادهٔ واقعی سرور اولویت دارد
+    const hasMgr = ((ST.myChannels || []).length + (ST.myGroups || []).length) > 0;
+    const hasBiz = (ST.businesses || []).length > 0;
+    if (hasMgr) { obMarkDone('manager'); return false; }
+    if (hasBiz) { obMarkDone('advertiser'); return false; }
+    try {
+      if (localStorage.getItem(obKey('onboard_done')) === '1') return false;
+    } catch (e) {}
     return true;
   }
 
   function obProgress() {
     const map = {
-      role: 12,
-      biz_name: 40, biz_kind: 55, biz_done: 100,
-      ch_link: 35, pmode: 55, tariff: 75, mgr_done: 100,
+      role: 10,
+      biz_name: 30, biz_kind: 50, biz_cat: 70, biz_done: 100,
+      ch_link: 30, pmode: 50, tariff: 75, mgr_done: 100,
     };
     return map[OB.step] || 20;
   }
@@ -2296,7 +2312,15 @@ function renderOpTickets() {
           <input id="ob-biz-ref" maxlength="200" placeholder="${OB.biz.kind==='bale'?'@mychannel یا ble.ir/…':'https://…'}" value="${esc(OB.biz.source_ref)}"/>
         </div>
         ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
-    } else if (step === 'biz_done') {
+    } else if (step === 'biz_cat') {
+      body = `${logo}
+        <div class="lb-ob-title">دسته‌بندی کسب‌وکار</div>
+        <p class="lb-ob-sub">حداقل یک موضوع انتخاب کنید تا تعرفه‌های مرتبط بهتر پیشنهاد شوند.</p>
+        <div class="lb-ob-chips">
+          ${OB_CATS.map((c) => `<button type="button" class="lb-ob-chip ${(OB.biz.categories||[]).includes(c)?'on':''}" data-ob="cat-${esc(c)}">${esc(c)}</button>`).join('')}
+        </div>
+        ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
+        } else if (step === 'biz_done') {
       body = `<div class="lb-ob-done">
         <div class="ok-ico">${icon('check',28)}</div>
         <div class="lb-ob-title">آماده‌اید</div>
@@ -2351,7 +2375,7 @@ function renderOpTickets() {
       foot = `<button type="button" class="btn btn-primary" data-ob="finish">ورود به لینک‌بان</button>`;
     } else {
       const backStep = {
-        biz_name: 'role', biz_kind: 'biz_name',
+        biz_name: 'role', biz_kind: 'biz_name', biz_cat: 'biz_kind',
         ch_link: 'role', pmode: 'ch_link', tariff: 'pmode',
       }[step];
       foot = `${backStep ? `<button type="button" class="btn btn-soft" data-ob="back">بازگشت</button>` : ''}
@@ -2373,14 +2397,14 @@ function renderOpTickets() {
       if (act === 'role-advertiser') {
         OB.role = 'advertiser';
         OB.step = 'biz_name';
-        try { localStorage.setItem('lb_role', 'advertiser'); localStorage.setItem('lb_role_chosen', '1'); } catch (e) {}
+        try { localStorage.setItem(obKey('role'), 'advertiser'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'advertiser'); } catch (e) {}
         ST.role = 'advertiser';
         return renderOb();
       }
       if (act === 'role-manager') {
         OB.role = 'manager';
         OB.step = 'ch_link';
-        try { localStorage.setItem('lb_role', 'manager'); localStorage.setItem('lb_role_chosen', '1'); } catch (e) {}
+        try { localStorage.setItem(obKey('role'), 'manager'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'manager'); } catch (e) {}
         ST.role = 'manager';
         return renderOb();
       }
@@ -2396,9 +2420,17 @@ function renderOpTickets() {
         OB.tariff.duration_hours = parseInt(act.slice(4), 10) || 24;
         return renderOb();
       }
+      if (act.startsWith('cat-')) {
+        const c = act.slice(4);
+        const arr = OB.biz.categories || [];
+        if (arr.includes(c)) OB.biz.categories = arr.filter((x) => x !== c);
+        else OB.biz.categories = arr.concat([c]);
+        if (!OB.biz.categories.length) OB.biz.categories = ['سایر'];
+        return renderOb();
+      }
       if (act === 'back') {
         const backStep = {
-          biz_name: 'role', biz_kind: 'biz_name',
+          biz_name: 'role', biz_kind: 'biz_name', biz_cat: 'biz_kind',
           ch_link: 'role', pmode: 'ch_link', tariff: 'pmode',
         }[OB.step];
         if (backStep) OB.step = backStep;
@@ -2432,6 +2464,14 @@ function renderOpTickets() {
         if (OB.step === 'biz_kind') {
           const r = document.getElementById('ob-biz-ref');
           OB.biz.source_ref = (r && r.value || '').trim();
+          OB.step = 'biz_cat';
+          return renderOb();
+        }
+        if (OB.step === 'biz_cat') {
+          if (!(OB.biz.categories || []).length) {
+            OB.error = 'حداقل یک دسته‌بندی انتخاب کنید.';
+            return renderOb();
+          }
           OB.loading = true; renderOb();
           try {
             const d = await api('/businesses', {
@@ -2440,11 +2480,11 @@ function renderOpTickets() {
                 name: OB.biz.name,
                 kind: OB.biz.kind,
                 source_ref: OB.biz.source_ref,
-                categories: { main: ['سایر'], sub: [] },
+                categories: { main: OB.biz.categories, sub: [] },
               }),
             });
             if (!d.ok) throw new Error(d.message || d.error || 'ثبت نشد');
-            try { localStorage.setItem('lb_customer_onboarded', '1'); } catch (e) {}
+            obMarkDone('advertiser');
             OB.step = 'biz_done';
             await loadBusinesses().catch(() => {});
           } catch (err) {
@@ -2504,7 +2544,7 @@ function renderOpTickets() {
               }),
             });
             if (!d.ok) throw new Error(d.message || d.error || 'ثبت تعرفه ناموفق');
-            try { localStorage.setItem('lb_manager_onboarded', '1'); } catch (e) {}
+            obMarkDone('manager');
             OB.step = 'mgr_done';
           } catch (err) {
             OB.error = err.message || 'ثبت تعرفه ناموفق بود.';
@@ -2517,19 +2557,25 @@ function renderOpTickets() {
   }
 
   function startOnboardingIfNeeded() {
-    if (!obNeedShow()) return;
+    if (!obNeedShow()) return false;
     OB.open = true;
     OB.step = 'role';
-    // اگر نقش از قبل ذخیره شده
+    OB.role = '';
+    OB.error = '';
+    OB.ch = { link: '', error: '', loading: false, id: 0, name: '' };
+    OB.biz = { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] };
+    OB.pmode = 'manual';
+    OB.tariff = { name: '۲۴ ساعته', duration_hours: 24, price: '' };
     try {
-      const r = localStorage.getItem('lb_role');
-      if (r === 'manager' && localStorage.getItem('lb_manager_onboarded') !== '1') {
+      const r = localStorage.getItem(obKey('role')) || localStorage.getItem('lb.role') || localStorage.getItem('lb_role');
+      if (r === 'manager' && localStorage.getItem(obKey('manager_onboarded')) !== '1') {
         OB.role = 'manager'; OB.step = 'ch_link'; ST.role = 'manager';
-      } else if ((r === 'advertiser' || r === 'customer') && localStorage.getItem('lb_customer_onboarded') !== '1') {
+      } else if ((r === 'advertiser' || r === 'customer') && localStorage.getItem(obKey('customer_onboarded')) !== '1') {
         OB.role = 'advertiser'; OB.step = 'biz_name'; ST.role = 'advertiser';
       }
     } catch (e) {}
     renderOb();
+    return true;
   }
 
   async function boot() {
@@ -2559,6 +2605,7 @@ function renderOpTickets() {
     }
     ST.loading = false;
     render();
+    try { startOnboardingIfNeeded(); } catch (e) { console.error('onboard', e); }
   }
 
   document.addEventListener('visibilitychange', () => {
