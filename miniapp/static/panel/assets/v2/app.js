@@ -84,8 +84,15 @@
 
   function getInitData() {
     try {
-      const w = window.Bale && window.Bale.WebApp;
-      if (w && w.initData) return w.initData;
+      const w = (window.Bale && window.Bale.WebApp) || (window.Telegram && window.Telegram.WebApp) || window.__LB_BALE;
+      if (w && w.initData) {
+        try { localStorage.setItem('lb.initData', w.initData); } catch (e) {}
+        return w.initData;
+      }
+    } catch (e) {}
+    try {
+      const cached = localStorage.getItem('lb.initData');
+      if (cached) return cached;
     } catch (e) {}
     return new URLSearchParams(location.search).get('initData') || '';
   }
@@ -102,6 +109,7 @@
     if (initData) headers['X-Bale-Init-Data'] = initData;
     const dbg = debugId();
     if (dbg) headers['X-Bale-User-Id'] = dbg;
+    else if (softUser && softUser.id) headers['X-Bale-User-Id'] = String(softUser.id);
 
     let body = opts.body;
     if (body && !(body instanceof FormData) && typeof body === 'object') {
@@ -361,7 +369,8 @@
   async function loadMgrOrders() {
     const d = await api('/orders');
     if (!d.ok) { ST.mgrOrders = []; return; }
-    ST.mgrOrders = (d.orders || []).filter((o) => o.inbox || o.manager_status);
+    // همه سفارش‌های مرتبط با مدیر (inbox + سابقه)
+    ST.mgrOrders = (d.orders || []).filter((o) => o.inbox || o.manager_status || o.role === 'manager');
   }
 
   async function loadMgrTariffs() {
@@ -799,7 +808,7 @@
           <div class="manager-history-value"><span>سهم این انتشار</span><strong>${faNum(it.price)} <small>تومان</small></strong></div>
           ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',14)} زمان پیشنهادی: ${esc(it.proposed_date)}</div>`:''}
           ${it.published_link ? `<a href="${esc(it.published_link)}" target="_blank" rel="noopener" class="manager-published-link">مشاهدهٔ لینک انتشار ${icon('arrow-up-left',14)}</a>`:''}
-          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}${it.manager_status==='approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published-disabled="${it.id}">${icon('check',14)} ثبت انتشار انجام‌شده</button>`:''}</div>
+          <div class="manager-history-actions">${it.manager_status==='pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',14)} تأیید</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',14)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',15)}</button>`:''}${it.manager_status==='approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',14)} ثبت انتشار انجام‌شده</button>`:''}</div>
         </article>`).join('') : `<div class="scenario-empty"><span>${icon('inbox',27)}</span><h3>هنوز سفارشی ثبت نشده</h3><p>به‌محض ثبت سفارش برای کانال‌هایت، سابقه و وضعیت آن اینجا نمایش داده می‌شود.</p><button class="btn btn-soft" id="btnMgrOrdersGoHome">بازگشت به میزکار</button></div>`;
       return `<section class="orders-overview manager-orders-overview"><div><span class="eyebrow">سابقهٔ جایگاه‌ها</span><h2>سفارش‌های کانال</h2><p>از درخواست جدید تا اعلام انتشار، وضعیت هر جایگاه را دنبال کن.</p></div><div class="orders-overview-metrics"><div><strong>${fa(list.length)}</strong><span>همه</span></div><div><strong>${fa(waiting.length)}</strong><span>در انتظار</span></div><div><strong>${fa(publish.length)}</strong><span>آمادهٔ انتشار</span></div></div></section><div class="manager-content-heading"><div><span class="eyebrow">نمایش همهٔ موارد</span><h2>سابقهٔ درخواست‌ها</h2></div><button class="manager-refresh" id="btnRefreshOrders">${icon('refresh-cw',16)}</button></div>${rows}`;
     }
@@ -983,7 +992,7 @@
     return `<section class="manager-screen-hero channels-screen-hero"><div class="manager-screen-art">${icon('building-2',27)}<i></i></div><div class="manager-screen-copy"><span class="manager-eyebrow">فضای انتشار شما</span><h2>کانال‌های من</h2><p>اطلاعات، آمار و روش انتشار هر جایگاه را مدیریت کن.</p><div class="manager-screen-badges"><span>${fa(channels.length)} کانال ثبت‌شده</span><span>${fa(active)} فعال در بازار</span></div></div></section>
       <div class="manager-screen-toolbar"><div><span class="eyebrow">جایگاه‌های متصل</span><h3>همهٔ کانال‌ها</h3></div><button class="manager-refresh" id="btnMgrRefreshChannelsTop" aria-label="تازه‌سازی">${icon('refresh-cw',16)}</button></div>
       <div class="manager-panel">${renderMgrChannels()}</div>
-      <div class="manager-connect-bottom"><span>${icon('link',18)}</span><div><b>کانال جدیدی داری؟</b><small>بازوی لینک‌بان را به کانال اضافه کن و دسترسی مدیر را تأیید کن.</small></div><button id="btnMgrConnectChannelsBottom">راهنما</button></div>`;
+      <div class="manager-connect-bottom"><span>${icon('link',18)}</span><div><b>کانال جدیدی داری؟</b><small>نام کاربری‌ات را در توضیحات کانال بگذار و لینک را ثبت کن.</small></div><button class="btn btn-primary" id="btnMgrAddChannel">افزودن کانال</button></div>`;
   }
 
   function renderMgrTariffsPage() {
@@ -1011,14 +1020,14 @@
         ${it.proposed_date ? `<div class="manager-time-note">${icon('calendar',15)} زمان پیشنهادی فعلی: ${esc(it.proposed_date)}</div>` : ''}
         <div class="manager-request-actions">
           ${it.manager_status === 'pending' ? `<button class="btn btn-primary" data-mgr-approve="${it.id}">${icon('check',15)} تأیید درخواست</button><button class="btn btn-ghost" data-mgr-suggest="${it.id}">${icon('calendar',15)} پیشنهاد زمان</button><button class="btn btn-danger-icon" data-mgr-reject="${it.id}" aria-label="رد درخواست">${icon('close',17)}</button>` : ''}
-          ${it.manager_status === 'approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published-disabled="${it.id}">${icon('check',15)} اعلام انتشار</button>` : ''}
+          ${it.manager_status === 'approved' && it.publish_due ? `<button class="btn btn-primary btn-block" data-mgr-published="${it.id}">${icon('check',15)} اعلام انتشار</button>` : ''}
         </div>
       </article>`).join('')}</div>`;
   }
 
   function renderMgrChannels() {
     const chs = ST.myChannels || [];
-    if (!chs.length) return `<div class="manager-empty-state"><div class="manager-empty-art channel-empty-art"><div class="empty-orbit"></div><span>${icon('building-2',31)}</span><i></i><b></b></div><span class="manager-empty-label">شبکهٔ کانال‌ها</span><h3>هنوز کانالی به میزکارت وصل نشده</h3><p>کانالی را که مدیریت می‌کنی از بازوی لینک‌بان معرفی کن. پس از اتصال، آمار، تعرفه‌ها و روزهای آزادش را از همین قسمت مدیریت می‌کنی.</p><div class="manager-empty-actions"><button class="btn btn-primary" id="btnMgrConnectChannels">اتصال کانال در بله</button><button class="btn btn-ghost" id="btnMgrRefreshChannelsEmpty">بررسی دوباره</button></div><div class="manager-connect-hint">${icon('shield-check',15)} اتصال مدیر و دسترسی ربات باید در کانال تأیید شده باشد.</div></div>`;
+    if (!chs.length) return `<div class="manager-empty-state"><div class="manager-empty-art channel-empty-art"><div class="empty-orbit"></div><span>${icon('building-2',31)}</span><i></i><b></b></div><span class="manager-empty-label">شبکهٔ کانال‌ها</span><h3>هنوز کانالی به میزکارت وصل نشده</h3><p>نام کاربری بله‌ات را در «توضیحات کانال» بنویس، بعد لینک یا @شناسه را اینجا ثبت کن. پس از تأیید می‌توانی نام کاربری را از توضیحات حذف کنی.</p><div class="manager-empty-actions"><button class="btn btn-primary" id="btnMgrAddChannelEmpty">افزودن کانال</button><button class="btn btn-ghost" id="btnMgrRefreshChannelsEmpty">بررسی دوباره</button></div><div class="manager-connect-hint">${icon('shield-check',15)} کانال باید عمومی باشد و حداقل ۱۰۰۰ عضو داشته باشد.</div></div>`;
     return `<div class="manager-channel-list">${chs.map((c,index) => {
       const letter = esc((c.name || 'ک').slice(0,1));
       const ava = c.avatar_url || c.photo_url ? `<img src="${esc(c.avatar_url || c.photo_url)}" alt="" onerror="this.parentNode.textContent='${letter}'"/>` : letter;
@@ -1709,11 +1718,63 @@ function renderOpTickets() {
     const mgrHistory = $('#btnMgrHistory'); if (mgrHistory) mgrHistory.onclick = async () => { try { await loadMgrOrders(); } catch(e) {} navigate('orders'); };
     const refreshChannelsTop = $('#btnMgrRefreshChannelsTop'); if (refreshChannelsTop) refreshChannelsTop.onclick = async () => { try { await loadMyChannels(); } catch(e) { toast(e.message||'به‌روزرسانی انجام نشد'); } render(); };
     const refreshTariffsTop = $('#btnRefreshTariffsTop'); if (refreshTariffsTop) refreshTariffsTop.onclick = async () => { try { await loadMgrTariffs(); } catch(e) { toast(e.message||'به‌روزرسانی انجام نشد'); } render(); };
-    const connectChannelsBottom = $('#btnMgrConnectChannelsBottom'); if (connectChannelsBottom) connectChannelsBottom.onclick = () => { const w=window.Bale&&window.Bale.WebApp; if(w&&typeof w.openLink==='function') w.openLink('https://ble.ir/linkban'); else window.open('https://ble.ir/linkban','_blank'); };
+    const openAddChannelSheet = () => {
+      let handle = '';
+      try {
+        const u = baleClientUser();
+        if (u && u.username) handle = String(u.username).replace(/^@/, '');
+      } catch (e) {}
+      try {
+        if (!handle && ST.me && ST.me.user) handle = String(ST.me.user.handle || ST.me.user.username || '').replace(/^@/, '');
+      } catch (e) {}
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <h3 style="margin:0 0 8px;text-align:center">افزودن کانال</h3>
+        <p class="hint" style="text-align:center;margin-bottom:12px">نام کاربری یا لینک کانال بله را وارد کنید.</p>
+        <div class="field"><label>نام کاربری یا لینک</label>
+          <input id="mgrAddChLink" placeholder="@mychannel یا ble.ir/mychannel" autocomplete="off" /></div>
+        <div class="hint" style="text-align:start;line-height:1.7">
+          <b>برای شروع لازم است:</b>
+          <ul style="margin:6px 0 0;padding-inline-start:18px">
+            <li>کانال بیشتر از <b>۱۰۰۰</b> عضو داشته باشد.</li>
+            <li>کانال در حالت عمومی باشد.</li>
+            <li>نام کاربری خود${handle ? ' (<b>@' + handle + '</b>)' : ''} را در بخش «توضیحات کانال» بنویسید.</li>
+          </ul>
+          <span>پس از تأیید می‌توانید نام کاربری را از توضیحات کانال حذف کنید.</span>
+        </div>
+        <p class="hint" id="mgrAddChErr" style="color:#b91c1c;display:none;text-align:start"></p>
+        <button class="btn btn-primary btn-block" id="btnDoAddChannel" style="margin-top:12px">بررسی و ثبت کانال</button>
+      `);
+      const errEl = $('#mgrAddChErr');
+      $('#btnDoAddChannel').onclick = async () => {
+        const link = ($('#mgrAddChLink') && $('#mgrAddChLink').value || '').trim();
+        if (!link) {
+          if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'لینک یا نام کاربری را وارد کنید.'; }
+          return;
+        }
+        const btn = $('#btnDoAddChannel');
+        if (btn) { btn.disabled = true; btn.textContent = 'در حال بررسی…'; }
+        try {
+          const d = await api('/channels/add', { method: 'POST', body: { link, name: '' } });
+          if (!d.ok) throw new Error(d.message || d.error || 'ثبت کانال انجام نشد');
+          toast(d.message || 'کانال وصل شد');
+          closeSheet();
+          await Promise.allSettled([loadMyChannels(), loadMgrTariffs()]);
+          render();
+        } catch (e) {
+          if (errEl) { errEl.style.display = 'block'; errEl.textContent = e.message || 'ثبت نشد'; }
+          if (btn) { btn.disabled = false; btn.textContent = 'بررسی و ثبت کانال'; }
+        }
+      };
+    };
+    const addChBtn = $('#btnMgrAddChannel');
+    if (addChBtn) addChBtn.onclick = openAddChannelSheet;
+    const addChEmpty = $('#btnMgrAddChannelEmpty');
+    if (addChEmpty) addChEmpty.onclick = openAddChannelSheet;
+    const connectChannels = $('#btnMgrConnectChannels');
+    if (connectChannels) connectChannels.onclick = openAddChannelSheet;
     const refreshEmptyInbox = $('#btnMgrRefreshEmpty');
     if (refreshEmptyInbox) refreshEmptyInbox.onclick = async () => { try { await loadMgrOrders(); } catch(e) {} render(); };
-    const connectChannels = $('#btnMgrConnectChannels');
-    if (connectChannels) connectChannels.onclick = () => { const w=window.Bale&&window.Bale.WebApp; if(w&&typeof w.openLink==='function') w.openLink('https://ble.ir/linkban'); else window.open('https://ble.ir/linkban','_blank'); };
     ['#btnMgrRefreshChannelsEmpty','#btnMgrRefreshChannelsList'].forEach(sel => { const b=$(sel); if(b) b.onclick=async()=>{ try { await loadMyChannels(); } catch(e){} render(); }; });
     ['#btnOpRefreshEmpty','#btnOpRefreshList'].forEach(sel => { const b=$(sel); if(b) b.onclick=async()=>{ try { await Promise.allSettled([loadOpBanners(),loadOpPayouts(),loadOpAssignments()]); } catch(e){} render(); }; });
     $$('[data-op-shortcut]').forEach((b) => b.onclick = async () => { ST.opTab=b.dataset.opShortcut; if(ST.opTab==='assign') await loadOpAssignments(); if(ST.opTab==='payouts') await loadOpPayouts(); if(ST.opTab==='banners') await loadOpBanners(); render(); });
@@ -1754,7 +1815,21 @@ function renderOpTickets() {
         if (d.ok) { closeSheet(); await loadMgrOrders(); render(); }
       };
     });
-    /* انتشار دستی مدیر حذف شد — فقط زمان‌بندی خودکار */
+    /* اعلام انتشار دستی (فقط وقتی publish_due از سرور true باشد) */
+    $$('[data-mgr-published]').forEach((b) => b.onclick = async () => {
+      const itemId = Number(b.dataset.mgrPublished);
+      if (!itemId) return;
+      b.disabled = true;
+      try {
+        const d = await api('/orders/published', { method: 'POST', body: { item_id: itemId } });
+        toast(d.message || (d.ok ? 'انتشار ثبت شد' : (d.error || 'تأیید انتشار نشد')));
+        if (d.ok) { await loadMgrOrders(); render(); }
+      } catch (e) {
+        toast(e.message || 'ارتباط برقرار نشد');
+      } finally {
+        b.disabled = false;
+      }
+    });
     $$('[data-mgr-ch]').forEach((b) => b.onclick = () => {
       ST.selectedMgrChannel = Number(b.dataset.mgrCh);
       navigate('mgr-channel');
@@ -1806,7 +1881,7 @@ function renderOpTickets() {
         };
         const d = await api('/tariffs/add', { method: 'POST', body });
         toast(d.message || (d.ok ? 'تعرفه ثبت شد' : (d.error || 'خطا')));
-        if (d.ok) { closeSheet(); await loadMyChannels(); render(); }
+        if (d.ok) { closeSheet(); await Promise.allSettled([loadMyChannels(), loadMgrTariffs()]); render(); }
       };
     };
     const refreshTariffs = $('#btnRefreshTariffs');
