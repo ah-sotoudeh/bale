@@ -820,6 +820,34 @@ def publish_due_items() -> Dict[str, int]:
                     failed += 1
 
         if retry_later and not any_ok and not any_manual:
+            # پنجره تلاش مجدد از تنظیمات (پیش‌فرض ۳۰ دقیقه، هر ~۶۰ثانیه در poll)
+            max_min, _interval = _publish_retry_window()
+            started = item.publish_retry_started_at
+            if not started:
+                item.publish_retry_started_at = now
+                item.save(update_fields=['publish_retry_started_at'])
+                continue
+            elapsed_min = (now - started).total_seconds() / 60.0
+            if elapsed_min < max_min:
+                continue
+            # مهلت تلاش تمام — خطا در ارسال
+            item.execution_status = 'failed_publish'
+            item.save(update_fields=['execution_status'])
+            try:
+                if item.manager and item.manager.bale_user_id:
+                    bc.send_message(
+                        item.manager.bale_user_id,
+                        f'⚠️ اجرای تبلیغ #{item.id} پس از {int(max_min)} دقیقه تلاش ناموفق ماند (اجرا نشده).',
+                    )
+            except Exception:
+                logger.exception('notify manager retry exhausted item=%s', item.id)
+            _refund_failed_item(item)
+            try:
+                from orders.execution import settle_paid_order
+                settle_paid_order(item.order_id)
+            except Exception:
+                logger.exception('settle after retry fail')
+            failed += 1
             continue
 
         if any_manual and not any_ok:

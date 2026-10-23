@@ -229,6 +229,7 @@ class OrderItem(models.Model):
     channel_message_id = models.TextField(null=True, blank=True)
     duration_hours = models.PositiveIntegerField(default=0)
     booked_channel_ids = models.JSONField(default=list, blank=True)
+    publish_retry_started_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -313,3 +314,42 @@ class ManagerResponse(models.Model):
     action = models.CharField(max_length=20)
     payload = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+
+class SupportTicket(models.Model):
+    """تیکت پشتیبانی مشتری."""
+    STATUS = [
+        ('open', 'open'),
+        ('answered', 'answered'),
+        ('customer_replied', 'customer_replied'),
+        ('closed', 'closed'),
+    ]
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='support_tickets'
+    )
+    subject = models.CharField(max_length=160)
+    category = models.CharField(max_length=32, default='other', db_index=True)
+    status = models.CharField(max_length=24, default='open', db_index=True)
+    order_id_ref = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at', '-id']
+
+    def __str__(self):
+        return f'Ticket #{self.id} {self.subject[:40]}'
+
+
+class SupportTicketMessage(models.Model):
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name='messages')
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket_messages'
+    )
+    body = models.TextField()
+    is_staff = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']

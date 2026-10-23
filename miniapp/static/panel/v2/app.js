@@ -1265,7 +1265,7 @@
     if (helpBtn) helpBtn.onclick = () => navigate('help');
     const supportTicket = $('#btnSupportTicket');
     if (supportTicket) supportTicket.onclick = () => {
-      openSheet(`<div class="sheet-handle"></div><section class="form-sheet-hero ticket-form-hero"><span class="form-sheet-icon">${icon('ticket',22)}</span><div><span class="eyebrow">مرکز پشتیبانی</span><h3>ثبت تیکت جدید</h3><p>موضوع را انتخاب کن و مشکل را واضح توضیح بده.</p></div></section><div class="field"><label>موضوع تیکت</label><select id="demoTicketTopic"><option value="order">سفارش و زمان انتشار</option><option value="wallet">کیف پول و پرداخت</option><option value="banner">ثبت یا بررسی بنر</option><option value="business">کسب‌وکار و اطلاعات کانال</option><option value="other">موضوع دیگر</option></select></div><div class="field"><label>شماره سفارش <span>اختیاری</span></label><input id="demoTicketOrder" inputmode="numeric" placeholder="مثلاً ۱۲۳۴"/></div><div class="field"><label>شرح درخواست</label><textarea id="demoTicketMessage" rows="4" placeholder="چه اتفاقی افتاده و چه کمکی نیاز داری؟"></textarea></div><div class="prototype-note">${icon('info',15)} این فرم در نسخهٔ نمایشی است؛ اتصال ارسال و پیگیری تیکت باید در مرحلهٔ بک‌اند انجام شود.</div><button class="btn btn-primary btn-block form-submit-primary" id="btnSubmitDemoTicket">${icon('send',16)} ثبت در نمونهٔ رابط</button>`);
+      openSheet(`<div class="sheet-handle"></div><section class="form-sheet-hero ticket-form-hero"><span class="form-sheet-icon">${icon('ticket',22)}</span><div><span class="eyebrow">مرکز پشتیبانی</span><h3>ثبت تیکت جدید</h3><p>موضوع را انتخاب کن و مشکل را واضح توضیح بده.</p></div></section><div class="field"><label>موضوع تیکت</label><select id="demoTicketTopic"><option value="order">سفارش و زمان انتشار</option><option value="wallet">کیف پول و پرداخت</option><option value="banner">ثبت یا بررسی بنر</option><option value="business">کسب‌وکار و اطلاعات کانال</option><option value="other">موضوع دیگر</option></select></div><div class="field"><label>شماره سفارش <span>اختیاری</span></label><input id="demoTicketOrder" inputmode="numeric" placeholder="مثلاً ۱۲۳۴"/></div><div class="field"><label>شرح درخواست</label><textarea id="demoTicketMessage" rows="4" placeholder="چه اتفاقی افتاده و چه کمکی نیاز داری؟"></textarea></div><div class="prototype-note">${icon('info',15)} پیام شما برای پشتیبان ثبت می‌شود و پاسخ در همین بخش می‌آید.</div><button class="btn btn-primary btn-block form-submit-primary" id="btnSubmitTicket">${icon('send',16)} ثبت در نمونهٔ رابط</button>`);
       $('#btnSubmitDemoTicket').onclick = () => {
         const message = $('#demoTicketMessage').value.trim();
         if (message.length < 8) return toast('شرح درخواست را کامل‌تر بنویس.');
@@ -1289,6 +1289,31 @@
     const settingQueues = $('#btnSettingsQueues'); if (settingQueues) settingQueues.onclick = async () => { try { await Promise.allSettled([loadOpBanners(),loadOpPayouts(),loadOpAssignments()]); } catch(e) {} navigate('op-home'); };
 
     const emptyBannerCreate = $('#btnEmptyBannerCreate'); if (emptyBannerCreate) emptyBannerCreate.onclick = openNewBanner;
+
+    const submitTicket = $('#btnSubmitTicket');
+    if (submitTicket) submitTicket.onclick = async () => {
+      const topic = ($('#demoTicketTopic') || {}).value || 'other';
+      const orderRef = ($('#demoTicketOrder') || {}).value || '';
+      const message = (($('#demoTicketMessage') || {}).value || '').trim();
+      if (message.length < 5) { toast('متن تیکت را کامل‌تر بنویسید'); return; }
+      const body = {
+        category: topic,
+        subject: ST.pendingTicket?.subject || '',
+        message,
+        order_id: orderRef || ST.pendingTicket?.order_id || null,
+      };
+      const d = await api('/tickets', { method: 'POST', body });
+      if (!d.ok) { toast(d.message || d.error || 'ثبت تیکت ناموفق'); return; }
+      ST.pendingTicket = null;
+      toast('تیکت ثبت شد');
+      closeSheet();
+      try {
+        const list = await api('/tickets');
+        if (list.ok) ST.tickets = list.tickets || [];
+      } catch (e) {}
+      render();
+    };
+
     const emptyBusinessCreate = $('#btnEmptyBusinessCreate'); if (emptyBusinessCreate) emptyBusinessCreate.onclick = () => { openSheet(renderBusinessForm()); bindBusinessForm(); };
     const newBusiness = $('#btnNewBusiness');
     if (newBusiness) newBusiness.onclick = () => { openSheet(renderBusinessForm()); bindBusinessForm(); };
@@ -1872,30 +1897,79 @@
   }
 
   async function payOrder(id) {
-    const d = await api('/pay/invoice', { method: 'POST', body: { order_id: Number(id) } });
-    if (!d.ok) {
-      toast(d.message || d.error || 'صدور فاکتور ناموفق بود');
-      return;
-    }
-    // فاکتور بله — در صورت وجود لینک در مینی‌اپ باز شود
-    const link = d.invoice_link || d.link || (d.invoice && d.invoice.link) || '';
-    try {
-      const w = window.Bale && Bale.WebApp;
-      if (link && w && typeof w.openInvoice === 'function') {
-        w.openInvoice(link, function (status) {
-          toast(status === 'paid' ? 'پرداخت ثبت شد' : (status || 'فاکتور بسته شد'));
-          loadOrders().then(render);
-          loadWallet().then(render);
-        });
+    try { await loadWallet(); } catch (e) {}
+    const order = (ST.orders || []).find((o) => Number(o.id) === Number(id));
+    const total = Number(order?.total || order?.total_amount || 0);
+    const credit = Number((ST.wallet?.balance || ST.wallet || {}).credit || (ST.me?.wallet || {}).credit || 0);
+    openSheet(`
+      <div class="sheet-handle"></div>
+      <h3 style="margin:0 0 8px;text-align:center">پرداخت سفارش #${fa(id)}</h3>
+      <p class="hint">مبلغ: <b>${faNum(total)}</b> تومان · اعتبار شما: <b>${faNum(credit)}</b></p>
+      <button class="btn btn-primary btn-block" id="payWallet" ${credit < total ? 'disabled' : ''}>پرداخت از اعتبار</button>
+      <button class="btn btn-soft btn-block" id="payBot" style="margin-top:8px">فاکتور در گفتگوی بازو (کیف پول بله)</button>
+      <button class="btn btn-soft btn-block" id="payCard" style="margin-top:8px">کارت‌به‌کارت / رسید</button>
+      <p class="hint" style="margin-top:12px">درگاه داخل مینی‌اپ نیست؛ فاکتور بله در چت بازو باز می‌شود. کارت‌به‌کارت پس از ارسال رسید توسط پشتیبان تأیید می‌شود.</p>
+    `);
+    const run = async (via) => {
+      const d = await api('/pay/invoice', { method: 'POST', body: { order_id: Number(id), via } });
+      if (!d.ok) {
+        toast(d.message || d.error || 'پرداخت ناموفق');
         return;
       }
-      if (link && w && typeof w.openLink === 'function') {
-        w.openLink(link);
-        toast('صفحه پرداخت باز شد');
+      if (via === 'wallet' || d.via === 'wallet') {
+        toast(d.message || 'از اعتبار پرداخت شد');
+        closeSheet();
+        await Promise.allSettled([loadOrders(), loadWallet()]);
+        render();
         return;
       }
-    } catch (e) {}
-    toast(d.message || 'فاکتور در گفتگوی بازو ارسال شد');
+      const link = d.invoice_link || d.link || d.bot_url || '';
+      try {
+        const w = window.Bale && Bale.WebApp;
+        if (d.open_bot && w && typeof w.close === 'function') {
+          toast(d.message || 'به گفتگوی بازو بروید و فاکتور را پرداخت کنید');
+          setTimeout(() => { try { w.close(); } catch (e) {} }, 500);
+          return;
+        }
+        if (link && w && typeof w.openInvoice === 'function') {
+          w.openInvoice(link, function (status) {
+            toast(status === 'paid' ? 'پرداخت ثبت شد' : (status || 'فاکتور بسته شد'));
+            loadOrders().then(render);
+            loadWallet().then(render);
+          });
+          return;
+        }
+        if (link && w && typeof w.openLink === 'function') {
+          w.openLink(link);
+        }
+      } catch (e) {}
+      toast(d.message || 'فاکتور ارسال شد');
+      closeSheet();
+    };
+    const wBtn = $('#payWallet');
+    if (wBtn) wBtn.onclick = () => run('wallet');
+    const bBtn = $('#payBot');
+    if (bBtn) bBtn.onclick = () => run('bot');
+    const cBtn = $('#payCard');
+    if (cBtn) cBtn.onclick = () => {
+      openSheet(`
+        <div class="sheet-handle"></div>
+        <h3 style="text-align:center">کارت‌به‌کارت</h3>
+        <p class="hint">مبلغ سفارش را کارت‌به‌کارت کنید و در تیکت پشتیبانی رسید و شماره سفارش را بفرستید تا پشتیبان تأیید کند.</p>
+        <p class="hint">شماره سفارش: <b>#${fa(id)}</b> — مبلغ: <b>${faNum(total)}</b> تومان</p>
+        <button class="btn btn-primary btn-block" id="payCardTicket">باز کردن تیکت پرداخت</button>
+      `);
+      const t = $('#payCardTicket');
+      if (t) t.onclick = () => {
+        closeSheet();
+        ST.pendingTicket = { category: 'wallet', subject: 'رسید کارت‌به‌کارت سفارش ' + id, order_id: id };
+        navigate('help');
+        setTimeout(() => {
+          const openBtn = $('#btnNewTicket') || $('#btnOpenTicket');
+          if (openBtn) openBtn.click();
+        }, 300);
+      };
+    };
   }
 
   function esc(s) {
@@ -1934,6 +2008,7 @@
           else await loadOrders();
         }
         if (id === 'wallet') await loadWallet();
+        if (id === 'help') { try { const t = await api('/tickets'); if (t.ok) ST.tickets = t.tickets || []; } catch(e) {} }
         if (id === 'mgr-home') { await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs()]); }
         if (id === 'mgr-channels') await loadMyChannels();
         if (id === 'mgr-tariffs') { await Promise.allSettled([loadMyChannels(), loadMgrTariffs()]); }
