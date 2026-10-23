@@ -2214,6 +2214,7 @@ function renderOpTickets() {
   }
 
 
+
   /* ——— Onboarding (اولین ورود) ——— */
   const OB_CATS = [
     'خبری', 'سرگرمی', 'بانوان', 'آموزش', 'فروشگاهی', 'سلامت و زیبایی',
@@ -2254,12 +2255,10 @@ function renderOpTickets() {
       }
     } catch (e) {}
   }
-
   function obNeedShow() {
     try {
       if (new URLSearchParams(location.search).get('onboard') === '1') return true;
     } catch (e) {}
-    // دادهٔ واقعی سرور اولویت دارد
     const hasMgr = ((ST.myChannels || []).length + (ST.myGroups || []).length) > 0;
     const hasBiz = (ST.businesses || []).length > 0;
     if (hasMgr) { obMarkDone('manager'); return false; }
@@ -2269,52 +2268,36 @@ function renderOpTickets() {
     } catch (e) {}
     return true;
   }
-
   function obProgress() {
     const map = {
-      role: 10,
-      biz_name: 30, biz_kind: 50, biz_cat: 70, biz_done: 100,
+      role: 10, biz_name: 30, biz_kind: 50, biz_cat: 70, biz_done: 100,
       ch_link: 30, pmode: 50, tariff: 75, mgr_done: 100,
     };
     return map[OB.step] || 20;
   }
 
-  function renderOb() {
-    let root = document.getElementById('lb-ob-root');
-    if (!OB.open) {
-      if (root) root.remove();
-      document.documentElement.classList.remove('lb-ob-lock');
-      return;
-    }
-    document.documentElement.classList.add('lb-ob-lock');
-    if (!root) {
-      root = document.createElement('div');
-      root.id = 'lb-ob-root';
-      root.className = 'lb-ob-root';
-      document.body.appendChild(root);
-    }
+  function buildObHtml() {
     const step = OB.step;
-    let body = '';
     const logo = `<div class="lb-ob-logo"><span>ل</span></div>`;
-
+    let body = '';
     if (step === 'role') {
       body = `${logo}
         <div class="lb-ob-title">چطور می‌خواهید از لینک‌بان استفاده کنید؟</div>
-        <p class="lb-ob-sub">نقش خود را انتخاب کنید. بعداً از تنظیمات می‌توانید بین نقش‌ها جابه‌جا شوید.</p>
+        <p class="lb-ob-sub">نقش خود را انتخاب کنید. بعداً از تنظیمات می‌توانید جابه‌جا شوید.</p>
         <div class="lb-ob-cards">
           <button type="button" class="lb-ob-card" data-ob="role-advertiser">
             <span class="lb-ob-card-ico">${icon('megaphone',22)}</span>
-            <span><b>آگهی‌دهنده</b><small>ثبت کسب‌وکار، بنر و سفارش تبلیغ در کانال‌ها</small></span>
+            <span><b>آگهی‌دهنده</b><small>ثبت کسب‌وکار، بنر و سفارش تبلیغ</small></span>
           </button>
           <button type="button" class="lb-ob-card" data-ob="role-manager">
             <span class="lb-ob-card-ico">${icon('building-2',22)}</span>
-            <span><b>مدیر کانال</b><small>ثبت کانال، تعرفه و پاسخ به درخواست‌های تبلیغ</small></span>
+            <span><b>مدیر کانال</b><small>ثبت کانال، تعرفه و پاسخ به درخواست‌ها</small></span>
           </button>
         </div>`;
     } else if (step === 'biz_name') {
       body = `${logo}
         <div class="lb-ob-title">کسب‌وکار خود را معرفی کنید</div>
-        <p class="lb-ob-sub">برای شروع حداقل یک کسب‌وکار لازم است. بنرها بعداً به بازو ارسال می‌شوند.</p>
+        <p class="lb-ob-sub">برای شروع حداقل یک کسب‌وکار لازم است. بنر را بعداً به بازو می‌فرستید.</p>
         <div class="lb-ob-field"><label>نام کسب‌وکار</label>
           <input id="ob-biz-name" maxlength="160" placeholder="مثلاً فروشگاه گیاهان طبیعی" value="${esc(OB.biz.name)}"/>
         </div>
@@ -2322,57 +2305,57 @@ function renderOpTickets() {
     } else if (step === 'biz_kind') {
       body = `${logo}
         <div class="lb-ob-title">نوع کسب‌وکار</div>
-        <p class="lb-ob-sub">اگر کانال بله دارید شناسه را وارد کنید؛ در غیر این صورت فروشگاه خارجی را انتخاب کنید.</p>
+        <p class="lb-ob-sub">کانال بله یا کسب‌وکار خارج از بله.</p>
         <div class="lb-ob-opts">
           <button type="button" class="lb-ob-opt ${OB.biz.kind==='bale'?'on':''}" data-ob="kind-bale"><span class="radio"></span><div><b>کانال یا گروه بله</b><span>با شناسه یا لینک ble.ir</span></div></button>
-          <button type="button" class="lb-ob-opt ${OB.biz.kind==='external'?'on':''}" data-ob="kind-external"><span class="radio"></span><div><b>فروشگاه / کسب‌وکار خارج از بله</b><span>سایت، اینستاگرام و …</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.biz.kind==='external'?'on':''}" data-ob="kind-external"><span class="radio"></span><div><b>فروشگاه خارج از بله</b><span>سایت، اینستاگرام و …</span></div></button>
         </div>
-        <div class="lb-ob-field" style="margin-top:14px"><label>${OB.biz.kind==='bale'?'شناسه یا لینک کانال':'آدرس یا شناسه (اختیاری)'}</label>
+        <div class="lb-ob-field" style="margin-top:14px"><label>${OB.biz.kind==='bale'?'شناسه یا لینک کانال':'آدرس (اختیاری)'}</label>
           <input id="ob-biz-ref" maxlength="200" placeholder="${OB.biz.kind==='bale'?'@mychannel یا ble.ir/…':'https://…'}" value="${esc(OB.biz.source_ref)}"/>
         </div>
         ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
     } else if (step === 'biz_cat') {
       body = `${logo}
         <div class="lb-ob-title">دسته‌بندی کسب‌وکار</div>
-        <p class="lb-ob-sub">حداقل یک موضوع انتخاب کنید تا تعرفه‌های مرتبط بهتر پیشنهاد شوند.</p>
+        <p class="lb-ob-sub">حداقل یک موضوع انتخاب کنید.</p>
         <div class="lb-ob-chips">
           ${OB_CATS.map((c) => `<button type="button" class="lb-ob-chip ${(OB.biz.categories||[]).includes(c)?'on':''}" data-ob="cat-${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
         ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
-        } else if (step === 'biz_done') {
+    } else if (step === 'biz_done') {
       body = `<div class="lb-ob-done">
         <div class="ok-ico">${icon('check',28)}</div>
         <div class="lb-ob-title">آماده‌اید</div>
-        <p class="lb-ob-sub">کسب‌وکار «${esc(OB.biz.name)}» ثبت شد. برای افزودن بنر، از برگه بنرها دکمهٔ افزودن را بزنید تا بازو راهنمایی کند.</p>
+        <p class="lb-ob-sub">کسب‌وکار «${esc(OB.biz.name)}» ثبت شد. بنر را از برگه بنرها از طریق بازو اضافه کنید.</p>
       </div>`;
     } else if (step === 'ch_link') {
       body = `${logo}
         <div class="lb-ob-title">افزودن کانال</div>
-        <p class="lb-ob-sub">نام کاربری یا لینک کانال بله را وارد کنید. دیگر نیازی به گذاشتن شناسه در بیو نیست.</p>
+        <p class="lb-ob-sub">نام کاربری یا لینک کانال بله را وارد کنید. نیازی به بیو نیست.</p>
         <div class="lb-ob-field"><label>نام کاربری یا لینک</label>
           <input id="ob-ch-link" maxlength="120" placeholder="@mychannel یا ble.ir/mychannel" value="${esc(OB.ch.link)}"/>
         </div>
-        <div class="lb-ob-hint">اگر کانال را قبلاً پشتیبان به شما انتساب داده باشد، همین‌جا با اولین ورود دیده می‌شود و فقط تعرفه می‌گذارید.</div>
+        <div class="lb-ob-hint">اگر پشتیبان کانال را به شما انتساب داده، همین‌جا دیده می‌شود و فقط تعرفه می‌گذارید.</div>
         ${OB.ch.error || OB.error ? `<div class="lb-ob-err">${esc(OB.ch.error || OB.error)}</div>` : ''}`;
     } else if (step === 'pmode') {
       body = `${logo}
         <div class="lb-ob-title">نحوه انتشار تبلیغ</div>
-        <p class="lb-ob-sub">وقتی سفارشی برای «${esc(OB.ch.name || 'کانال')}» قبول می‌کنید، تبلیغ چطور منتشر شود؟</p>
+        <p class="lb-ob-sub">برای «${esc(OB.ch.name || 'کانال')}» انتشار چگونه باشد؟</p>
         <div class="lb-ob-opts">
-          <button type="button" class="lb-ob-opt ${OB.pmode==='manual'?'on':''}" data-ob="pmode-manual"><span class="radio"></span><div><b>ارسال دستی توسط خودم</b><span>خودتان در زمان مقرر در کانال می‌فرستید</span></div></button>
-          <button type="button" class="lb-ob-opt ${OB.pmode==='bot'?'on':''}" data-ob="pmode-bot"><span class="radio"></span><div><b>ارسال خودکار با بازو</b><span>بازو باید ادمین کانال باشد</span></div></button>
-          <button type="button" class="lb-ob-opt ${OB.pmode==='linkyar'?'on':''}" data-ob="pmode-linkyar"><span class="radio"></span><div><b>ارسال خودکار با حساب دستیار</b><span>حساب لینک‌یار باید ادمین کانال باشد</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='manual'?'on':''}" data-ob="pmode-manual"><span class="radio"></span><div><b>ارسال دستی</b><span>خودتان در زمان مقرر می‌فرستید</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='bot'?'on':''}" data-ob="pmode-bot"><span class="radio"></span><div><b>خودکار با بازو</b><span>بازو باید ادمین کانال باشد</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='linkyar'?'on':''}" data-ob="pmode-linkyar"><span class="radio"></span><div><b>خودکار با حساب دستیار</b><span>لینک‌یار باید ادمین کانال باشد</span></div></button>
         </div>`;
     } else if (step === 'tariff') {
       body = `${logo}
         <div class="lb-ob-title">اولین تعرفه</div>
-        <p class="lb-ob-sub">یک تعرفه بسازید تا آگهی‌دهنده‌ها بتوانند سفارش دهند. بعداً از برگه کانال‌ها قابل ویرایش است.</p>
+        <p class="lb-ob-sub">یک تعرفه بسازید تا آگهی‌دهنده‌ها سفارش بدهند.</p>
         <div class="lb-ob-field"><label>نام تعرفه</label>
           <input id="ob-tar-name" maxlength="80" value="${esc(OB.tariff.name)}" placeholder="مثلاً ۲۴ ساعته"/>
         </div>
         <div class="lb-ob-chips">
           ${[[12,'۱۲ ساعت'],[24,'۲۴ ساعت'],[48,'۴۸ ساعت'],[72,'۷۲ ساعت']].map(([h,l]) =>
-            `<button type="button" class="lb-ob-chip ${OB.tariff.duration_hours===h?'on':''}" data-ob="dur-${h}">${l}</button>`
+            `<button type="button" class="lb-ob-chip ${Number(OB.tariff.duration_hours)===h?'on':''}" data-ob="dur-${h}">${l}</button>`
           ).join('')}
         </div>
         <div class="lb-ob-field"><label>قیمت (تومان)</label>
@@ -2383,16 +2366,16 @@ function renderOpTickets() {
       body = `<div class="lb-ob-done">
         <div class="ok-ico">${icon('check',28)}</div>
         <div class="lb-ob-title">کانال آماده است</div>
-        <p class="lb-ob-sub">«${esc(OB.ch.name || OB.ch.link)}» ثبت شد. درخواست‌های تبلیغ در صف پاسخ‌گویی می‌آیند.</p>
+        <p class="lb-ob-sub">«${esc(OB.ch.name || OB.ch.link)}» ثبت شد. درخواست‌ها در صف پاسخ‌گویی می‌آیند.</p>
       </div>`;
+    } else {
+      body = `${logo}<div class="lb-ob-title">ادامهٔ ثبت‌نام</div>`;
     }
 
     let foot = '';
-    if (step === 'role') {
-      foot = '';
-    } else if (step === 'biz_done' || step === 'mgr_done') {
+    if (step === 'biz_done' || step === 'mgr_done') {
       foot = `<button type="button" class="btn btn-primary" data-ob="finish">ورود به لینک‌بان</button>`;
-    } else {
+    } else if (step !== 'role') {
       const backStep = {
         biz_name: 'role', biz_kind: 'biz_name', biz_cat: 'biz_kind',
         ch_link: 'role', pmode: 'ch_link', tariff: 'pmode',
@@ -2401,194 +2384,189 @@ function renderOpTickets() {
         <button type="button" class="btn btn-primary" data-ob="next" ${OB.loading || OB.ch.loading ? 'disabled' : ''}>${OB.loading || OB.ch.loading ? '…' : 'ادامه'}</button>`;
     }
 
-    root.innerHTML = `
-      <div class="lb-ob-progress"><i style="width:${obProgress()}%"></i></div>
-      <div class="lb-ob-body">${body}</div>
-      ${foot ? `<div class="lb-ob-foot">${foot}</div>` : ''}`;
-
-    root.onclick = async (e) => {
-      const btn = e.target.closest('[data-ob]');
-      if (!btn) return;
-      const act = btn.getAttribute('data-ob');
-      OB.error = '';
-      OB.ch.error = '';
-
-      if (act === 'role-advertiser') {
-        OB.role = 'advertiser';
-        OB.step = 'biz_name';
-        try { localStorage.setItem(obKey('role'), 'advertiser'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'advertiser'); } catch (e) {}
-        ST.role = 'advertiser';
-        return renderOb();
-      }
-      if (act === 'role-manager') {
-        OB.role = 'manager';
-        OB.step = 'ch_link';
-        try { localStorage.setItem(obKey('role'), 'manager'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'manager'); } catch (e) {}
-        ST.role = 'manager';
-        return renderOb();
-      }
-      if (act === 'kind-bale' || act === 'kind-external') {
-        OB.biz.kind = act === 'kind-bale' ? 'bale' : 'external';
-        return renderOb();
-      }
-      if (act.startsWith('pmode-')) {
-        OB.pmode = act.slice(6);
-        return renderOb();
-      }
-      if (act.startsWith('dur-')) {
-        OB.tariff.duration_hours = parseInt(act.slice(4), 10) || 24;
-        return renderOb();
-      }
-      if (act.startsWith('cat-')) {
-        const c = act.slice(4);
-        const arr = OB.biz.categories || [];
-        if (arr.includes(c)) OB.biz.categories = arr.filter((x) => x !== c);
-        else OB.biz.categories = arr.concat([c]);
-        if (!OB.biz.categories.length) OB.biz.categories = ['سایر'];
-        return renderOb();
-      }
-      if (act === 'back') {
-        const backStep = {
-          biz_name: 'role', biz_kind: 'biz_name', biz_cat: 'biz_kind',
-          ch_link: 'role', pmode: 'ch_link', tariff: 'pmode',
-        }[OB.step];
-        if (backStep) OB.step = backStep;
-        return renderOb();
-      }
-      if (act === 'finish') {
-        OB.open = false;
-        try { renderOb(); } catch (e) {}
-        ST.loading = true; render();
-        try {
-          if (ST.role === 'manager') {
-            await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs()]);
-            ST.page = 'mgr-home';
-          } else {
-            await Promise.allSettled([loadBusinesses(), loadBanners(), loadOrders()]);
-            ST.page = 'market';
-          }
-        } catch (e) {}
-        ST.loading = false;
-        render();
-        return;
-      }
-      if (act === 'next') {
-        if (OB.step === 'biz_name') {
-          const n = document.getElementById('ob-biz-name');
-          OB.biz.name = (n && n.value || '').trim();
-          if (!OB.biz.name) { OB.error = 'نام کسب‌وکار را بنویسید.'; return renderOb(); }
-          OB.step = 'biz_kind';
-          return renderOb();
-        }
-        if (OB.step === 'biz_kind') {
-          const r = document.getElementById('ob-biz-ref');
-          OB.biz.source_ref = (r && r.value || '').trim();
-          OB.step = 'biz_cat';
-          return renderOb();
-        }
-        if (OB.step === 'biz_cat') {
-          if (!(OB.biz.categories || []).length) {
-            OB.error = 'حداقل یک دسته‌بندی انتخاب کنید.';
-            return renderOb();
-          }
-          OB.loading = true; renderOb();
-          try {
-            const d = await api('/businesses', {
-              method: 'POST',
-              body: JSON.stringify({
-                name: OB.biz.name,
-                kind: OB.biz.kind,
-                source_ref: OB.biz.source_ref,
-                categories: { main: OB.biz.categories, sub: [] },
-              }),
-            });
-            if (!d.ok) throw new Error(d.message || d.error || 'ثبت نشد');
-            obMarkDone('advertiser');
-            OB.step = 'biz_done';
-            await loadBusinesses().catch(() => {});
-          } catch (err) {
-            OB.error = err.message || 'ثبت کسب‌وکار ناموفق بود.';
-          }
-          OB.loading = false;
-          return renderOb();
-        }
-        if (OB.step === 'ch_link') {
-          const el = document.getElementById('ob-ch-link');
-          OB.ch.link = (el && el.value || '').trim();
-          if (!OB.ch.link) { OB.ch.error = 'شناسه یا لینک کانال را وارد کنید.'; return renderOb(); }
-          OB.ch.loading = true; renderOb();
-          try {
-            const d = await api('/channels/add', {
-              method: 'POST',
-              body: JSON.stringify({ link: OB.ch.link, name: '' }),
-            });
-            if (!d.ok) throw new Error(d.message || d.error || 'ثبت کانال ناموفق');
-            OB.ch.id = d.channel?.id || d.id || 0;
-            OB.ch.name = d.channel?.name || d.channel?.title || OB.ch.link;
-            OB.step = 'pmode';
-          } catch (err) {
-            OB.ch.error = err.message || 'ثبت کانال ناموفق بود.';
-          }
-          OB.ch.loading = false;
-          return renderOb();
-        }
-        if (OB.step === 'pmode') {
-          if (OB.ch.id) {
-            try {
-              await api('/publish-mode', {
-                method: 'POST',
-                body: JSON.stringify({ channel_id: OB.ch.id, publish_mode: OB.pmode }),
-              });
-            } catch (e) {}
-          }
-          OB.step = 'tariff';
-          return renderOb();
-        }
-        if (OB.step === 'tariff') {
-          const tn = document.getElementById('ob-tar-name');
-          const pr = document.getElementById('ob-tar-price');
-          OB.tariff.name = (tn && tn.value || '').trim() || `${OB.tariff.duration_hours} ساعته`;
-          OB.tariff.price = (pr && pr.value || '').toString().trim();
-          const priceNum = parseInt(String(OB.tariff.price).replace(/[^0-9]/g, ''), 10) || 0;
-          if (priceNum <= 0) { OB.error = 'قیمت معتبر وارد کنید.'; return renderOb(); }
-          OB.loading = true; renderOb();
-          try {
-            const d = await api('/tariffs/add', {
-              method: 'POST',
-              body: JSON.stringify({
-                channel_id: OB.ch.id,
-                name: OB.tariff.name,
-                duration_hours: OB.tariff.duration_hours,
-                price: priceNum,
-              }),
-            });
-            if (!d.ok) throw new Error(d.message || d.error || 'ثبت تعرفه ناموفق');
-            obMarkDone('manager');
-            OB.step = 'mgr_done';
-          } catch (err) {
-            OB.error = err.message || 'ثبت تعرفه ناموفق بود.';
-          }
-          OB.loading = false;
-          return renderOb();
-        }
-      }
-    };
+    return `
+      <div class="lb-ob-inline">
+        <div class="lb-ob-progress"><i style="width:${obProgress()}%"></i></div>
+        <div class="lb-ob-body">${body}</div>
+        ${foot ? `<div class="lb-ob-foot">${foot}</div>` : ''}
+      </div>`;
   }
 
-
   function renderOnboardPage() {
-    // Keep overlay code path for handlers; also paint into page
-    try { renderOb(); } catch (e) { console.error('renderOb', e); }
-    const root = document.getElementById('lb-ob-root');
-    if (root) {
-      // move visual into page flow: style overlay relative
-      root.style.position = 'relative';
-      root.style.inset = 'auto';
-      root.style.zIndex = '1';
-      root.style.minHeight = '70vh';
-      return ''; // content already in overlay attached to body
+    document.documentElement.classList.remove('lb-ob-lock');
+    const old = document.getElementById('lb-ob-root');
+    if (old) old.remove();
+    return buildObHtml();
+  }
+
+  async function handleObAction(act) {
+    OB.error = '';
+    OB.ch.error = '';
+    if (act === 'role-advertiser') {
+      OB.role = 'advertiser'; OB.step = 'biz_name'; ST.role = 'advertiser';
+      try { localStorage.setItem(obKey('role'), 'advertiser'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'advertiser'); } catch (e) {}
+      return render();
     }
-    return '<div class="loading">آماده‌سازی ورود…</div>';
+    if (act === 'role-manager') {
+      OB.role = 'manager'; OB.step = 'ch_link'; ST.role = 'manager';
+      try { localStorage.setItem(obKey('role'), 'manager'); localStorage.setItem(obKey('role_chosen'), '1'); localStorage.setItem('lb.role', 'manager'); } catch (e) {}
+      return render();
+    }
+    if (act === 'kind-bale' || act === 'kind-external') {
+      OB.biz.kind = act === 'kind-bale' ? 'bale' : 'external';
+      return render();
+    }
+    if (act.startsWith('pmode-')) {
+      OB.pmode = act.slice(6);
+      return render();
+    }
+    if (act.startsWith('dur-')) {
+      OB.tariff.duration_hours = parseInt(act.slice(4), 10) || 24;
+      return render();
+    }
+    if (act.startsWith('cat-')) {
+      const c = act.slice(4);
+      const arr = OB.biz.categories || [];
+      if (arr.includes(c)) OB.biz.categories = arr.filter((x) => x !== c);
+      else OB.biz.categories = arr.concat([c]);
+      if (!OB.biz.categories.length) OB.biz.categories = ['سایر'];
+      return render();
+    }
+    if (act === 'back') {
+      const backStep = {
+        biz_name: 'role', biz_kind: 'biz_name', biz_cat: 'biz_kind',
+        ch_link: 'role', pmode: 'ch_link', tariff: 'pmode',
+      }[OB.step];
+      if (backStep) OB.step = backStep;
+      return render();
+    }
+    if (act === 'finish') {
+      OB.open = false;
+      ST.loading = true; render();
+      try {
+        if (ST.role === 'manager') {
+          await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs()]);
+          ST.page = 'mgr-home';
+        } else {
+          await Promise.allSettled([loadBusinesses(), loadBanners(), loadOrders()]);
+          ST.page = 'home';
+        }
+      } catch (e) {}
+      ST.loading = false;
+      return render();
+    }
+    if (act === 'next') {
+      if (OB.step === 'biz_name') {
+        const n = document.getElementById('ob-biz-name');
+        OB.biz.name = (n && n.value || '').trim();
+        if (!OB.biz.name) { OB.error = 'نام کسب‌وکار را بنویسید.'; return render(); }
+        OB.step = 'biz_kind';
+        return render();
+      }
+      if (OB.step === 'biz_kind') {
+        const r = document.getElementById('ob-biz-ref');
+        OB.biz.source_ref = (r && r.value || '').trim();
+        OB.step = 'biz_cat';
+        return render();
+      }
+      if (OB.step === 'biz_cat') {
+        if (!(OB.biz.categories || []).length) {
+          OB.error = 'حداقل یک دسته‌بندی انتخاب کنید.';
+          return render();
+        }
+        OB.loading = true; render();
+        try {
+          const d = await api('/businesses', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: OB.biz.name,
+              kind: OB.biz.kind,
+              source_ref: OB.biz.source_ref,
+              categories: { main: OB.biz.categories, sub: [] },
+            }),
+          });
+          if (!d.ok) throw new Error(d.message || d.error || 'ثبت نشد');
+          obMarkDone('advertiser');
+          OB.step = 'biz_done';
+          await loadBusinesses().catch(() => {});
+        } catch (err) {
+          OB.error = err.message || 'ثبت کسب‌وکار ناموفق بود.';
+        }
+        OB.loading = false;
+        return render();
+      }
+      if (OB.step === 'ch_link') {
+        const el = document.getElementById('ob-ch-link');
+        OB.ch.link = (el && el.value || '').trim();
+        if (!OB.ch.link) { OB.ch.error = 'شناسه یا لینک کانال را وارد کنید.'; return render(); }
+        OB.ch.loading = true; render();
+        try {
+          const d = await api('/channels/add', {
+            method: 'POST',
+            body: JSON.stringify({ link: OB.ch.link, name: '' }),
+          });
+          if (!d.ok) throw new Error(d.message || d.error || 'ثبت کانال ناموفق');
+          OB.ch.id = (d.channel && d.channel.id) || d.id || 0;
+          OB.ch.name = (d.channel && (d.channel.name || d.channel.title)) || OB.ch.link;
+          OB.step = 'pmode';
+        } catch (err) {
+          OB.ch.error = err.message || 'ثبت کانال ناموفق بود.';
+        }
+        OB.ch.loading = false;
+        return render();
+      }
+      if (OB.step === 'pmode') {
+        if (OB.ch.id) {
+          try {
+            await api('/publish-mode', {
+              method: 'POST',
+              body: JSON.stringify({ channel_id: OB.ch.id, publish_mode: OB.pmode }),
+            });
+          } catch (e) {}
+        }
+        OB.step = 'tariff';
+        return render();
+      }
+      if (OB.step === 'tariff') {
+        const tn = document.getElementById('ob-tar-name');
+        const pr = document.getElementById('ob-tar-price');
+        OB.tariff.name = (tn && tn.value || '').trim() || (OB.tariff.duration_hours + ' ساعته');
+        OB.tariff.price = (pr && pr.value || '').toString().trim();
+        const priceNum = parseInt(String(OB.tariff.price).replace(/[^0-9]/g, ''), 10) || 0;
+        if (priceNum <= 0) { OB.error = 'قیمت معتبر وارد کنید.'; return render(); }
+        OB.loading = true; render();
+        try {
+          const d = await api('/tariffs/add', {
+            method: 'POST',
+            body: JSON.stringify({
+              channel_id: OB.ch.id,
+              name: OB.tariff.name,
+              duration_hours: OB.tariff.duration_hours,
+              price: priceNum,
+            }),
+          });
+          if (!d.ok) throw new Error(d.message || d.error || 'ثبت تعرفه ناموفق');
+          obMarkDone('manager');
+          OB.step = 'mgr_done';
+        } catch (err) {
+          OB.error = err.message || 'ثبت تعرفه ناموفق بود.';
+        }
+        OB.loading = false;
+        return render();
+      }
+    }
+  }
+
+  function bindOnboardPage() {
+    const root = $('#pageContent');
+    if (!root) return;
+    root.querySelectorAll('[data-ob]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const act = btn.getAttribute('data-ob');
+        if (act) handleObAction(act);
+      };
+    });
   }
 
   function startOnboardingIfNeeded() {

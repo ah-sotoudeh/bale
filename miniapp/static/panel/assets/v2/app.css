@@ -1015,3 +1015,7 @@ html[data-theme="dark"] .lb-ob-root {
   color: var(--muted, #64748B);
   font-size: .9rem;
 }
+
+.lb-ob-inline { display: flex; flex-direction: column; min-height: 60vh; }
+.lb-ob-inline .lb-ob-body { flex: 1; }
+.lb-ob-inline .lb-ob-foot { position: sticky; bottom: 0; }
