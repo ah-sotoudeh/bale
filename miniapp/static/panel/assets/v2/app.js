@@ -98,6 +98,7 @@
     const method = (opts.method || 'GET').toUpperCase();
     const headers = Object.assign({}, opts.headers || {});
     const initData = getInitData();
+    const softUser = baleClientUser();
     if (initData) headers['X-Bale-Init-Data'] = initData;
     const dbg = debugId();
     if (dbg) headers['X-Bale-User-Id'] = dbg;
@@ -105,10 +106,16 @@
     let body = opts.body;
     if (body && !(body instanceof FormData) && typeof body === 'object') {
       headers['Content-Type'] = 'application/json';
-      if (dbg && !body.debug_bale_id) body = Object.assign({ debug_bale_id: dbg }, body);
+      const extra = {};
+      if (dbg && !body.debug_bale_id) extra.debug_bale_id = dbg;
+      if (softUser && softUser.id && !body.soft_user) extra.soft_user = softUser;
+      if (Object.keys(extra).length) body = Object.assign({}, extra, body);
       body = JSON.stringify(body);
     } else if (body instanceof FormData && dbg) {
       body.append('debug_bale_id', dbg);
+    } else if (method !== 'GET' && softUser && softUser.id && (body == null || body === undefined)) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify({ soft_user: softUser, ...(dbg ? { debug_bale_id: dbg } : {}) });
     }
 
     let url = path.startsWith('http') ? path : API + path;
@@ -197,6 +204,54 @@
     return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
   }
 
+
+  function baleClientUser() {
+    try {
+      if (window.__LB_USER) return window.__LB_USER;
+      const w = window.Bale && window.Bale.WebApp;
+      if (w && w.initDataUnsafe && w.initDataUnsafe.user) return w.initDataUnsafe.user;
+    } catch (e) {}
+    return null;
+  }
+
+  function displayName(me) {
+    const u = (me && me.user) || me || {};
+    const bu = baleClientUser() || {};
+    const fn = (u.first_name || bu.first_name || bu.firstName || '').trim();
+    const ln = (u.last_name || bu.last_name || bu.lastName || '').trim();
+    const full = [fn, ln].filter(Boolean).join(' ').trim();
+    if (full) return full;
+    if (u.full_name) return String(u.full_name).trim();
+    const handle = (u.handle || '').replace(/^@/, '') || u.username || bu.username || '';
+    return handle || 'دوست لینک‌بان';
+  }
+
+  function userPhotoUrl(me) {
+    const u = (me && me.user) || me || {};
+    const bu = baleClientUser() || {};
+    return (u.photo_url || bu.photo_url || bu.photoUrl || '').trim();
+  }
+
+  function userInitials(me) {
+    const name = displayName(me);
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).slice(0, 2);
+    return (name[0] || 'ک').toUpperCase();
+  }
+
+  function paintHeaderProfile() {
+    const btn = document.getElementById('btnProfile');
+    if (!btn) return;
+    const photo = userPhotoUrl(ST.me);
+    const letter = userInitials(ST.me);
+    if (photo) {
+      btn.innerHTML = `<img src="${esc(photo)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove();this.parentNode.textContent='${esc(letter)}'"/>`;
+    } else {
+      btn.textContent = letter;
+    }
+    btn.title = displayName(ST.me);
+  }
+
   function openSheet(html) {
     $('#sheetBody').innerHTML = html;
     $('#sheet').classList.add('on');
@@ -268,8 +323,21 @@
   async function loadMe() {
     const d = await api('/me');
     if (!d.ok) throw new Error(d.message || d.error || 'auth');
+    // merge Bale client profile
+    try {
+      const bu = baleClientUser();
+      if (bu && d.user) {
+        if (!d.user.first_name && (bu.first_name || bu.firstName)) d.user.first_name = bu.first_name || bu.firstName;
+        if (!d.user.last_name && (bu.last_name || bu.lastName)) d.user.last_name = bu.last_name || bu.lastName;
+        if (bu.photo_url || bu.photoUrl) d.user.photo_url = bu.photo_url || bu.photoUrl;
+        if (d.user.first_name || d.user.last_name) {
+          d.user.full_name = [d.user.first_name, d.user.last_name].filter(Boolean).join(' ');
+        }
+      }
+    } catch (e) {}
     ST.me = d;
     ST.wallet = d.wallet || { available: 0, pending: 0 };
+    try { paintHeaderProfile(); } catch (e) {}
     // restore preferred role if valid
     try {
       const saved = localStorage.getItem('lb.role');
@@ -472,8 +540,7 @@
   }
 
   function renderHome() {
-    const user = ST.me?.user || {};
-    const name = user.first_name || user.handle || user.username || 'دوست لینک‌بان';
+    const name = displayName(ST.me);
     const wr = ST.wallet || ST.me?.wallet || {};
     const w = wr.balance || wr;
     const balance = Number(w.credit ?? w.available ?? 0);
@@ -484,7 +551,7 @@
     const approvedBanners = (ST.banners || []).filter(b => (b.stage || b.status || 'ready') !== 'rejected' && b.is_active !== false).length;
     const suggestions = groupByChannel(filteredTariffs()).slice(0, 2);
     const miniCards = suggestions.map(g => {
-      const minPrice = Math.min(...g.tariffs.map(t => Number(t.price)||0));
+      const minPrice = g.tariffs.length ? Math.min(...g.tariffs.map(t => Number(t.price)||0)) : 0;
       const chId = g.key;
       return `<article class="home-channel-card" data-open-ch="${esc(chId)}">
         <div class="home-channel-art"><span>${icon('megaphone',24)}</span><i></i></div>
@@ -525,7 +592,7 @@
     const tariffCount = (ST.catalog?.tariffs || []).length;
     const cards = list.length
       ? list.map((g, index) => {
-          const minPrice = Math.min(...g.tariffs.map((t) => Number(t.price) || 0));
+          const minPrice = g.tariffs.length ? Math.min(...g.tariffs.map((t) => Number(t.price) || 0)) : 0;
           const letter = (g.name || '?').charAt(0);
           const av = g.avatar
             ? `<img src="${esc(g.avatar)}" alt="" onerror="this.parentNode.textContent='${esc(letter)}'"/>`
@@ -824,8 +891,10 @@
   function renderSettings() {
     const u = ST.me?.user || {};
     const pending = ST.me?.pending_orders || 0;
-    const handle = u.handle || u.username || 'کاربر لینک‌بان';
+    const handle = displayName(ST.me);
     const identity = u.bale_user_id || '';
+    const photo = userPhotoUrl(ST.me);
+    const initials = userInitials(ST.me);
     const isOperator = ST.me?.is_operator || ST.me?.roles?.operator;
     const roleCard = (key, title, subtitle, glyph) => `
       <div class="role-card ${ST.role===key?'on':''}" data-r="${key}" role="button" tabindex="0" aria-pressed="${ST.role===key?'true':'false'}">
@@ -837,8 +906,8 @@
       <section class="profile-hero">
         <div class="profile-hero-glow"></div>
         <div class="profile-identity">
-          <div class="profile-avatar">${icon('user-round',28)}</div>
-          <div class="profile-copy"><span class="profile-overline">حساب لینک‌بان</span><h2>${esc(handle.startsWith('@') ? handle : '@' + handle)}</h2><span class="profile-subline">${icon('shield-check',13)} حساب کاربری شما</span></div>
+          <div class="profile-avatar">${photo ? `<img src="${esc(photo)}" alt=""/>` : esc(initials)}</div>
+          <div class="profile-copy"><span class="profile-overline">حساب لینک‌بان</span><h2>${esc(handle)}</h2><span class="profile-subline">${icon('shield-check',13)} ${(u.handle || u.username) ? ('@' + esc(String(u.handle || u.username).replace(/^@/,''))) : 'حساب کاربری شما'}</span></div>
           <span class="profile-member-badge">${icon('badge-check',17)}</span>
         </div>
         <div class="profile-meta"><span>شناسه کاربری</span><strong>${identity ? fa(identity) : '—'}</strong><button id="btnCopyUserId" type="button" aria-label="کپی شناسه" ${identity ? '' : 'disabled'}>${icon('copy',15)}</button></div>
@@ -888,7 +957,7 @@
     const chs = ST.myChannels || [];
     const tariffs = ST.mgrTariffs || [];
     const publishing = all.filter(o => o.manager_status === 'approved' && o.publish_due);
-    const label = ST.me?.user?.first_name || ST.me?.user?.handle || 'مدیر کانال';
+    const label = displayName(ST.me);
     return `
       <section class="manager-inbox-hero">
         <div class="manager-inbox-glow"></div>
@@ -1141,6 +1210,7 @@ function renderOpTickets() {
       const nav = document.getElementById('bottomNav');
       if (nav) nav.style.display = (ST.page === 'onboard') ? 'none' : '';
     } catch (e) {}
+    try { paintHeaderProfile(); } catch (e) {}
     renderNav();
     bindPage();
   }
@@ -2279,7 +2349,7 @@ function renderOpTickets() {
 
   function buildObHtml() {
     const step = OB.step;
-    const logo = `<div class="lb-ob-logo"><span>ل</span></div>`;
+    const logo = `<div class="lb-ob-logo"><img src="/miniapp/assets/logo-linkban.jpg" alt="لینک‌بان" onerror="this.style.display='none';this.parentNode.innerHTML='<span>ل</span>'"/></div>`;
     let body = '';
     if (step === 'role') {
       body = `${logo}

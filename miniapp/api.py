@@ -220,6 +220,12 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
         user = User(username=login_name, bale_user_id=uid)
         user.set_unusable_password()
         user.bale_username = uname_meta or None
+        fn = str(meta.get('first_name') or meta.get('firstName') or '').strip()[:150]
+        ln = str(meta.get('last_name') or meta.get('lastName') or '').strip()[:150]
+        if fn:
+            user.first_name = fn
+        if ln:
+            user.last_name = ln
         try:
             user.save()
         except Exception:
@@ -229,10 +235,21 @@ def _auth_user(request: HttpRequest) -> tuple[Optional[User], Optional[JsonRespo
                 raise
     else:
         uname = str(meta.get('username') or '').strip().lstrip('@')
+        fields = []
         if uname and str(user.bale_username or '') != uname:
             user.bale_username = uname
+            fields.append('bale_username')
+        fn = str(meta.get('first_name') or meta.get('firstName') or '').strip()[:150]
+        ln = str(meta.get('last_name') or meta.get('lastName') or '').strip()[:150]
+        if fn and user.first_name != fn:
+            user.first_name = fn
+            fields.append('first_name')
+        if ln and user.last_name != ln:
+            user.last_name = ln
+            fields.append('last_name')
+        if fields:
             try:
-                user.save(update_fields=['bale_username'])
+                user.save(update_fields=fields)
             except Exception:
                 pass
         # اگر bale_user_id با صفر/فرمت عجیب ذخیره شده، یکدست کن
@@ -315,6 +332,16 @@ def api_me(request: HttpRequest) -> JsonResponse:
             'bale_user_id': user.bale_user_id,
             'handle': getattr(user, 'bale_handle', None) or '',
             'username': user.bale_username,
+            'first_name': (user.first_name or '').strip(),
+            'last_name': (user.last_name or '').strip(),
+            'full_name': (' '.join(x for x in [(user.first_name or '').strip(), (user.last_name or '').strip()] if x) or (user.bale_username or '') or 'کاربر'),
+            'photo_url': '',  # از کلاینت Bale.WebApp پر می‌شود
+            'initials': (
+                ''.join(
+                    (p[:1] for p in [(user.first_name or '').strip(), (user.last_name or '').strip()] if p)
+                )[:2]
+                or (str(user.bale_username or 'ک')[:1])
+            ),
         },
         'wallet': br,
         'channel_categories': [{'id': c[0], 'label': c[1]} for c in getattr(Channel, 'CATEGORY_CHOICES', ())],
