@@ -2163,11 +2163,12 @@ function renderOpTickets() {
     render();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    try { loadAll(true); } catch (e) {}
-  }
-});
-document.addEventListener('DOMContentLoaded, boot);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      try { if (typeof loadAll === 'function') loadAll(true); } catch (e) {}
+    }
+  });
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })();
