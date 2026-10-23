@@ -2581,16 +2581,20 @@ function renderOpTickets() {
     OB.biz = { name: '', kind: 'bale', source_ref: '', categories: ['سایر'] };
     OB.pmode = 'manual';
     OB.tariff = { name: '۲۴ ساعته', duration_hours: 24, price: '' };
+    // فقط اگر کاربر قبلاً در همین حساب نقش را انتخاب کرده و ثبت‌نامش ناتمام است، ادامه بده
     try {
-      const r = localStorage.getItem(obKey('role')) || localStorage.getItem('lb.role') || localStorage.getItem('lb_role');
-      if (r === 'manager' && localStorage.getItem(obKey('manager_onboarded')) !== '1') {
+      const chosen = localStorage.getItem(obKey('role_chosen')) === '1';
+      const r = localStorage.getItem(obKey('role')) || '';
+      if (chosen && r === 'manager' && localStorage.getItem(obKey('manager_onboarded')) !== '1') {
         OB.role = 'manager'; OB.step = 'ch_link'; ST.role = 'manager';
-      } else if ((r === 'advertiser' || r === 'customer') && localStorage.getItem(obKey('customer_onboarded')) !== '1') {
+      } else if (chosen && (r === 'advertiser' || r === 'customer') && localStorage.getItem(obKey('customer_onboarded')) !== '1') {
         OB.role = 'advertiser'; OB.step = 'biz_name'; ST.role = 'advertiser';
       }
+      // در غیر این صورت همیشه از کارت‌های انتخاب نقش شروع کن
     } catch (e) {}
     ST.page = 'onboard';
     ST.loading = false;
+    ST.forceBusinessSetup = false;
     try { render(); } catch (e) { console.error(e); }
     return true;
   }
@@ -2613,13 +2617,7 @@ function renderOpTickets() {
       else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments(), loadOpSettings(), loadOpTickets()]); }
       else ST.page = launchView === 'businesses' ? 'businesses' : 'home';
       await Promise.allSettled([loadCatalog(), loadBanners(), loadBusinesses({ refreshMetadata: launchView === 'businesses' }), loadOrders(), loadWallet()]);
-      // ویزارد ورود: آگهی‌دهنده حداقل یک کسب‌وکار لازم دارد
-      if (ST.role === 'advertiser' || ST.role === 'customer') {
-        if (!(ST.businesses || []).length) {
-          ST.page = 'businesses';
-          ST.forceBusinessSetup = true;
-        }
-      }
+      // ثبت‌نام اولیه فقط از ویزارد نقش (startOnboardingIfNeeded)
     } catch (e) {
       toast(e.message || 'ورود ناموفق — با ?debug_bale_id=… یا داخل بله باز کنید');
     }
