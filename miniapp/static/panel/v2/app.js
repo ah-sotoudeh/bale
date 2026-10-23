@@ -44,7 +44,7 @@
     me: null,
     catalog: null,
     banners: [],
-    bannerFeePolicy: { first_free_available: true, next_banner_fee_toman: 140000 },
+    bannerFeePolicy: { first_free_available: true, next_banner_fee_toman: 0 },
     businesses: [],
     activeBusinessId: null,
     bannerDraft: null,
@@ -426,7 +426,7 @@
       </section>
       <section class="home-banner-callout">
         <div class="home-banner-visual"><div class="home-banner-poster">${icon('image',28)}<span>AD</span></div><i></i><i></i></div>
-        <div class="home-banner-copy"><span class="home-banner-label">کتابخانهٔ خلاقیت</span><strong>بنرت آمادهٔ انتشار است؟</strong><p>${approvedBanners ? `${fa(approvedBanners)} بنر تأییدشده برای سفارش داری.` : 'بنرت را ثبت کن تا پس از بررسی، در سفارش‌ها از آن استفاده کنی.'}</p><button id="btnHomeManageBanners">مدیریت بنرها ${icon('chevron-left',14)}</button></div>
+        <div class="home-banner-copy"><span class="home-banner-label">کتابخانهٔ خلاقیت</span><strong>بنرت آمادهٔ انتشار است؟</strong><p>${approvedBanners ? `${fa(approvedBanners)} بنر تأییدشده برای سفارش داری.` : 'بنرت را ثبت کن تا پس از ثبت، در سفارش‌ها از آن استفاده کنی.'}</p><button id="btnHomeManageBanners">مدیریت بنرها ${icon('chevron-left',14)}</button></div>
       </section>
       <div class="home-section-head"><div><span class="eyebrow">پیشنهادهای بازار</span><h2>کانال‌های منتخب</h2></div><button class="text-action" id="btnHomeMarketAll">مشاهدهٔ بازار ${icon('chevron-left',15)}</button></div>
       <div class="home-channel-list">${miniCards || `<div class="home-soft-empty"><span>${icon('search',21)}</span><div><strong>هنوز پیشنهادی نداریم</strong><small>بازار را باز کن تا جایگاه‌های موجود را ببینی.</small></div><button id="btnHomeMarketEmpty">${icon('chevron-left',15)}</button></div>`}</div>
@@ -533,7 +533,7 @@
         <div class="page-intro-copy"><span class="eyebrow">محتوای تبلیغاتی شما</span><h2>کتابخانهٔ بنرها</h2><p>بنرها را ثبت کن و وضعیت بررسی هرکدام را از همین‌جا دنبال کن.</p></div>
         <div class="banner-intro-count"><strong>${fa(allBanners.length)}</strong><span>بنر ثبت‌شده</span><small>${fa(waitingBanners)} در انتظار</small></div>
       </section>
-      <p class="hint page-note">بنر می‌تواند تصویر، ویدیو یا <strong>فقط متن</strong> باشد. پس از بررسی پشتیبانی تأیید می‌شود.</p>
+      <p class="hint page-note">بنر می‌تواند تصویر، ویدیو یا <strong>فقط متن</strong> باشد. پس از ثبت پشتیبانی تأیید می‌شود.</p>
       <div class="bot-hint">
         <strong>از ربات هم می‌توانید بنر بفرستید:</strong>
         بنر را به بازوی لینک‌بان فوروارد کنید؛ بعد از ثبت، اینجا نمایش داده می‌شود.
@@ -582,7 +582,7 @@
       : `هزینهٔ تأیید این بنر ${faNum(feePolicy.next_banner_fee_toman || 140000)} تومان است و فقط پس از تأیید پشتیبانی کسر می‌شود.`;
     const hasBusinesses = (ST.businesses || []).length > 0;
     return `<div class="sheet-handle"></div>
-      <section class="form-sheet-hero banner-form-hero"><span class="form-sheet-icon">${icon('image',23)}</span><div><span class="eyebrow">کتابخانهٔ محتوای تبلیغاتی</span><h3>ثبت بنر جدید</h3><p>یک محتوا ثبت کن تا پس از بررسی به سفارش‌هایت اضافه شود.</p></div></section>
+      <section class="form-sheet-hero banner-form-hero"><span class="form-sheet-icon">${icon('image',23)}</span><div><span class="eyebrow">کتابخانهٔ محتوای تبلیغاتی</span><h3>ثبت بنر جدید</h3><p>بنر را ثبت کن تا بلافاصله در فهرست بنرهایت باشد و برای سفارش قابل انتخاب شود.</p></div></section>
       <div class="banner-type-picker" id="bannerType"><button type="button" class="on" data-t="media"><span>${icon('image',17)}</span><b>تصویر یا ویدیو</b><small>محتوای بصری</small></button><button type="button" data-t="text"><span>${icon('file-text',17)}</span><b>بنر متنی</b><small>بدون فایل رسانه</small></button></div>
       <div id="mediaBlock"><div class="upload-zone upload-zone-modern" id="uploadZone"><span class="upload-zone-icon">${icon('upload-cloud',25)}</span><strong>فایل را انتخاب کن</strong><span>تصویر JPG/PNG یا ویدیوی MP4</span><small>حداکثر حجم ۱۵ مگابایت</small><input type="file" id="bannerFile" accept="image/*,video/*" hidden/></div><div id="fileName" class="file-save-status" aria-live="polite"></div></div>
       <div class="form-section-label"><span>۱</span><div><b>جزئیات بنر</b><small>عنوان و پیام تبلیغاتی</small></div></div>
@@ -712,7 +712,7 @@
       ${payouts.length ? payouts.map(x => `<div class="card list-item"><div class="grow"><div class="title">درخواست #${fa(x.id)}</div><div class="hint">${esc(payoutLabels[x.status] || x.status)} · ${esc(x.iban_tail || '')}</div></div><b>${faNum(x.amount_toman)} تومان</b></div>`).join('') : '<div class="card hint">درخواستی ثبت نشده است.</div>'}
       <div class="section">گردش حساب</div>
       ${ledger.length ? ledger.map(x => `<div class="card list-item"><div class="grow"><div class="title">${esc(ledgerLabels[x.entry_type] || x.entry_type || 'تراکنش')}</div><div class="hint">${esc(x.note || x.ref || '')}</div></div><b>${Number(x.amount) > 0 ? '+' : ''}${faNum(x.amount)} تومان</b></div>`).join('') : '<div class="card hint">تراکنشی برای نمایش وجود ندارد.</div>'}
-      <p class="hint" style="margin-top:12px">فاکتور شارژ از طریق گفت‌وگوی بله ارسال می‌شود. درخواست برداشت پس از بررسی پشتیبانی پردازش خواهد شد.</p>`;
+      <p class="hint" style="margin-top:12px">فاکتور شارژ از طریق گفت‌وگوی بله ارسال می‌شود. درخواست برداشت پس از ثبت پشتیبانی پردازش خواهد شد.</p>`;
   }
 
   function renderSettings() {
@@ -1859,6 +1859,13 @@
       else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments()]); }
       else ST.page = launchView === 'businesses' ? 'businesses' : 'home';
       await Promise.allSettled([loadCatalog(), loadBanners(), loadBusinesses({ refreshMetadata: launchView === 'businesses' }), loadOrders(), loadWallet()]);
+      // ویزارد ورود: آگهی‌دهنده حداقل یک کسب‌وکار لازم دارد
+      if (ST.role === 'advertiser' || ST.role === 'customer') {
+        if (!(ST.businesses || []).length) {
+          ST.page = 'businesses';
+          ST.forceBusinessSetup = true;
+        }
+      }
     } catch (e) {
       toast(e.message || 'ورود ناموفق — با ?debug_bale_id=… یا داخل بله باز کنید');
     }

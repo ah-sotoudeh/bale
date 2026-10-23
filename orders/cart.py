@@ -20,7 +20,15 @@ from users.models import User
 logger = logging.getLogger(__name__)
 
 MANAGER_HOURS = int(os.environ.get('MANAGER_RESPONSE_HOURS', '12'))
-PAYMENT_HOLD_HOURS = int(os.environ.get('PAYMENT_HOLD_HOURS', '24'))
+def _payment_hold_hours() -> int:
+    try:
+        from config.system_settings import get_settings
+        return int(get_settings().get('payment_hold_hours') or 3)
+    except Exception:
+        return int(os.environ.get('PAYMENT_HOLD_HOURS', '3'))
+
+
+PAYMENT_HOLD_HOURS = _payment_hold_hours()  # snapshot at import; call _payment_hold_hours() for live
 CART_HOLD_MINUTES = int(os.environ.get('CART_HOLD_MINUTES', '120'))
 
 
@@ -495,7 +503,7 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
     total = sum(i.price for i in approved)
     order.total_amount = total
     order.status = 'waiting_payment'
-    order.managers_deadline = timezone.now() + timedelta(hours=PAYMENT_HOLD_HOURS)
+    order.managers_deadline = timezone.now() + timedelta(hours=_payment_hold_hours())
     order.save()
 
     from bot_flow.access import is_debug_user
@@ -513,7 +521,7 @@ def maybe_finalize_order(order_id: int) -> Dict[str, Any]:
             lines.append(f'{fa_num(index)}. {fa_money(part)}')
         lines.append('سفارش بعد از پرداخت همهٔ درخواست‌ها ثبت می‌شود.')
     lines.append(
-        f'تا {fa_num(PAYMENT_HOLD_HOURS)} ساعت برای پرداخت وقت دارید. '
+        f'تا {fa_num(_payment_hold_hours())} ساعت برای پرداخت وقت دارید. '
         'بعد از آن، روزها دوباره آزاد می‌شوند.'
     )
     kb = None
