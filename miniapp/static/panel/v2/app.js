@@ -360,10 +360,17 @@
   }
 
   async function loadMyChannels() {
-    const d = await api('/channels');
-    if (!d.ok) { ST.myChannels = []; ST.myGroups = []; return; }
-    ST.myChannels = d.channels || [];
-    ST.myGroups = d.groups || [];
+    try {
+      const d = await api('/channels');
+      if (!d || !d.ok) { ST.myChannels = []; ST.myGroups = []; return; }
+      ST.myChannels = d.channels || [];
+      ST.myGroups = d.groups || [];
+    } catch (e) {
+      console.error('loadMyChannels', e);
+      ST.myChannels = ST.myChannels || [];
+      ST.myGroups = ST.myGroups || [];
+      throw e;
+    }
   }
 
   async function loadMgrOrders() {
@@ -1027,40 +1034,71 @@
 
   function renderMgrChannels() {
     const chs = ST.myChannels || [];
-    if (!chs.length) return `<div class="manager-empty-state"><div class="manager-empty-art channel-empty-art"><div class="empty-orbit"></div><span>${icon('building-2',31)}</span><i></i><b></b></div><span class="manager-empty-label">شبکهٔ کانال‌ها</span><h3>هنوز کانالی به میزکارت وصل نشده</h3><p>نام کاربری بله‌ات را در «توضیحات کانال» بنویس، بعد لینک یا @شناسه را اینجا ثبت کن. پس از تأیید می‌توانی نام کاربری را از توضیحات حذف کنی.</p><div class="manager-empty-actions"><button class="btn btn-primary" id="btnMgrAddChannelEmpty">افزودن کانال</button><button class="btn btn-ghost" id="btnMgrRefreshChannelsEmpty">بررسی دوباره</button></div><div class="manager-connect-hint">${icon('shield-check',15)} کانال باید عمومی باشد و حداقل ۱۰۰۰ عضو داشته باشد.</div></div>`;
-    return `<div class="manager-channel-list">${chs.map((c,index) => {
-      const letter = esc((c.name || 'ک').slice(0,1));
-      const src = c.avatar_url || c.photo_url || '';
-      const ava = src
-        ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span class="mgr-ava-fallback" style="display:none">${letter}</span>`
-        : `<span class="mgr-ava-fallback">${letter}</span>`;
-      const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\\.ir\\//i, '')) : '';
-      const mode = (c.publish_mode === 'linkyar') ? 'linkyar' : (c.publish_mode === 'bot' ? 'bot' : 'bot');
-      return `<article class="manager-channel-card compact" style="--card-order:${Math.min(index,8)}">
-        <div class="manager-channel-row">
-          <div class="manager-channel-avatar">${ava}</div>
-          <div class="manager-channel-main">
-            <div class="manager-channel-name-row">
-              <div>
-                <h3>${esc(c.name)}</h3>
-                <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسه ثبت نشده'}</p>
-              </div>
-              <span class="manager-channel-state ${c.is_listed===false?'paused':''}">${c.is_listed===false?'آرشیو':'در بازار'}</span>
-            </div>
-            <div class="manager-channel-meta-line">
-              <span>${icon('users',13)} ${faK(c.members_count)}</span>
-              <span>${icon('chart',13)} ${faK(c.avg_views)}</span>
-              <span>${icon('tags',13)} ${fa(c.tariff_count || 0)}</span>
-              <span class="manager-method-badge">${esc(modeLabel(c.publish_mode === 'manual' ? 'bot' : c.publish_mode))}</span>
-            </div>
-          </div>
-        </div>
-        <div class="manager-channel-actions">
-          <button class="btn btn-primary" data-mgr-ch="${c.id}">مدیریت</button>
-          <button class="btn btn-ghost" data-mgr-mode="${c.id}">${icon('sliders',14)} انتشار</button>
-        </div>
-      </article>`;
-    }).join('')}</div><button class="btn btn-soft btn-block manager-list-refresh" id="btnMgrRefreshChannelsList">${icon('refresh-cw',15)} به‌روزرسانی آمار کانال‌ها</button>`;
+    if (!chs.length) {
+      return (
+        '<div class="manager-empty-state">' +
+        '<div class="manager-empty-art channel-empty-art"><div class="empty-orbit"></div><span>' + icon('building-2', 31) + '</span><i></i><b></b></div>' +
+        '<span class="manager-empty-label">شبکهٔ کانال‌ها</span>' +
+        '<h3>هنوز کانالی به میزکارت وصل نشده</h3>' +
+        '<p>نام کاربری بله‌ات را در «توضیحات کانال» بنویس، بعد لینک یا @شناسه را اینجا ثبت کن. پس از تأیید می‌توانی نام کاربری را از توضیحات حذف کنی.</p>' +
+        '<div class="manager-empty-actions">' +
+        '<button class="btn btn-primary" id="btnMgrAddChannelEmpty">افزودن کانال</button>' +
+        '<button class="btn btn-ghost" id="btnMgrRefreshChannelsEmpty">بررسی دوباره</button>' +
+        '</div>' +
+        '<div class="manager-connect-hint">' + icon('shield-check', 15) + ' کانال باید عمومی باشد و حداقل ۱۰۰۰ عضو داشته باشد.</div>' +
+        '</div>'
+      );
+    }
+    const cards = chs.map(function (c, index) {
+      try {
+        const letter = esc((c.name || 'ک').slice(0, 1));
+        const src = c.avatar_url || c.photo_url || '';
+        let ava;
+        if (src) {
+          ava =
+            '<img src="' + esc(src) + '" alt="" loading="lazy" ' +
+            'onerror="this.style.display=\'none\';var s=this.nextElementSibling;if(s)s.style.display=\'grid\'"/>' +
+            '<span class="mgr-ava-fallback" style="display:none">' + letter + '</span>';
+        } else {
+          ava = '<span class="mgr-ava-fallback">' + letter + '</span>';
+        }
+        let handle = '';
+        if (c.link) {
+          handle = '@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i, '');
+        }
+        const modeKey = c.publish_mode === 'linkyar' ? 'linkyar' : 'bot';
+        const listed = c.is_listed === false;
+        return (
+          '<article class="manager-channel-card compact" style="--card-order:' + Math.min(index, 8) + '">' +
+          '<div class="manager-channel-row">' +
+          '<div class="manager-channel-avatar">' + ava + '</div>' +
+          '<div class="manager-channel-main">' +
+          '<div class="manager-channel-name-row">' +
+          '<div><h3>' + esc(c.name) + '</h3>' +
+          '<p class="mgr-handle" dir="ltr">' + (handle ? esc(handle) : 'شناسه ثبت نشده') + '</p></div>' +
+          '<span class="manager-channel-state' + (listed ? ' paused' : '') + '">' + (listed ? 'آرشیو' : 'در بازار') + '</span>' +
+          '</div>' +
+          '<div class="manager-channel-meta-line">' +
+          '<span>' + icon('users', 13) + ' ' + faK(c.members_count) + '</span>' +
+          '<span>' + icon('chart', 13) + ' ' + faK(c.avg_views) + '</span>' +
+          '<span>' + icon('wallet', 13) + ' ' + fa(c.tariff_count || 0) + '</span>' +
+          '<span class="manager-method-badge">' + esc(modeLabel(modeKey)) + '</span>' +
+          '</div></div></div>' +
+          '<div class="manager-channel-actions">' +
+          '<button class="btn btn-primary" data-mgr-ch="' + c.id + '">مدیریت</button>' +
+          '<button class="btn btn-ghost" data-mgr-mode="' + c.id + '">' + icon('sliders', 14) + ' انتشار</button>' +
+          '</div></article>'
+        );
+      } catch (err) {
+        console.error('channel card', err);
+        return '';
+      }
+    }).join('');
+    return (
+      '<div class="manager-channel-list">' + cards + '</div>' +
+      '<button class="btn btn-soft btn-block manager-list-refresh" id="btnMgrRefreshChannelsList">' +
+      icon('refresh-cw', 15) + ' به‌روزرسانی آمار کانال‌ها</button>'
+    );
   }
 
   function renderMgrTariffs() {
@@ -1228,9 +1266,9 @@ function renderOpTickets() {
     else if (ST.page === 'businesses') html = renderBusinesses();
     else if (ST.page === 'help') html = renderHelp();
     else if (ST.page === 'mgr-home') html = renderMgrHome();
-    else if (ST.page === 'mgr-channels') html = renderMgrChannelsPage();
+    else if (ST.page === 'mgr-channels') { try { html = renderMgrChannelsPage(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در کانال‌ها</strong><p>'+esc(String(e.message||e))+'</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>'; } }
     else if (ST.page === 'mgr-tariffs') html = renderMgrTariffsPage();
-    else if (ST.page === 'mgr-channel') html = renderMgrChannelDetail();
+    else if (ST.page === 'mgr-channel') { try { html = renderMgrChannelDetail(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'op-home') html = renderOpHome();
     else html = ST.role === 'manager' ? renderMgrHome() : ST.role === 'operator' ? renderOpHome() : renderMarket();
 
@@ -2381,8 +2419,10 @@ function renderOpTickets() {
         if (id === 'mgr-tariffs') { await Promise.allSettled([loadMyChannels(), loadMgrTariffs()]); }
         if (id === 'op-home') { await loadOpBanners(); await loadOpPayouts(); await loadOpAssignments(); }
       } catch (err) { toast(err.message || 'خطا'); }
-      ST.loading = false;
-      navigate(id);
+      finally {
+        ST.loading = false;
+      }
+      try { navigate(id); } catch (e) { console.error(e); ST.loading = false; render(); }
     };
   }
 
