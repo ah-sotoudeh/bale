@@ -1234,6 +1234,7 @@ function renderOpTickets() {
   }
 
   function bindPage() {
+    if (ST.page === 'onboard') { bindOnboardPage(); return; }
     $$('#homeFilters .chip').forEach((b) => b.onclick = () => {
       ST.filter = b.dataset.f; render();
     });
