@@ -72,11 +72,10 @@ def demo_asset(_request: HttpRequest, name: str, path: str) -> HttpResponse:
 
 @xframe_options_exempt
 def mini_app(request: HttpRequest) -> HttpResponse:
-    # پیش‌فرض: پنل اصلی (React/legacy) که داخل قاب بله تست شده.
-    # ?v2=1 → مینی‌اپ جدید SPA | ?demo=hub → هاب دمو | ?demo=linkban-pro → دموی طراحی
+    # پیش‌فرض v2؛ ?legacy=1 نسخهٔ قبلی | ?demo=... دموها
     demo = (request.GET.get('demo') or '').strip()
-    use_v2 = request.GET.get('v2') == '1' or request.GET.get('app') == 'v2'
-    if use_v2:
+    use_legacy = request.GET.get('legacy') == '1'
+    if not use_legacy and demo not in ('hub', 'linkban-pro', 'baboon', 'marketplace', 'nova-store'):
         html = (PANEL / 'v2' / 'index.html').read_text(encoding='utf-8')
     elif demo == 'hub':
         html = (PANEL / 'demos' / 'index.html').read_text(encoding='utf-8')
@@ -89,6 +88,7 @@ def mini_app(request: HttpRequest) -> HttpResponse:
         html = (PANEL / 'index.html').read_text(encoding='utf-8')
     resp = HttpResponse(html, content_type='text/html; charset=utf-8')
     return _framed(resp)
+
 
 
 @xframe_options_exempt

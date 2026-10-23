@@ -31,11 +31,18 @@
   </script>
   <script>
     (function () {
-      var r = document.documentElement, s = null;
-      try { s = localStorage.getItem("lb.theme"); } catch (e) {}
+      var r = document.documentElement, s = null, saved = null;
+      try {
+        s = localStorage.getItem("lb.theme");
+        if (s !== "light" && s !== "dark") {
+          saved = JSON.parse(localStorage.getItem("lb.scenario.ui.v1") || "{}");
+          s = saved && (saved.theme === "light" || saved.theme === "dark") ? saved.theme : null;
+        }
+      } catch (e) {}
       var w = window.Bale && Bale.WebApp, b = (w && w.colorScheme) || "light";
+      if (!w && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) b = "dark";
       var bg = w && w.themeParams && w.themeParams.bg_color;
-      if (bg && /^#([0-9a-f]{6})$/i.test(bg)) {
+      if (!s && bg && /^#([0-9a-f]{6})$/i.test(bg)) {
         var n = parseInt(bg.slice(1), 16);
         var l = (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
         b = l < 0.4 ? "dark" : "light";
@@ -45,7 +52,9 @@
       r.style.colorScheme = t;
     })();
   </script>
-  <link rel="stylesheet" href="/miniapp/assets/v2/app.css" />
+  <link rel="stylesheet" href="/miniapp/assets/v2/scenario-ui.css?v=20261022-scenario-complete8" />
+  <link rel="stylesheet" href="/miniapp/assets/v2/scenario-ui-polish.css?v=20261022-scenario-complete8" />
+  <link rel="stylesheet" href="/miniapp/assets/v2/scenario-ui-market.css?v=20261022-scenario-complete8" />
 </head>
 <body>
   <div id="app">
@@ -66,6 +75,6 @@
   </div>
   <div class="sheet" id="sheet"><div class="sheet-panel"><div id="sheetBody"></div></div></div>
   <div class="toast" id="toast"></div>
-  <script src="/miniapp/assets/v2/app.js"></script>
+  <script src="/miniapp/assets/v2/scenario-ui.js?v=20261022-scenario-complete8"></script>
 </body>
 </html>

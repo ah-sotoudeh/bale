@@ -4,11 +4,45 @@ from django.db import models
 from channels_app.models import Channel, Tariff
 
 
+
+class CustomerBusiness(models.Model):
+    """پروفایل تبلیغاتی مستقل مشتری؛ از مالکیت واقعی کانال مستقل است."""
+    KIND_CHOICES = [('bale', 'کانال بله'), ('external', 'کسب‌وکار خارج از بله')]
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='customer_businesses'
+    )
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default='bale', db_index=True)
+    source_ref = models.CharField(max_length=255, blank=True, default='')
+    name = models.CharField(max_length=160)
+    avatar_url = models.URLField(max_length=1000, blank=True, default='')
+    # ساختار انتخابی: {"main": ["..."], "sub": ["..."]}
+    categories = models.JSONField(default=dict, blank=True)
+    info_source = models.CharField(
+        max_length=16, choices=[('auto', 'خودکار'), ('manual', 'دستی')], default='manual'
+    )
+    info_checked_at = models.DateTimeField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['customer', 'is_deleted'], name='business_owner_deleted_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.name} (customer={self.customer_id})'
+
+
 class CustomerBanner(models.Model):
     """بنر ذخیره‌شده مشتری — فقط بنرهای منتشرشده در لینک‌بانک برای سفارش معتبرند."""
 
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='banners'
+    )
+    business = models.ForeignKey(
+        'CustomerBusiness', on_delete=models.SET_NULL, null=True, blank=True, related_name='banners'
     )
     title = models.CharField(max_length=120, blank=True, default='')
     caption = models.TextField(blank=True, default='')
@@ -45,6 +79,26 @@ class CustomerBanner(models.Model):
         if cap:
             return (cap[:40] + '…') if len(cap) > 40 else cap
         return f'بنر #{self.id}'
+
+
+
+class BannerSubmissionDraft(models.Model):
+    """حداکثر یک پیش‌نویس ثبت بنر ناتمام برای هر مشتری."""
+    customer = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='banner_submission_draft'
+    )
+    business = models.ForeignKey(
+        CustomerBusiness, on_delete=models.SET_NULL, null=True, blank=True, related_name='banner_drafts'
+    )
+    title = models.CharField(max_length=120, blank=True, default='')
+    caption = models.TextField(blank=True, default='')
+    media_kind = models.CharField(max_length=20, blank=True, default='')
+    media_path = models.CharField(max_length=500, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'draft customer={self.customer_id}'
 
 
 class BannerPublishRequest(models.Model):

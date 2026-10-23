@@ -1,6 +1,6 @@
 from django.urls import path
 
-from miniapp import api, api_extra, api_shop, api_banner_create
+from miniapp import api, api_extra, api_shop, api_banner_create, api_business, api_banner_draft
 from miniapp.views import demo_asset, demo_page, demos_hub, manager_app, media_file, mini_app, panel_asset, rules_page
 
 urlpatterns = [
@@ -50,6 +50,12 @@ urlpatterns = [
     path('api/pay/invoice', api.api_invoice),
     path('api/banners', api_shop.api_banners),
     path('api/banners/request-new', api_shop.api_banner_request_new),
+    path('api/banners/draft', api_banner_draft.api_banner_draft),
+    path('api/businesses', api_business.api_businesses),
+    path('api/businesses/metadata', api_business.api_business_metadata),
+    path('api/businesses/<int:business_id>/avatar', api_business.api_business_avatar),
+    path('api/businesses/<int:business_id>/update', api_business.api_business_update),
+    path('api/businesses/<int:business_id>/delete', api_business.api_business_delete),
     path('api/banners/create', api_banner_create.api_banner_create),
     path('api/banners/<int:banner_id>/media', api_shop.api_banner_media),
     path('api/banners/rename', api_shop.api_banner_rename),

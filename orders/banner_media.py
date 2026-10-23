@@ -17,6 +17,83 @@ _MEDIA_EXT = _IMAGE_EXT | _VIDEO_EXT
 _MISS_TTL = 3600
 
 
+def banner_draft_dir() -> Path:
+    path = Path(settings.BASE_DIR) / 'media' / 'banner_drafts'
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def banner_draft_file(customer_id: int) -> Path | None:
+    """Return the one safe persisted media file for an unfinished customer draft."""
+    root = banner_draft_dir()
+    files = [x for x in root.glob(f'{int(customer_id)}.*') if x.is_file()]
+    return max(files, key=lambda x: x.stat().st_mtime) if files else None
+
+
+def save_banner_draft_upload(customer_id: int, upload) -> tuple[Path | None, str]:
+    """Store a draft upload using a numeric owner name and an allow-listed extension."""
+    import mimetypes
+    import os
+    import uuid
+
+    allowed = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'}
+    if getattr(upload, 'size', 0) > 15 * 1024 * 1024:
+        return None, 'file_too_large'
+    name = Path(str(getattr(upload, 'name', '') or '')).name
+    ext = Path(name).suffix.lower()
+    content_type = str(getattr(upload, 'content_type', '') or '').lower()
+    if ext not in allowed:
+        ext = mimetypes.guess_extension(content_type) or ''
+        if ext == '.jpe':
+            ext = '.jpg'
+    if ext not in allowed or not (content_type.startswith('image/') or content_type.startswith('video/')):
+        return None, 'bad_media'
+    root = banner_draft_dir()
+    tmp = root / f'.{int(customer_id)}-{uuid.uuid4().hex}.tmp'
+    final = root / f'{int(customer_id)}{ext}'
+    size = 0
+    try:
+        with tmp.open('wb') as out:
+            for chunk in upload.chunks():
+                size += len(chunk)
+                if size > 15 * 1024 * 1024:
+                    out.close()
+                    tmp.unlink(missing_ok=True)
+                    return None, 'file_too_large'
+                out.write(chunk)
+        with tmp.open('rb') as src:
+            head = src.read(32)
+        is_image = (
+            head.startswith(b'\xff\xd8\xff')
+            or head.startswith(b'\x89PNG\r\n\x1a\n')
+            or head.startswith((b'GIF87a', b'GIF89a'))
+            or (ext == '.webp' and head[:4] == b'RIFF' and head[8:12] == b'WEBP')
+        )
+        is_video = b'ftyp' in head[:32] or head.startswith(b'\x1a\x45\xdf\xa3')
+        if not (is_image or is_video):
+            tmp.unlink(missing_ok=True)
+            return None, 'bad_media'
+        for old in root.glob(f'{int(customer_id)}.*'):
+            if old.is_file():
+                old.unlink(missing_ok=True)
+        os.replace(tmp, final)
+        return final, ('video' if is_video else 'photo')
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        logger.exception('saving banner draft media failed')
+        return None, 'bad_media'
+
+
+def clear_banner_draft_media(customer_id: int) -> None:
+    try:
+        for path in banner_draft_dir().glob(f'{int(customer_id)}.*'):
+            if path.is_file():
+                path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception('clearing banner draft media failed')
+
+
+
 def banner_dir() -> Path:
     path = Path(settings.BASE_DIR) / 'media' / 'banners'
     path.mkdir(parents=True, exist_ok=True)
