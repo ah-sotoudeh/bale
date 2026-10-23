@@ -416,7 +416,7 @@ def api_busy_day(request: HttpRequest) -> JsonResponse:
                 'detail': (str(last_err)[:200] if last_err else ''),
             }, status=200)
 
-        return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day)})
+        return JsonResponse({'ok': True, 'slot_id': slot.id, 'jalali': format_jalali(day), 'date': day.isoformat(), 'message': 'روز ' + format_jalali(day) + ' مسدود شد.'})
     except Exception as exc:
         try:
             logger.exception('api_busy_day')
@@ -461,13 +461,25 @@ def api_clear_busy(request: HttpRequest) -> JsonResponse:
             if day:
                 from channels_app.models import AvailabilitySlot
                 from datetime import time as dtime, datetime as dt, timedelta
-                day_start = timezone.make_aware(dt.combine(day, dtime.min), timezone.get_current_timezone())
+                from orders.availability import MANUAL_BUSY_NOTE
+                try:
+                    day_start = timezone.make_aware(dt.combine(day, dtime.min), timezone.get_current_timezone())
+                except Exception:
+                    day_start = dt.combine(day, dtime.min)
                 day_end = day_start + timedelta(days=1)
-                deleted, _ = AvailabilitySlot.objects.filter(
-                    tariff_id=t.id, is_available=False, start__gte=day_start, start__lt=day_end
-                ).delete()
+                qs = AvailabilitySlot.objects.filter(is_available=False, start__gte=day_start, start__lt=day_end)
+                q = qs.filter(tariff_id=t.id)
+                if t.channel_id:
+                    q = q | qs.filter(channel_id=t.channel_id, note=MANUAL_BUSY_NOTE)
+                if t.group_id:
+                    q = q | qs.filter(group_id=t.group_id, note=MANUAL_BUSY_NOTE)
+                deleted, _ = q.delete()
                 ok = deleted > 0
-        return JsonResponse({'ok': True, 'cleared': bool(ok)})
+        return JsonResponse({
+            'ok': True,
+            'cleared': bool(ok),
+            'message': 'روز آزاد شد.' if ok else 'مسدود دستی برای این روز پیدا نشد.',
+        })
     except Exception as exc:
         try:
             logger.exception('api_clear_busy')

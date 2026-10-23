@@ -63,6 +63,10 @@
     mgrOrders: [],
     mgrTariffs: [],
     mgrTab: 'inbox', // inbox | channels | tariffs
+    mgrCalTariffId: null,
+    mgrCalDays: [],
+    mgrCalBusy: [], // manual busy {id,date,jalali}
+    mgrCalLoading: false,
     selectedMgrChannel: null,
     // operator
     opBanners: [],
@@ -1135,8 +1139,140 @@
   }
 
   function renderMgrTariffs() {
-    const rows = (ST.mgrTariffs || []).map((t,index) => `<article class="manager-tariff-card" style="--card-order:${Math.min(index,8)}"><div class="manager-tariff-top"><span class="manager-tariff-symbol">${icon('wallet',20)}</span><span class="badge ${t.is_active?'ok':'muted'}"><i class="tiny-status-dot"></i>${t.is_active?'فعال در بازار':'غیرفعال'}</span></div><div class="manager-tariff-name">${esc(t.name || (t.duration_hours + ' ساعته'))}</div><div class="manager-tariff-channel">${icon('building-2',13)} ${esc(t.owner || 'کانال')} <span>·</span> شروع ${fa(t.start_hour ?? 0)}:۰۰</div><div class="manager-tariff-price">${faNum(t.price)} <small>تومان</small><span>/ ${fa(t.duration_hours || 24)} ساعت</span></div><div class="manager-tariff-divider"></div><div class="manager-tariff-actions"><button class="btn btn-soft" data-tariff-edit="${t.id}">${icon('sliders',15)} ویرایش</button><button class="btn btn-ghost" data-tariff-toggle="${t.id}" data-active="${t.is_active?'1':'0'}">${t.is_active?'توقف نمایش':'فعال‌سازی'}</button><button class="icon-btn manager-delete-tariff" data-tariff-delete="${t.id}" aria-label="حذف تعرفه">${icon('trash-2',16)}</button></div></article>`).join('');
+    const rows = (ST.mgrTariffs || []).map((t,index) => `<article class="manager-tariff-card" style="--card-order:${Math.min(index,8)}"><div class="manager-tariff-top"><span class="manager-tariff-symbol">${icon('wallet',20)}</span><span class="badge ${t.is_active?'ok':'muted'}"><i class="tiny-status-dot"></i>${t.is_active?'فعال در بازار':'غیرفعال'}</span></div><div class="manager-tariff-name">${esc(t.name || (t.duration_hours + ' ساعته'))}</div><div class="manager-tariff-channel">${icon('building-2',13)} ${esc(t.owner || 'کانال')} <span>·</span> شروع ${fa(t.start_hour ?? 0)}:۰۰</div><div class="manager-tariff-price">${faNum(t.price)} <small>تومان</small><span>/ ${fa(t.duration_hours || 24)} ساعت</span></div><div class="manager-tariff-divider"></div><div class="manager-tariff-actions"><button class="btn btn-soft" data-tariff-cal="${t.id}">${icon('calendar',15)} تقویم</button><button class="btn btn-soft" data-tariff-edit="${t.id}">${icon('sliders',15)} ویرایش</button><button class="btn btn-ghost" data-tariff-toggle="${t.id}" data-active="${t.is_active?'1':'0'}">${t.is_active?'توقف نمایش':'فعال‌سازی'}</button><button class="icon-btn manager-delete-tariff" data-tariff-delete="${t.id}" aria-label="حذف تعرفه">${icon('trash-2',16)}</button></div></article>`).join('');
     return `<div class="manager-tariff-toolbar"><span>${fa((ST.mgrTariffs||[]).length)} تعرفه ثبت‌شده</span><button class="btn btn-primary" id="btnAddTariff">${icon('plus',15)} تعرفهٔ جدید</button></div>${rows ? `<div class="manager-tariff-list">${rows}</div>` : `<div class="manager-empty-state compact-empty"><div class="manager-empty-art"><div class="empty-orbit"></div><span>${icon('wallet',29)}</span></div><h3>هنوز تعرفه‌ای نساخته‌ای</h3><p>برای نمایش جایگاه کانال در بازار، اولین تعرفه‌ات را تعریف کن.</p><button class="btn btn-primary" id="btnAddTariff">${icon('plus',15)} ساخت اولین تعرفه</button></div>`}<button class="btn btn-ghost btn-block manager-list-refresh" id="btnRefreshTariffs">${icon('refresh-cw',15)} تازه‌سازی تعرفه‌ها</button><p class="manager-footnote">${icon('shield-check',14)} تعرفه‌های متصل به سفارش‌های قبلی، برای حفظ سابقه غیرفعال می‌شوند.</p>`;
+  }
+
+
+
+  function localISODate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  async function loadMgrCalendar(tariffId) {
+    const tid = Number(tariffId || ST.mgrCalTariffId || 0);
+    if (!tid) {
+      ST.mgrCalDays = [];
+      ST.mgrCalBusy = [];
+      return;
+    }
+    ST.mgrCalTariffId = tid;
+    ST.mgrCalLoading = true;
+    try {
+      const d = await api('/calendar?tariff_id=' + encodeURIComponent(tid) + '&days=62');
+      if (!d || !d.ok) {
+        ST.mgrCalDays = [];
+        ST.mgrCalBusy = [];
+        throw new Error((d && (d.message || d.error)) || 'دریافت تقویم ناموفق بود');
+      }
+      ST.mgrCalDays = d.days || [];
+      ST.mgrCalBusy = d.manual_busy || [];
+      return d;
+    } finally {
+      ST.mgrCalLoading = false;
+    }
+  }
+
+  function renderMgrCalendar() {
+    const chId = ST.selectedMgrChannel;
+    const ch = (ST.myChannels || []).find(x => Number(x.id) === Number(chId));
+    const tariffs = (ST.mgrTariffs || []).filter(t => !chId || Number(t.channel_id || t.channel) === Number(chId));
+    const activeTariffs = tariffs.filter(t => t.is_active !== false);
+    const list = activeTariffs.length ? activeTariffs : tariffs;
+    if (!list.length) {
+      return `<div class="manager-empty-state"><div class="manager-empty-art"><span>${icon('calendar',31)}</span></div>
+        <h3>تعرفه‌ای برای تقویم نیست</h3>
+        <p>اول برای این کانال تعرفه بساز، بعد روزهای پر را مشخص کن.</p>
+        <button class="btn btn-primary" id="btnAddTariffForCh">${icon('plus',15)} افزودن تعرفه</button>
+        <button class="btn btn-ghost btn-block" id="btnMgrCalBack" style="margin-top:8px">بازگشت</button></div>`;
+    }
+    let tid = Number(ST.mgrCalTariffId || 0);
+    if (!tid || !list.some(t => Number(t.id) === tid)) tid = Number(list[0].id);
+    ST.mgrCalTariffId = tid;
+    const trow = list.find(x => Number(x.id) === tid) || list[0];
+    const busySet = {};
+    (ST.mgrCalBusy || []).forEach(b => { if (b && b.date) busySet[b.date] = b; });
+    const byDate = {};
+    (ST.mgrCalDays || []).forEach(d => { if (d && d.date) byDate[d.date] = d; });
+
+    // Build ~2 month grid from today
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const start = new Date(today);
+    // align to Saturday for Persian week (شنبه=0 visually RTL: show ش ی د ... ج)
+    // Use ISO week starting Saturday for Iran
+    const dow = start.getDay(); // 0 Sun .. 6 Sat
+    // Iranian calendar grids often start Saturday
+    const offsetToSat = (dow + 1) % 7; // days since Saturday
+    start.setDate(start.getDate() - offsetToSat);
+
+    const weekLabels = ['ش','ی','د','س','چ','پ','ج'];
+    let cells = weekLabels.map(w => `<div class="mgr-cal-head">${w}</div>`).join('');
+    const totalCells = 42;
+    for (let i = 0; i < totalCells; i++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      const iso = localISODate(day);
+      const inMonthPad = true;
+      const entry = byDate[iso];
+      const isPast = day < today || (entry && entry.status === 'past');
+      const isManual = !!busySet[iso];
+      const isFull = entry && (entry.status === 'full' || entry.free === false) && !isPast;
+      const isFree = entry && entry.status === 'free';
+      let cls = 'mgr-cal-day';
+      let label = String(day.getDate());
+      let title = entry ? (entry.jalali || iso) : iso;
+      if (!entry && day >= today) {
+        // outside API span
+        cls += ' muted';
+      } else if (isPast) {
+        cls += ' past';
+      } else if (isManual) {
+        cls += ' manual';
+        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + 'مسدود توسط شما';
+      } else if (isFull) {
+        cls += ' full';
+        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + (entry.why || 'رزرو شده / پر');
+      } else if (isFree) {
+        cls += ' free';
+        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + 'آزاد — برای مسدود کردن لمس کنید';
+      } else {
+        cls += ' muted';
+      }
+      if (iso === localISODate(today)) cls += ' today';
+      const canToggle = !isPast && (isFree || isManual);
+      cells += `<button type="button" class="${cls}" data-mgr-cal-day="${iso}" data-can-toggle="${canToggle ? '1' : '0'}" data-manual="${isManual ? '1' : '0'}" title="${esc(title)}" ${isPast ? 'disabled' : ''}>${label}</button>`;
+    }
+
+    const chName = ch ? esc(ch.name) : 'کانال';
+    return `
+      <section class="manager-screen-hero tariffs-screen-hero" style="margin-bottom:12px">
+        <div class="manager-screen-art">${icon('calendar',27)}<i></i></div>
+        <div class="manager-screen-copy">
+          <span class="manager-eyebrow">ظرفیت انتشار</span>
+          <h2>تقویم ${chName}</h2>
+          <p>روزهای آزاد را لمس کنید تا مسدود شوند. روزهای مسدود دستی را دوباره لمس کنید تا آزاد شوند.</p>
+        </div>
+      </section>
+      <div class="field" style="margin-bottom:10px">
+        <label>تعرفه</label>
+        <select id="mgrCalTariffSelect">${list.map(x => `<option value="${x.id}" ${Number(x.id)===tid?'selected':''}>${esc(x.name || ((x.duration_hours||24)+' ساعته'))} · ${faNum(x.price)} تومان</option>`).join('')}</select>
+      </div>
+      <div class="mgr-cal-card">
+        ${ST.mgrCalLoading ? '<div class="loading" style="padding:24px">در حال بارگذاری تقویم…</div>' : `<div class="mgr-cal-grid">${cells}</div>`}
+        <div class="calendar-legend mgr-cal-legend">
+          <span><i class="legend-free"></i> آزاد</span>
+          <span><i class="legend-manual"></i> مسدود دستی</span>
+          <span><i class="legend-busy"></i> رزرو / پر</span>
+          <span><i class="legend-past"></i> گذشته</span>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:10px;line-height:1.7">روزهای «رزرو / پر» مربوط به سفارش‌های ثبت‌شده‌اند و از اینجا باز نمی‌شوند. فقط مسدود دستی قابل برداشتن است.</p>
+      <button class="btn btn-ghost btn-block" id="btnMgrCalBack" style="margin-top:8px">بازگشت به کانال</button>
+    `;
   }
 
   function renderMgrChannelDetail() {
@@ -1241,6 +1377,7 @@ function renderOpTickets() {
     'mgr-channels': 'کانال‌های من',
     'mgr-tariffs': 'تعرفه و زمان‌بندی',
     'mgr-channel': 'مدیریت کانال',
+    'mgr-calendar': 'تقویم و ظرفیت',
     'op-home': 'پنل پشتیبانی',
   };
 
@@ -1301,6 +1438,7 @@ function renderOpTickets() {
     else if (ST.page === 'mgr-home') html = renderMgrHome();
     else if (ST.page === 'mgr-channels') { try { html = renderMgrChannelsPage(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در کانال‌ها</strong><p>'+esc(String(e.message||e))+'</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>'; } }
     else if (ST.page === 'mgr-tariffs') html = renderMgrTariffsPage();
+    else if (ST.page === 'mgr-calendar') { try { html = renderMgrCalendar(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در تقویم</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'mgr-channel') { try { html = renderMgrChannelDetail(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'op-home') html = renderOpHome();
     else html = ST.role === 'manager' ? renderMgrHome() : ST.role === 'operator' ? renderOpHome() : renderMarket();
@@ -1762,44 +1900,63 @@ function renderOpTickets() {
     if (availabilityBtn) availabilityBtn.onclick = async () => {
       availabilityBtn.disabled = true;
       try {
-        const d = await api('/tariffs');
-        const tariffs = (d.tariffs || d.items || []).filter(t => !ST.selectedMgrChannel || Number(t.channel_id || t.channel) === Number(ST.selectedMgrChannel));
-        if (!d.ok || !tariffs.length) { toast(d.message || 'برای این کانال تعرفهٔ فعالی پیدا نشد.'); return; }
-        openSheet(`<div class="sheet-handle"></div><h3>مدیریت روزهای آزاد و مسدود</h3>
-          <div class="field"><label>تعرفه</label><select id="availabilityTariff">${tariffs.map(t => `<option value="${t.id}">${esc(t.name || (t.duration_hours + ' ساعته'))} · ${faNum(t.price)} تومان</option>`).join('')}</select></div>
-          <div class="field"><label>تاریخ</label><input id="availabilityDate" type="date" min="${new Date().toISOString().slice(0,10)}" /></div>
-          <button class="btn btn-danger btn-block" id="btnBlockDay">مسدودکردن این روز</button>
-          <button class="btn btn-primary btn-block" id="btnUnblockDay" style="margin-top:8px">آزادکردن این روز</button>
-          <div id="availabilityPreview" class="hint" style="margin-top:12px">برای مشاهدهٔ وضعیت، تعرفه و تاریخ را انتخاب کنید.</div>`);
-        const refreshAvailability = async () => {
-          const tid = Number($('#availabilityTariff').value);
-          const day = $('#availabilityDate').value;
-          if (!tid || !day) return;
-          const cal = await api('/calendar?tariff_id=' + encodeURIComponent(tid) + '&days=42');
-          const entry = (cal.days || []).find(x => x.date === day);
-          $('#availabilityPreview').textContent = entry ? `وضعیت ${entry.jalali || entry.date}: ${entry.status || (entry.free ? 'آزاد' : 'مسدود')}${entry.why ? ' — ' + entry.why : ''}` : 'وضعیت این روز در پاسخ تقویم موجود نیست.';
-        };
-        $('#availabilityDate').value = new Date().toISOString().slice(0,10);
-        $('#availabilityTariff').onchange = refreshAvailability;
-        $('#availabilityDate').onchange = refreshAvailability;
-        $('#btnBlockDay').onclick = async () => {
-          const tariff_id = Number($('#availabilityTariff').value), date = $('#availabilityDate').value;
-          if (!date) return toast('تاریخ را انتخاب کنید');
-          const r = await api('/busy-day', { method:'POST', body:{ tariff_id, date } });
-          toast(r.message || (r.ok ? 'روز مسدود شد' : r.error || 'خطا'));
-          if (r.ok) refreshAvailability();
-        };
-        $('#btnUnblockDay').onclick = async () => {
-          const tariff_id = Number($('#availabilityTariff').value), date = $('#availabilityDate').value;
-          if (!date) return toast('تاریخ را انتخاب کنید');
-          const r = await api('/clear-busy', { method:'POST', body:{ tariff_id, date } });
-          toast(r.message || (r.ok ? 'روز آزاد شد' : r.error || 'خطا'));
-          if (r.ok) refreshAvailability();
-        };
-        refreshAvailability();
-      } catch (e) { toast(e.message || 'دریافت تقویم ناموفق بود'); }
-      finally { availabilityBtn.disabled = false; }
+        await loadMgrTariffs().catch(() => {});
+        const tariffs = (ST.mgrTariffs || []).filter(t => !ST.selectedMgrChannel || Number(t.channel_id || t.channel) === Number(ST.selectedMgrChannel));
+        if (!tariffs.length) {
+          toast('برای این کانال هنوز تعرفه‌ای ثبت نشده است.');
+          return;
+        }
+        ST.mgrCalTariffId = Number(tariffs[0].id);
+        try { await loadMgrCalendar(ST.mgrCalTariffId); } catch (e) { toast(e.message || 'تقویم بارگذاری نشد'); }
+        navigate('mgr-calendar');
+      } catch (e) {
+        toast(e.message || 'باز کردن تقویم ناموفق بود');
+      } finally {
+        availabilityBtn.disabled = false;
+      }
     };
+
+
+    const mgrCalBack = $('#btnMgrCalBack');
+    if (mgrCalBack) mgrCalBack.onclick = () => navigate('mgr-channel');
+    const mgrCalSel = $('#mgrCalTariffSelect');
+    if (mgrCalSel) mgrCalSel.onchange = async () => {
+      ST.mgrCalTariffId = Number(mgrCalSel.value);
+      ST.mgrCalLoading = true; render();
+      try { await loadMgrCalendar(ST.mgrCalTariffId); }
+      catch (e) { toast(e.message || 'خطا'); }
+      finally { ST.mgrCalLoading = false; render(); }
+    };
+    $$('[data-mgr-cal-day]').forEach((btn) => {
+      btn.onclick = async () => {
+        if (btn.disabled || btn.dataset.canToggle !== '1') return;
+        const date = btn.dataset.mgrCalDay;
+        const tariff_id = Number(ST.mgrCalTariffId);
+        if (!date || !tariff_id) return;
+        const isManual = btn.dataset.manual === '1';
+        btn.disabled = true;
+        try {
+          let r;
+          if (isManual) {
+            r = await api('/clear-busy', { method: 'POST', body: { tariff_id, date } });
+            toast(r.message || (r.ok ? (r.cleared ? 'روز آزاد شد' : 'مسدود دستی برای این روز پیدا نشد') : (r.error || 'خطا')));
+          } else {
+            r = await api('/busy-day', { method: 'POST', body: { tariff_id, date } });
+            toast(r.message || (r.ok ? ('روز مسدود شد' + (r.jalali ? ' · ' + r.jalali : '')) : (r.error || 'خطا')));
+          }
+          if (r && r.ok) {
+            await loadMgrCalendar(tariff_id);
+            render();
+          } else {
+            btn.disabled = false;
+          }
+        } catch (e) {
+          toast(e.message || 'انجام نشد');
+          btn.disabled = false;
+        }
+      };
+    });
+
     const mgrOrdersHome = $('#btnMgrOrdersGoHome'); if (mgrOrdersHome) mgrOrdersHome.onclick = () => navigate('mgr-home');
     const refreshOrders = $('#btnRefreshOrders');
     if (refreshOrders) refreshOrders.onclick = async () => {
@@ -2008,6 +2165,21 @@ function renderOpTickets() {
       catch (e) { toast(e.message || 'دریافت تعرفه‌ها ناموفق بود'); }
       finally { refreshTariffs.disabled = false; }
     };
+    $$('[data-tariff-cal]').forEach((b) => b.onclick = async () => {
+      const tid = Number(b.dataset.tariffCal);
+      const tar = (ST.mgrTariffs || []).find(x => Number(x.id) === tid);
+      if (tar && tar.channel_id) ST.selectedMgrChannel = Number(tar.channel_id);
+      ST.mgrCalTariffId = tid;
+      b.disabled = true;
+      try {
+        await loadMgrCalendar(tid);
+        navigate('mgr-calendar');
+      } catch (e) {
+        toast(e.message || 'تقویم باز نشد');
+      } finally {
+        b.disabled = false;
+      }
+    });
     $$('[data-tariff-edit]').forEach((b) => b.onclick = () => {
       const t = (ST.mgrTariffs || []).find(x => Number(x.id) === Number(b.dataset.tariffEdit));
       if (!t) return;
@@ -2450,6 +2622,7 @@ function renderOpTickets() {
     if (btnBack) btnBack.onclick = () => {
       if (ST.page === 'calendar') navigate('channel');
       else if (ST.page === 'channel') navigate('market');
+      else if (ST.page === 'mgr-calendar') navigate('mgr-channel');
       else if (ST.page === 'mgr-channel') navigate('mgr-channels');
       else if (ST.page === 'help' || ST.page === 'businesses' || ST.page === 'onboard') navigate('settings');
       else if (ST.role === 'manager') navigate('mgr-home');
