@@ -766,3 +766,114 @@ input, textarea, select { color: var(--text); }
 .manager-history-link{min-height:38px;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);padding:0 11px;font-size:11px;font-weight:800;white-space:nowrap}
 .manager-history-link svg{color:var(--primary)}
 @media(max-width:360px){.manager-history-link{padding:0 8px;gap:4px;font-size:10px}.manager-page-heading p{max-width:220px}}
+
+
+/* ——— Theme toggle (از پنل قبلی) ——— */
+.header .icon-btn.tt {
+  inline-size: 40px;
+  block-size: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255,255,255,.12);
+  border: 0;
+  flex: 0 0 40px;
+  padding: 0;
+  cursor: pointer;
+  transition: background .2s ease, transform .15s ease;
+}
+.header .icon-btn.tt:active { transform: scale(0.92); background: rgba(255,255,255,.2); }
+.header .icon-btn.tt svg {
+  display: block;
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tt-core, .tt-cut, .tt-rays, .tt-stars {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+}
+.tt-rays { opacity: 0; transform: scale(0.4) rotate(-45deg); }
+.tt-stars { opacity: 1; }
+[data-theme="dark"] .header .icon-btn.tt svg { transform: rotate(90deg); }
+[data-theme="dark"] .tt-cut { transform: translate(-14px, -14px); }
+[data-theme="dark"] .tt-core { transform: scale(0.62); }
+[data-theme="dark"] .tt-rays {
+  opacity: 1;
+  transform: scale(1) rotate(0);
+  transition-delay: 80ms;
+}
+[data-theme="dark"] .tt-stars { opacity: 0; transform: scale(0.3); }
+
+/* موج تغییر تم */
+::view-transition-new(root) {
+  animation: tt-circle 420ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+::view-transition-old(root) { animation: none; }
+@keyframes tt-circle {
+  from { clip-path: circle(0 at var(--tt-x, 50%) var(--tt-y, 0)); }
+  to { clip-path: circle(150% at var(--tt-x, 50%) var(--tt-y, 0)); }
+}
+.theme-anim, .theme-anim * {
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, box-shadow 220ms ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tt *, .theme-anim, .theme-anim *,
+  ::view-transition-new(root) { transition: none !important; animation: none !important; }
+}
+
+/* تقویت تم تیره برای صفحات و کارت‌ها */
+[data-theme="dark"] {
+  --navy: #0f2740;
+  --navy-deep: #0a1a2c;
+  --teal: #2dd4bf;
+  --teal-strong: #5eead4;
+  --teal-soft: #134e4a;
+  --bg: #0B1220;
+  --surface: #111827;
+  --text: #F1F5F9;
+  --muted: #94A3B8;
+  --faint: #64748B;
+  --line: #243044;
+  --track: #1E293B;
+  --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.3);
+}
+[data-theme="dark"] body,
+[data-theme="dark"] #app { background: var(--bg); color: var(--text); }
+[data-theme="dark"] .header.brand {
+  background: linear-gradient(135deg, #0f2740, #0a3d4a);
+  color: #fff;
+}
+[data-theme="dark"] .card,
+[data-theme="dark"] .sheet-panel,
+[data-theme="dark"] .nav {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+[data-theme="dark"] .nav { background: color-mix(in srgb, var(--surface) 94%, transparent); }
+[data-theme="dark"] .chip {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--muted);
+}
+[data-theme="dark"] .chip.on {
+  background: var(--teal-soft);
+  border-color: var(--teal);
+  color: var(--teal-strong);
+}
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--track);
+  border-color: var(--line);
+  color: var(--text);
+}
+[data-theme="dark"] .btn-soft {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+[data-theme="dark"] .toast {
+  background: #1e293b;
+  color: #f1f5f9;
+}

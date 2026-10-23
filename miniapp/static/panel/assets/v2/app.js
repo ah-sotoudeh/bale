@@ -205,9 +205,63 @@
     $('#sheet').classList.remove('on');
   }
 
-  function setTheme(dark) {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    try { localStorage.setItem('lb.theme', dark ? 'dark' : 'light'); } catch (e) {}
+  function themeRays() {
+    let s = '';
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI / 4) * i;
+      s += `<circle cx="${(12 + Math.cos(a) * 10).toFixed(2)}" cy="${(12 + Math.sin(a) * 10).toFixed(2)}" r="1.1"/>`;
+    }
+    return s;
+  }
+
+  function themeToggleSvg() {
+    return (
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' +
+      '<mask id="lb-tt-m"><rect width="24" height="24" fill="#fff"/><circle class="tt-cut" cx="8" cy="8" r="7" fill="#000"/></mask>' +
+      '<circle class="tt-core" cx="13" cy="13" r="8.5" fill="currentColor" mask="url(#lb-tt-m)"/>' +
+      '<g class="tt-rays" fill="currentColor">' + themeRays() + '</g>' +
+      '<g class="tt-stars" fill="currentColor">' +
+      '<path d="M4.5 2.2l.55 1.35 1.35.55-1.35.55-.55 1.35-.55-1.35L2.6 4.1l1.35-.55z"/>' +
+      '<path d="M9.2 1l.35.85.85.35-.85.35-.35.85-.35-.85-.85-.35.85-.35z"/>' +
+      '</g></svg>'
+    );
+  }
+
+  function paintThemeButton(btn) {
+    if (!btn) return;
+    const dark = document.documentElement.dataset.theme === 'dark';
+    btn.setAttribute('aria-label', dark ? 'حالت روشن' : 'حالت تیره');
+    btn.title = dark ? 'حالت روشن' : 'حالت تیره';
+  }
+
+  function setTheme(dark, evt) {
+    const next = dark ? 'dark' : 'light';
+    const root = document.documentElement;
+    const apply = () => {
+      root.dataset.theme = next;
+      root.style.colorScheme = next;
+      try { localStorage.setItem('lb.theme', next); } catch (e) {}
+      paintThemeButton(document.getElementById('btnTheme'));
+      const th2 = document.getElementById('btnTheme2');
+      if (th2) th2.classList.toggle('on', dark);
+      try {
+        const w = window.Bale && Bale.WebApp;
+        if (w && typeof w.setHeaderColor === 'function') {
+          w.setHeaderColor(dark ? '#0B1220' : '#005088');
+        }
+      } catch (e) {}
+    };
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (document.startViewTransition && !reduce && evt && evt.currentTarget) {
+      const box = evt.currentTarget.getBoundingClientRect();
+      root.style.setProperty('--tt-x', (box.x + box.width / 2) + 'px');
+      root.style.setProperty('--tt-y', (box.y + box.height / 2) + 'px');
+      document.startViewTransition(apply);
+    } else {
+      root.classList.add('theme-anim');
+      apply();
+      setTimeout(() => root.classList.remove('theme-anim'), 280);
+    }
   }
 
   /* ——— Data loaders ——— */
@@ -1452,9 +1506,9 @@ function renderOpTickets() {
       render();
     });
     const th2 = $('#btnTheme2');
-    if (th2) th2.onclick = () => {
+    if (th2) th2.onclick = (e) => {
       const dark = document.documentElement.dataset.theme !== 'dark';
-      setTheme(dark);
+      setTheme(dark, e);
       render();
     };
 
@@ -2101,9 +2155,15 @@ function renderOpTickets() {
       else if (ST.role === 'operator') navigate('op-home');
       else navigate('market');
     };
-    $('#btnTheme').onclick = () => {
-      setTheme(document.documentElement.dataset.theme !== 'dark');
-    };
+    const themeBtn = $('#btnTheme');
+    if (themeBtn) {
+      themeBtn.classList.add('tt');
+      if (!themeBtn.querySelector('.tt-core')) themeBtn.innerHTML = themeToggleSvg();
+      paintThemeButton(themeBtn);
+      themeBtn.onclick = (e) => {
+        setTheme(document.documentElement.dataset.theme !== 'dark', e);
+      };
+    }
     $('#btnProfile').onclick = () => navigate('settings');
     $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') closeSheet(); };
     $('#bottomNav').onclick = async (e) => {
