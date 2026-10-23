@@ -425,6 +425,8 @@ class ChannelReview(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_hidden = models.BooleanField(default=False)
+    manager_reply = models.TextField(blank=True, default='')
+    manager_replied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']

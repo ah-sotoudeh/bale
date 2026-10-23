@@ -1454,6 +1454,7 @@ def api_wallet(request: HttpRequest) -> JsonResponse:
             {
                 'id': b.id,
                 'iban': b.iban,
+                'label': getattr(b, 'label', '') or '',
                 'holder_name': b.holder_name,
                 'is_default': b.is_default,
                 'iban_tail': (b.iban or '')[-6:],
@@ -1547,8 +1548,14 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
             str(body.get('iban') or ''),
             str(body.get('holder_name') or ''),
             make_default=True,
+            label=str(body.get('label') or body.get('name') or ''),
         )
-        return JsonResponse({'ok': True, 'bank_id': acc.id})
+        return JsonResponse({
+            'ok': True,
+            'bank_id': acc.id,
+            'label': getattr(acc, 'label', '') or '',
+            'message': 'حساب بانکی ثبت شد.',
+        })
     except ValueError as e:
         return JsonResponse({'ok': False, 'error': 'bad_fields', 'message': str(e)}, status=200)
     except Exception as exc:
@@ -1558,7 +1565,27 @@ def api_add_bank(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
+def api_delete_bank(request: HttpRequest) -> JsonResponse:
+    user, err = _auth_user(request)
+    if err:
+        return err
+    body = _json_body(request) or {}
+    try:
+        bid = int(body.get('bank_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'bad_fields'}, status=200)
+    ok, reason = ws.can_delete_bank(user, bid)
+    if not ok:
+        msg = 'درخواست برداشت در انتظار تسویه است؛ تا تعیین تکلیف حذف ممکن نیست.' if reason == 'pending_payout' else 'حساب پیدا نشد.'
+        return JsonResponse({'ok': False, 'error': reason, 'message': msg}, status=200)
+    BankAccount.objects.filter(id=bid, user=user).delete()
+    return JsonResponse({'ok': True, 'deleted': True})
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
 def api_invoice(request: HttpRequest) -> JsonResponse:
+
     """فاکتور را در گفتگوی بازو می‌فرستد تا کاربر در بله پرداخت کند و به مینی‌اپ برگردد.
 
     درگاه داخل مینی‌اپ در دسترس نیست؛ مسیر اصلی sendInvoice در چت بازو است.

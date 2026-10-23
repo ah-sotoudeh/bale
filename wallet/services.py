@@ -264,18 +264,21 @@ def validate_iban(iban: str) -> bool:
 
 
 def save_bank_account(
-    user: User, iban: str, holder_name: str, make_default: bool = True
+    user: User, iban: str, holder_name: str, make_default: bool = True, label: str = ''
 ) -> BankAccount:
-    iban = iban.replace(' ', '').upper()
+    iban = (iban or '').replace(' ', '').upper()
+    if iban and not iban.startswith('IR'):
+        iban = 'IR' + iban
     if not validate_iban(iban):
         raise ValueError('invalid_iban')
     holder_name = (holder_name or '').strip()
     if not holder_name:
         raise ValueError('need_holder_name')
+    label = (label or '').strip()[:64]
     acc, _ = BankAccount.objects.update_or_create(
         user=user,
         iban=iban,
-        defaults={'holder_name': holder_name},
+        defaults={'holder_name': holder_name, 'label': label},
     )
     if make_default:
         BankAccount.objects.filter(user=user).exclude(id=acc.id).update(is_default=False)
@@ -287,12 +290,10 @@ def save_bank_account(
 def can_request_payout(user: User) -> Tuple[bool, str]:
     if PayoutRequest.objects.filter(user=user, status='pending').exists():
         return False, 'already_pending'
-    last_paid = (
-        PayoutRequest.objects.filter(user=user, status='paid').order_by('-paid_at', '-id').first()
-    )
-    if last_paid and last_paid.paid_at:
-        if timezone.now() - last_paid.paid_at < timedelta(days=PAYOUT_COOLDOWN_DAYS):
-            return False, 'weekly_limit'
+    # حداکثر یک درخواست در هر روز تقویمی
+    today = timezone.localdate()
+    if PayoutRequest.objects.filter(user=user, created_at__date=today).exclude(status='failed').exists():
+        return False, 'daily_limit'
     avail = available_balance(user)
     if avail < MIN_PAYOUT_TOMAN:
         return False, 'below_minimum'
@@ -324,6 +325,8 @@ def request_payout(
         amount_rial=amount * 10,
         iban=bank.iban,
         holder_name=bank.holder_name,
+        bank_label=getattr(bank, 'label', '') or '',
+        bank_account=bank,
         status='pending',
     )
     credit(
@@ -334,7 +337,7 @@ def request_payout(
         note='قفل درخواست تسویه',
         idempotency_key=f'payout:{pr.id}',
     )
-    return {'ok': True, 'payout': pr}
+    return {'ok': True, 'message': 'درخواست ثبت شد. مبلغ حداکثر طی ۷۲ ساعت از طریق پایا واریز می‌شود', 'payout': pr}
 
 
 @transaction.atomic
@@ -413,3 +416,35 @@ def is_operator(bale_user_id: str) -> bool:
     except Exception:
         pass
     return uid in ids
+
+
+@transaction.atomic
+def mark_payout_failed(payout_id: int, bank_tx_id: str = '') -> Dict[str, Any]:
+    """گزارش بانک ناموفق → مبلغ به قابل برداشت برمی‌گردد."""
+    pr = PayoutRequest.objects.select_for_update().filter(id=payout_id, status='pending').first()
+    if not pr:
+        return {'ok': False, 'error': 'not_found'}
+    pr.status = 'failed'
+    if bank_tx_id:
+        pr.bank_tx_id = str(bank_tx_id)[:64]
+    pr.save(update_fields=['status', 'bank_tx_id'] if bank_tx_id else ['status'])
+    credit(
+        pr.user,
+        int(pr.amount_toman),
+        'payout_unlock',
+        ref=f'payout_fail:{pr.id}',
+        note='بازگشت پس از ناموفق بودن پایا',
+        idempotency_key=f'payout_fail:{pr.id}',
+    )
+    return {'ok': True, 'payout_id': pr.id}
+
+
+def can_delete_bank(user: User, bank_id: int) -> Tuple[bool, str]:
+    bank = BankAccount.objects.filter(id=bank_id, user=user).first()
+    if not bank:
+        return False, 'not_found'
+    if PayoutRequest.objects.filter(user=user, status='pending', bank_account=bank).exists():
+        return False, 'pending_payout'
+    if PayoutRequest.objects.filter(user=user, status='pending', iban=bank.iban).exists():
+        return False, 'pending_payout'
+    return True, 'ok'

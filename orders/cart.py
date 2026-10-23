@@ -327,7 +327,7 @@ def process_manager_item(
 
     if not _manager_may_answer(manager, item):
         return {'ok': False, 'error': 'not_item_manager'}
-    if item.manager_status != 'pending':
+    if item.manager_status not in ('pending', 'no_response'):
         return {'ok': False, 'error': 'already_handled'}
 
     order = item.order

@@ -256,6 +256,19 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
                 'label': 'تخفیف ویژه',
             }
             items[-1]['price'] = disc.discounted_price(t.price)
+        try:
+            from orders.ratings import tariff_rating_stats, channel_rating_stats
+            tr = tariff_rating_stats(t.id)
+            items[-1]['rating_avg'] = tr['avg']
+            items[-1]['rating_count'] = tr['count']
+            items[-1]['rating_label'] = 'بدون نظر' if not tr['count'] else None
+            if t.channel_id:
+                cr = channel_rating_stats(t.channel_id)
+                items[-1]['channel_rating_avg'] = cr['avg'] if cr['show_in_list'] else None
+                items[-1]['channel_rating_count'] = cr['count']
+                items[-1]['channel_popularity'] = cr['popularity']
+        except Exception:
+            pass
 
     from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
 

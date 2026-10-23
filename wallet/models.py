@@ -11,6 +11,7 @@ class BankAccount(models.Model):
     )
     iban = models.CharField(max_length=34)  # IR + 24 digits
     holder_name = models.CharField(max_length=200)
+    label = models.CharField(max_length=64, blank=True, default='', help_text='نام کوتاه حساب مثلاً شخصی')
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -62,6 +63,7 @@ class PayoutRequest(models.Model):
         ('paid', 'paid'),
         ('rejected', 'rejected'),
         ('cancelled', 'cancelled'),
+        ('failed', 'failed'),  # ناموفق در گزارش بانک
     ]
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payouts'
@@ -70,6 +72,11 @@ class PayoutRequest(models.Model):
     amount_rial = models.PositiveIntegerField()
     iban = models.CharField(max_length=34)
     holder_name = models.CharField(max_length=200)
+    bank_label = models.CharField(max_length=64, blank=True, default='')
+    bank_account = models.ForeignKey(
+        'BankAccount', on_delete=models.SET_NULL, null=True, blank=True, related_name='payouts'
+    )
+    bank_tx_id = models.CharField(max_length=64, blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS, default='pending')
     batch = models.ForeignKey(
         'PayoutBatch',

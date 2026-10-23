@@ -8,7 +8,7 @@ from django.utils import timezone
 # مهلت پاسخ مدیر به سفارش (ساعت)
 MANAGER_RESPONSE_HOURS = 12
 # یادآوری قبل از پایان مهلت (ساعت مانده)
-MANAGER_REMIND_BEFORE_HOURS = 2
+MANAGER_REMIND_BEFORE_HOURS = 4  # یادآوری ۸ ساعت پس از دریافت (۴ ساعت مانده)
 
 # لغو پس از پرداخت
 CANCEL_FEE_PERCENT = 14
