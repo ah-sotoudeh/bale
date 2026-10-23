@@ -578,7 +578,6 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
             )
         )
     )
-    proved = bio_matches_owner(bio, user) or pre_verified or owner
     looked_up = not info.get('error')
     if not looked_up:
         missing = 'کانال را از بله نخواندیم. پیوند را یک بار دیگر بررسی کنید.'
@@ -586,12 +585,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
             {'ok': False, 'error': missing, 'message': missing, 'code': 'lookup_failed'},
             status=200,
         )
-    if not proved:
-        prompt = ownership_prompt(user)
-        return JsonResponse(
-            {'ok': False, 'error': prompt, 'message': prompt, 'code': 'owner_username'},
-            status=200,
-        )
+    # سناریو: مالکیت با بیو لازم نیست؛ ثبت‌کننده همان کسی است که لینک‌یار/بازو را مدیر می‌کند
 
     # حداقل تعداد عضو (موقت: ۱۰۰۰)
     members = 0
@@ -1645,9 +1639,11 @@ def api_invoice(request: HttpRequest) -> JsonResponse:
                         'error': result.get('error') or 'pay_failed',
                         'message': 'پرداخت از اعتبار ثبت نشد. پشتیبانی را خبر کنید.',
                     }, status=200)
+                from orders.policy import CANCEL_POLICY_TEXT
                 return JsonResponse({
                     'ok': True,
                     'via': 'wallet',
+                    'cancel_policy': CANCEL_POLICY_TEXT,
                     'order_id': order.id,
                     'order_status': 'paid',
                     'message': 'از اعتبار شما پرداخت شد. سفارش ثبت است.',

@@ -106,6 +106,16 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             pass
     customer_topics_active = bool(customer_primary or customer_secondary)
 
+    # مدیران مسدودکننده این مشتری
+    blocked_manager_ids = set()
+    try:
+        from orders.models import ManagerCustomerBlock
+        blocked_manager_ids = set(
+            ManagerCustomerBlock.objects.filter(customer=user).values_list('manager_id', flat=True)
+        )
+    except Exception:
+        pass
+
     def _tariff_ok(t) -> bool:
         if t.channel_id:
             chans = [t.channel]
@@ -122,6 +132,13 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             return False
         if ready_only and (not chans or any(not _ready_publish(ch) for ch in chans)):
             return False
+        if blocked_manager_ids:
+            for ch in chans:
+                mid = getattr(ch, 'manager_id', None)
+                if mid and mid in blocked_manager_ids:
+                    return False
+            if t.group_id and getattr(t.group, 'manager_id', None) in blocked_manager_ids:
+                return False
         # فیلتر موضوع ممنوعه کانال در برابر موضوع کسب‌وکار/بنر مشتری
         if customer_topics_active:
             from config.categories import topics_blocked
@@ -203,6 +220,8 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             'id': t.id,
             'name': t.name,
             'price': t.price,
+            'list_price': t.price,
+            'discount': None,
             'duration_hours': t.duration_hours,
             'start_hour': t.start_hour,
             'is_active': t.is_active,
@@ -227,6 +246,17 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
                 else ((t.channel.avg_views if t.channel_id else 0) or 0)
             ),
         })
+        disc = active_discount_for(t)
+        if disc:
+            items[-1]['discount'] = {
+                'id': disc.id,
+                'percent': disc.percent,
+                'fixed_amount': disc.fixed_amount,
+                'ends_at': disc.ends_at.isoformat() if disc.ends_at else '',
+                'label': 'تخفیف ویژه',
+            }
+            items[-1]['price'] = disc.discounted_price(t.price)
+
     from orders.availability import day_status_map, has_slot_conflict, slot_bounds, unavailable_why
 
     own_by_tariff: dict = {}
@@ -367,3 +397,13 @@ def api_operator_mark_paid(request: HttpRequest) -> JsonResponse:
         {'ok': False, 'error': 'use_bot', 'message': user_error('use_bot') or 'این کار را از بازو انجام دهید.'},
         status=200,
     )
+
+
+def active_discount_for(tariff, now=None):
+    from django.utils import timezone
+    from orders.models import TariffDiscount
+    now = now or timezone.now()
+    qs = TariffDiscount.objects.filter(
+        is_active=True, starts_at__lte=now, ends_at__gt=now, tariffs=tariff,
+    ).order_by('-id')
+    return qs.first()

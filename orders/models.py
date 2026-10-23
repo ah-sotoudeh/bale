@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.utils import timezone
 from django.db import models
 
 from channels_app.models import Channel, Tariff
@@ -196,6 +197,7 @@ class OrderItem(models.Model):
         ('edited', 'edited'),
         ('expired', 'expired'),
         ('customer_declined', 'customer_declined'),
+        ('no_response', 'no_response'),
     ]
     EXECUTION_STATUS = [
         ('none', 'none'),
@@ -232,6 +234,8 @@ class OrderItem(models.Model):
     duration_hours = models.PositiveIntegerField(default=0)
     booked_channel_ids = models.JSONField(default=list, blank=True)
     publish_retry_started_at = models.DateTimeField(null=True, blank=True)
+    time_change_count = models.PositiveSmallIntegerField(default=0)
+    manager_reminded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -355,3 +359,72 @@ class SupportTicketMessage(models.Model):
 
     class Meta:
         ordering = ['created_at', 'id']
+
+
+
+class ManagerCustomerBlock(models.Model):
+    """مسدودسازی مشتری توسط مدیر کانال — فقط سفارش‌های جدید."""
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='blocked_customers'
+    )
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='blocked_by_managers'
+    )
+    note = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('manager', 'customer')]
+
+
+class TariffDiscount(models.Model):
+    """کمپین تخفیف روی یک یا چند تعرفه — در هر لحظه فقط یک فعال per تعرفه."""
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tariff_discounts'
+    )
+    name = models.CharField(max_length=120, blank=True, default='')
+    percent = models.PositiveSmallIntegerField(default=0)  # 0 = use fixed_amount
+    fixed_amount = models.PositiveIntegerField(default=0)  # تومان کسر
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    tariffs = models.ManyToManyField('channels_app.Tariff', related_name='discounts', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def discounted_price(self, base: int) -> int:
+        base = int(base or 0)
+        if self.percent:
+            return max(0, base - (base * int(self.percent) // 100))
+        if self.fixed_amount:
+            return max(0, base - int(self.fixed_amount))
+        return base
+
+    def is_live(self, now=None) -> bool:
+        now = now or timezone.now()
+        return bool(self.is_active and self.starts_at <= now < self.ends_at)
+
+
+class ChannelReview(models.Model):
+    """نظر پس از اجرای موفق — یک نظر per سفارش آیتم."""
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='channel_reviews'
+    )
+    channel = models.ForeignKey(
+        'channels_app.Channel', on_delete=models.CASCADE, related_name='reviews'
+    )
+    order_item = models.OneToOneField(
+        'orders.OrderItem', on_delete=models.CASCADE, related_name='review'
+    )
+    rating = models.PositiveSmallIntegerField()  # 1-5
+    body = models.TextField(blank=True, default='')
+    views_count = models.PositiveIntegerField(default=0)
+    reactions_count = models.PositiveIntegerField(default=0)
+    banner_link = models.CharField(max_length=500, blank=True, default='')
+    tariff_name = models.CharField(max_length=120, blank=True, default='')
+    executed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_hidden = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']

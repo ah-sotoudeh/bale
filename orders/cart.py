@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """Customer cart → order lifecycle helpers."""
 from __future__ import annotations
 
@@ -558,7 +560,7 @@ def _release_open_items(order: Order, manager_status: str) -> list:
     return touched
 
 
-REFUND_CUTOFF = timedelta(hours=2)
+REFUND_CUTOFF = timedelta(hours=48)  # هم‌راستا با CANCEL_MIN_HOURS؛ منطق اصلی در policy
 
 
 def _open_items(order: Order):
@@ -704,55 +706,85 @@ def refund_paid_order(order: Order, amount: Optional[int] = None, *, reason: str
 
 
 def cancel_customer_order(order: Order) -> Dict[str, Any]:
-    """پیش از پرداخت روز آزاد می‌شود. بعد از پرداخت، تا ۲ ساعت مانده به انتشار به اعتبار برمی‌گردد."""
+    """لغو سفارش طبق policy: رایگان قبل پرداخت؛ بعد پرداخت ۱۴٪ اگر >۴۸ساعت؛ کمتر از ۴۸ساعت ممنوع."""
+    from orders.policy import CANCEL_FEE_PERCENT, CANCEL_POLICY_TEXT, can_cancel_paid
+
     if order.status == 'cancelled':
         return {'ok': True, 'order_status': 'cancelled', 'already': True}
-    if order.status == 'paid':
-        if not refund_window_open(order):
-            from bot_flow.jalali import format_slot
 
-            start = publish_start(order)
+    # قبل از پرداخت
+    if order.status in ('draft', 'waiting_managers', 'waiting_banner', 'waiting_customer_confirm'):
+        touched = _release_open_items(order, 'customer_declined')
+        order.status = 'cancelled'
+        order.save(update_fields=['status'])
+        cust = order.customer.bale_user_id
+        if cust:
+            bc.send_message(cust, f'سفارش {fa_num(order.id)} لغو شد و روزهایش آزاد شد.')
+        told = set()
+        for item in touched:
+            mid = item.manager.bale_user_id if item.manager else ''
+            if mid and mid not in told:
+                told.add(mid)
+                bc.send_message(mid, f'مشتری سفارش {fa_num(order.id)} را لغو کرد. آن روز آزاد است.')
+        return {'ok': True, 'order_status': 'cancelled', 'released': len(touched), 'fee_percent': 0}
+
+    if order.status == 'waiting_payment':
+        touched = _release_open_items(order, 'customer_declined')
+        order.status = 'cancelled'
+        order.save(update_fields=['status'])
+        return {'ok': True, 'order_status': 'cancelled', 'released': len(touched), 'fee_percent': 0}
+
+    if order.status == 'paid':
+        start = publish_start(order)
+        ok, code, fee_pct = can_cancel_paid(start)
+        if not ok:
+            from bot_flow.jalali import format_slot
             when = format_slot(timezone.localtime(start)) if start else ''
-            return {
-                'ok': False,
-                'error': 'too_late',
-                'message': (
-                    'از ۲ ساعت پیش از انتشار دیگر لغو نمی‌شود. '
-                    + (f'زمان انتشار: {when}. ' if when else '')
-                    + 'اگر مشکلی هست، اعتراض ثبت کنید.'
-                ),
-            }
-        return refund_paid_order(order, reason=f'لغو سفارش {fa_num(order.id)} توسط مشتری')
-    if order.status not in (
-        'draft',
-        'waiting_banner',
-        'waiting_managers',
-        'waiting_customer_confirm',
-        'waiting_payment',
-    ):
-        return {'ok': False, 'error': 'not_cancellable'}
-    touched = _release_open_items(order, 'customer_declined')
-    order.status = 'cancelled'
-    order.total_amount = 0
-    order.save(update_fields=['status', 'total_amount'])
-    CustomerDraft.objects.filter(order=order).delete()
-    cust = order.customer.bale_user_id
-    if cust:
-        bc.send_message(
-            cust,
-            f'سفارش {fa_num(order.id)} لغو شد و روزهایش برای دیگران آزاد شد.',
-        )
-    told = set()
-    for item in touched:
-        mid = item.manager.bale_user_id if item.manager else ''
-        if not mid or mid in told:
-            continue
-        told.add(mid)
-        bc.send_message(
-            mid,
-            f'مشتری سفارش {fa_num(order.id)} را پیش از پرداخت لغو کرد. آن روز آزاد است.',
-        )
-    return {'ok': True, 'order_status': 'cancelled', 'released': len(touched)}
+            msg = {
+                'within_48h': 'کمتر از ۴۸ ساعت تا انتشار مانده؛ لغو عادی ممکن نیست. می‌توانید درخواست تغییر زمان بدهید.',
+                'already_past': 'زمان انتشار گذشته است.',
+                'no_schedule': 'زمان انتشار مشخص نیست.',
+            }.get(code, 'لغو ممکن نیست.')
+            if when and code == 'within_48h':
+                msg += f' زمان انتشار: {when}.'
+            return {'ok': False, 'error': code, 'message': msg, 'policy': CANCEL_POLICY_TEXT}
+
+        # بازپرداخت با کسر جریمه
+        total = int(order.total_amount or 0)
+        fee = int(total * fee_pct // 100) if fee_pct else 0
+        refund_amt = max(0, total - fee)
+        if refund_amt > 0:
+            r = refund_paid_order(order, amount=refund_amt, reason=f'لغو مشتری با جریمه {fee_pct}٪')
+            if not r.get('ok') and r.get('error') not in ('already_refunded',):
+                return r
+        if fee > 0:
+            try:
+                from wallet.services import credit
+                # جریمه به‌عنوان ردیف جدا (کاهش اعتبار قبلاً در refund اعمال شده؛ فقط لاگ برای مدیر)
+                pass
+            except Exception:
+                pass
+        touched = _release_open_items(order, 'customer_declined')
+        order.status = 'cancelled'
+        order.save(update_fields=['status'])
+        cust = order.customer.bale_user_id
+        if cust:
+            bc.send_message(
+                cust,
+                f'سفارش {fa_num(order.id)} لغو شد. جریمه {fa_num(fee_pct)}٪ '
+                f'({fa_money(fee)}) کسر و {fa_money(refund_amt)} به کیف پول برگشت.',
+            )
+        return {
+            'ok': True,
+            'order_status': 'cancelled',
+            'fee_percent': fee_pct,
+            'fee': fee,
+            'refunded': refund_amt,
+            'policy': CANCEL_POLICY_TEXT,
+        }
+
+    return {'ok': False, 'error': 'not_cancellable', 'message': 'این سفارش قابل لغو نیست.', 'policy': CANCEL_POLICY_TEXT}
+
 
 
 def retire_tariff(tariff: Tariff) -> bool:
@@ -796,4 +828,43 @@ def cancel_unpaid_orders() -> int:
                 f'مهلت پرداخت سفارش {fa_num(order.id)} تمام شد و روزها دوباره آزاد شدند.',
             )
         n += 1
+    return n
+
+
+def expire_manager_timeouts() -> int:
+    """آیتم‌های pending که از مهلت managers_deadline گذشته‌اند → no_response."""
+    from orders.policy import MANAGER_RESPONSE_HOURS, MANAGER_REMIND_BEFORE_HOURS
+    now = timezone.now()
+    n = 0
+    # یادآوری قبل از پایان
+    remind_from = now + timedelta(hours=MANAGER_REMIND_BEFORE_HOURS - 0.1)
+    remind_to = now + timedelta(hours=MANAGER_REMIND_BEFORE_HOURS + 0.1)
+    for order in Order.objects.filter(status='waiting_managers', managers_deadline__isnull=False):
+        deadline = order.managers_deadline
+        if not deadline:
+            continue
+        left = (deadline - now).total_seconds() / 3600.0
+        for it in order.items.filter(manager_status='pending').select_related('manager'):
+            if left <= MANAGER_REMIND_BEFORE_HOURS and left > 0 and not it.manager_reminded_at:
+                mid = it.manager.bale_user_id if it.manager else ''
+                if mid:
+                    try:
+                        bc.send_message(
+                            mid,
+                            f'یادآوری: تا حدود {fa_num(int(max(1, left)))} ساعت برای پاسخ به سفارش {fa_num(order.id)} وقت دارید.',
+                        )
+                        it.manager_reminded_at = now
+                        it.save(update_fields=['manager_reminded_at'])
+                    except Exception:
+                        logger.exception('manager remind')
+            if deadline < now and it.manager_status == 'pending':
+                it.manager_status = 'no_response'
+                it.save(update_fields=['manager_status'])
+                n += 1
+        # اگر دیگر pending نماند و حداقل یک approved هست، مشتری می‌تواند پرداخت کند
+        left_pending = order.items.filter(manager_status='pending').exists()
+        has_approved = order.items.filter(manager_status='approved').exists()
+        if not left_pending and has_approved and order.status == 'waiting_managers':
+            # نگه داشتن waiting_managers تا مشتری انتخاب کند؛ یا waiting_payment برای approved-only path
+            pass
     return n

@@ -34,6 +34,7 @@ from bot_flow.dispatch import handle_update  # noqa: E402
 from integrations import bale_client as bc  # noqa: E402
 from integrations.bale_client import _token  # noqa: E402
 from integrations import linkyar_client as ly  # noqa: E402
+from orders.cart import expire_manager_timeouts,  # noqa: F401
 from orders.cart import cancel_unpaid_orders, expire_timed_out_items, release_abandoned_carts  # noqa: E402
 from orders.execution import (  # noqa: E402
     escalate_unconfirmed,
@@ -160,6 +161,12 @@ def run_background_jobs() -> None:
         if reminded:
             log.info('publish reminders: %s', reminded)
 
+        try:
+            exp = expire_manager_timeouts()
+            if exp:
+                log.info('manager timeouts: %s', exp)
+        except Exception:
+            log.exception('expire_manager_timeouts')
         pub = publish_due_items()
         if any(pub.get(k) for k in ('published', 'failed_channels', 'manual_reminded')):
             log.info('publish job: %s', pub)
