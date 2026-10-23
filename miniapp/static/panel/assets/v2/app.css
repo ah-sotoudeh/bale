@@ -21,7 +21,7 @@
   --danger-soft: #FEE2E2;
   --radius: 14px;
   --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.06);
-  --nav-h: 64px;
+  --nav-h: 58px;
   --header-h: 56px;
   --font: Vazirmatn, Tahoma, system-ui, sans-serif;
 }
@@ -1157,6 +1157,13 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
   gap: 2px !important;
   font-size: .6rem !important;
 }
+.nav-label {
+  display: block !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  pointer-events: none !important;
+}
 .nav button svg {
   width: 22px !important;
   height: 22px !important;
@@ -1195,3 +1202,157 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 #pageContent { min-height: 40vh; color: var(--text); }
 .empty { color: var(--text); }
 .loading { color: var(--muted); padding: 32px; text-align: center; }
+
+
+/* ========== Bottom nav — mobile-safe (final) ==========
+   Problem was: safe-area applied both on .nav height AND on button padding,
+   so icons/labels were clipped or floated into the home-indicator zone.
+*/
+.nav {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  transform: none !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  z-index: 80 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  justify-content: space-around !important;
+  gap: 0 !important;
+  /* height = content row only; safe-area is padding, not extra button space */
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 6px 4px max(8px, env(safe-area-inset-bottom, 0px)) !important;
+  margin: 0 !important;
+  background: var(--surface) !important;
+  border-top: 1px solid var(--line) !important;
+  box-shadow: 0 -6px 24px rgba(15, 43, 71, 0.06) !important;
+  overflow: visible !important;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.nav button {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  max-height: 48px !important;
+  margin: 0 !important;
+  padding: 4px 2px 2px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  font-family: var(--font) !important;
+  font-size: 0.62rem !important;
+  font-weight: 650 !important;
+  line-height: 1.15 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  cursor: pointer !important;
+  position: relative !important;
+  isolation: isolate !important;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.nav button svg {
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  flex-shrink: 0 !important;
+  display: block !important;
+  stroke: currentColor !important;
+  fill: none !important;
+  stroke-width: 2 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+  overflow: visible !important;
+}
+
+.nav button.on {
+  color: var(--teal-strong) !important;
+  font-weight: 800 !important;
+}
+
+/* soft pill behind active tab (not clipped) */
+.nav button::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: 2px 6px !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  z-index: -1 !important;
+  transition: background .15s ease !important;
+}
+.nav button.on::before {
+  background: var(--teal-soft) !important;
+}
+
+/* remove old bottom-dot indicator that collided with safe-area */
+.nav button.on::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* page content must clear the full nav including safe area */
+.main {
+  padding-left: 13px !important;
+  padding-right: 13px !important;
+  padding-top: 13px !important;
+  padding-bottom: calc(58px + 16px + env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box !important;
+}
+
+/* sheet must sit above nav */
+.sheet {
+  z-index: 90 !important;
+}
+.sheet-panel {
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* very small phones */
+@media (max-width: 360px) {
+  .nav button {
+    font-size: 0.56rem !important;
+    gap: 1px !important;
+  }
+  .nav button svg {
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+  }
+}
+
+/* landscape / short height */
+@media (max-height: 500px) {
+  .nav button {
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+  }
+  .main {
+    padding-bottom: calc(50px + 12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+[data-theme="dark"] .nav {
+  background: color-mix(in srgb, var(--surface) 92%, transparent) !important;
+  border-top-color: var(--line) !important;
+}
+

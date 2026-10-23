@@ -1480,7 +1480,8 @@ function renderOpTickets() {
   function renderNav() {
     const items = navItems();
     $('#bottomNav').innerHTML = items.map((it) =>
-      `<button type="button" class="${ST.page===it.id?'on':''}" data-nav="${it.id}">${icon(it.icon)}${it.label}</button>`
+      `<button type="button" class="${ST.page===it.id?'on':''}" data-nav="${it.id}" aria-label="${it.label}">` +
+      `${icon(it.icon, 22)}<span class="nav-label">${it.label}</span></button>`
     ).join('');
   }
 
