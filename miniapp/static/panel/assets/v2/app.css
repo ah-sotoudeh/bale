@@ -1122,3 +1122,76 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 .mgr-cal-day.today{outline:2px solid var(--teal-strong,#0a8f8a);outline-offset:0}
 .mgr-cal-legend .legend-manual{background:#d97706}
 .mgr-cal-legend{margin-top:12px}
+
+/* Manager Jalali calendar month bar */
+.mgr-cal-monthbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:4px 2px 12px;margin-bottom:4px;
+}
+.mgr-cal-month-label{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1}
+.mgr-cal-month-label strong{font-size:.95rem;font-weight:900;color:var(--text)}
+.mgr-cal-month-label span{font-size:.72rem;color:var(--muted);font-weight:700}
+.mgr-cal-nav-btn{
+  width:40px;height:40px;border-radius:50%;border:1px solid var(--line);
+  background:var(--surface);color:var(--text);display:grid;place-items:center;
+  cursor:pointer;flex-shrink:0;padding:0;
+}
+.mgr-cal-nav-btn:active{transform:scale(.94)}
+.mgr-cal-day.empty{visibility:hidden;pointer-events:none}
+
+/* Customer month bar between arrows */
+.cal-monthbar{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:6px 0 10px;
+}
+.cal-month-label{flex:1;text-align:center;font-size:.95rem;font-weight:900}
+
+/* Bottom nav — compact, icons stick to bottom on all devices */
+:root { --nav-h: 56px; }
+.nav {
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)) !important;
+  padding: 4px 0 env(safe-area-inset-bottom, 0px) !important;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+.nav button {
+  justify-content: flex-end !important;
+  padding: 0 0 6px !important;
+  gap: 2px !important;
+  font-size: .6rem !important;
+  min-height: 0 !important;
+}
+.nav button svg {
+  width: 22px !important;
+  height: 22px !important;
+  flex-shrink: 0;
+}
+.main {
+  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px) !important;
+}
+
+/* Header trailing swap animation (theme <-> back) */
+#btnTheme {
+  transition: transform .18s ease, opacity .18s ease;
+}
+#btnTheme.hdr-swap {
+  opacity: 0;
+  transform: scale(.7) rotate(-40deg);
+}
+#btnTheme.hdr-swap-in {
+  animation: hdrIn .22s ease forwards;
+}
+@keyframes hdrIn {
+  from { opacity: 0; transform: scale(.7) rotate(40deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+#btnTheme.is-back {
+  color: var(--text, #fff);
+}
+.header.brand #btnTheme.is-back { color: #fff; }
+/* Always hide standalone back — space reserved only for profile + title + trailing */
+#btnBack { display: none !important; width: 0 !important; min-width: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; overflow: hidden !important; }
+.header { display: flex; align-items: center; gap: 8px; }
+.header .avatar { order: 0; }
+.header #pageTitle { order: 1; flex: 1; text-align: center; margin: 0; }
+.header #btnTheme { order: 2; }

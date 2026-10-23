@@ -17,6 +17,72 @@
     return fa(n);
   };
 
+
+  /* ——— Jalali helpers ——— */
+  const JMONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+  function div(a, b) { return Math.floor(a / b); }
+  function gregorianToJalali(gy, gm, gd) {
+    const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let gy2 = (gm > 2) ? (gy + 1) : gy;
+    let days = 355666 + (365 * gy) + div(gy2 + 3, 4) - div(gy2 + 99, 100) + div(gy2 + 399, 400) + gd + g_d_m[gm - 1];
+    let jy = -1595 + (33 * div(days, 12053));
+    days %= 12053;
+    jy += 4 * div(days, 1461);
+    days %= 1461;
+    if (days > 365) {
+      jy += div(days - 1, 365);
+      days = (days - 1) % 365;
+    }
+    const jm = (days < 186) ? 1 + div(days, 31) : 7 + div(days - 186, 30);
+    const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
+    return [jy, jm, jd];
+  }
+  function jalaliToGregorian(jy, jm, jd) {
+    jy = +jy; jm = +jm; jd = +jd;
+    const jy2 = jy + 1595;
+    let days = -355668 + (365 * jy2) + div(jy2, 33) * 8 + div((jy2 % 33) + 3, 4) + jd + ((jm < 7) ? (jm - 1) * 31 : ((jm - 7) * 30 + 186));
+    let gy = 400 * div(days, 146097);
+    days %= 146097;
+    if (days > 36524) {
+      gy += 100 * div(--days, 36524);
+      days %= 36524;
+      if (days >= 365) days++;
+    }
+    gy += 4 * div(days, 1461);
+    days %= 1461;
+    if (days > 365) {
+      gy += div(days - 1, 365);
+      days = (days - 1) % 365;
+    }
+    let gd = days + 1;
+    const sal_a = [0, 31, ((gy % 4 === 0 && gy % 100 !== 0) || (gy % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let gm = 0;
+    for (gm = 1; gm <= 12 && gd > sal_a[gm]; gm++) gd -= sal_a[gm];
+    return [gy, gm, gd];
+  }
+  function jalaliMonthLength(jy, jm) {
+    if (jm <= 6) return 31;
+    if (jm <= 11) return 30;
+    // Esfand: leap if remainder of (jy+12)/33 is in {1,5,9,13,17,22,26,30}
+    const r = (jy + 12) % 33;
+    return [1, 5, 9, 13, 17, 22, 26, 30].includes(r) ? 30 : 29;
+  }
+  function shiftJalaliMonth(jy, jm, delta) {
+    let m = jm + delta;
+    let y = jy;
+    while (m < 1) { m += 12; y -= 1; }
+    while (m > 12) { m -= 12; y += 1; }
+    return [y, m];
+  }
+  function formatJalaliISO(iso) {
+    if (!iso) return '';
+    const p = String(iso).slice(0, 10).split('-').map(Number);
+    if (p.length < 3 || !p[0]) return iso;
+    const [jy, jm, jd] = gregorianToJalali(p[0], p[1], p[2]);
+    return fa(jd) + ' ' + JMONTHS[jm - 1] + ' ' + fa(jy);
+  }
+
+
   const STATUS_LABEL = {
     draft: 'پیش‌نویس',
     waiting_banner: 'منتظر بنر',
@@ -67,6 +133,7 @@
     mgrCalDays: [],
     mgrCalBusy: [], // manual busy {id,date,jalali}
     mgrCalLoading: false,
+    mgrCalMonth: null, // [jy, jm]
     selectedMgrChannel: null,
     // operator
     opBanners: [],
@@ -830,8 +897,13 @@
     let cells=''; for(let i=0;i<startDow;i++) cells+='<div class="cal-day muted"></div>';
     for(let d=1;d<=dim;d++){const g=jalaliToGregorian(jy,jm,d);const iso=`${g[0]}-${String(g[1]).padStart(2,'0')}-${String(g[2]).padStart(2,'0')}`;const past=new Date(g[0],g[1]-1,g[2])<new Date(now.getFullYear(),now.getMonth(),now.getDate());const busy=busySet.has(iso);const sel=ST.selectedDay===iso;let cls='cal-day scenario-cal-day';if(past)cls+=' muted';else if(busy)cls+=' busy';if(sel)cls+=' sel';cells+=`<button type="button" class="${cls}" data-day="${iso}" ${past||busy?'disabled':''}>${fa(d)}${sel?'<i></i>':''}</button>`;}
     return `<section class="calendar-summary"><div class="calendar-summary-icon">${icon('calendar',22)}</div><div class="grow"><span class="eyebrow">تقویم انتشار</span><h2>${esc(t.owner||t.name)}</h2><p>${esc(t.name)} · ${fa(t.duration_hours)} ساعت نمایش</p></div><strong>${faNum(t.price)} <small>تومان</small></strong></section>
-      <section class="calendar-card"><div class="calendar-topline"><div><span class="eyebrow">زمان مناسب خودت را پیدا کن</span><h3>روز انتشار</h3></div><div class="calendar-nav"><button class="icon-btn" id="calPrev" aria-label="ماه قبل">${icon('chevron-left',17)}</button><button class="icon-btn" id="calNext" aria-label="ماه بعد">${icon('chevron-left',17)}</button></div></div><div class="cal-head scenario-cal-head"><strong>${JMONTHS[jm-1]} ${fa(jy)}</strong></div><div class="cal-grid scenario-cal-grid">${['ش','ی','د','س','چ','پ','ج'].map(x=>`<div class="cal-dow">${x}</div>`).join('')}${cells}</div><div class="calendar-legend"><span><i class="legend-free"></i> آزاد</span><span><i class="legend-busy"></i> تکمیل ظرفیت</span><span><i class="legend-past"></i> گذشته</span></div></section>
-      <section class="calendar-selection"><div class="calendar-selection-copy"><span>${icon('check',16)}</span><div><small>تاریخ انتخاب‌شده</small><strong>${ST.selectedDay?esc(ST.selectedDay):'هنوز روزی انتخاب نشده'}</strong></div></div><div class="calendar-selection-price"><small>مبلغ تعرفه</small><strong>${faNum(t.price)} <small>تومان</small></strong></div></section>
+      <section class="calendar-card"><div class="calendar-topline"><div><span class="eyebrow">زمان مناسب خودت را پیدا کن</span><h3>روز انتشار</h3></div></div>
+        <div class="cal-monthbar">
+          <button class="icon-btn" id="calPrev" aria-label="ماه قبل">${icon('chevron-left',17)}</button>
+          <strong class="cal-month-label">${JMONTHS[jm-1]} ${fa(jy)}</strong>
+          <button class="icon-btn" id="calNext" aria-label="ماه بعد"><svg viewBox="0 0 24 24" width="17" height="17" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><path d="m10 18 6-6-6-6"/></svg></button>
+        </div><div class="cal-grid scenario-cal-grid">${['ش','ی','د','س','چ','پ','ج'].map(x=>`<div class="cal-dow">${x}</div>`).join('')}${cells}</div><div class="calendar-legend"><span><i class="legend-free"></i> آزاد</span><span><i class="legend-busy"></i> تکمیل ظرفیت</span><span><i class="legend-past"></i> گذشته</span></div></section>
+      <section class="calendar-selection"><div class="calendar-selection-copy"><span>${icon('check',16)}</span><div><small>تاریخ انتخاب‌شده</small><strong>${ST.selectedDay?esc(formatJalaliISO(ST.selectedDay)):'هنوز روزی انتخاب نشده'}</strong></div></div><div class="calendar-selection-price"><small>مبلغ تعرفه</small><strong>${faNum(t.price)} <small>تومان</small></strong></div></section>
       <button class="btn btn-primary btn-block" id="btnAddCart" ${ST.selectedDay?'':'disabled'}>ادامه و انتخاب بنر ${icon('chevron-left',16)}</button><p class="calendar-security-note">${icon('shield-check',14)} تا پیش از ثبت نهایی می‌توانی جزئیات سفارش را بازبینی کنی.</p>`;
   }
 
@@ -1152,6 +1224,7 @@
     return y + '-' + m + '-' + day;
   }
 
+
   async function loadMgrCalendar(tariffId) {
     const tid = Number(tariffId || ST.mgrCalTariffId || 0);
     if (!tid) {
@@ -1162,7 +1235,7 @@
     ST.mgrCalTariffId = tid;
     ST.mgrCalLoading = true;
     try {
-      const d = await api('/calendar?tariff_id=' + encodeURIComponent(tid) + '&days=62');
+      const d = await api('/calendar?tariff_id=' + encodeURIComponent(tid) + '&days=93');
       if (!d || !d.ok) {
         ST.mgrCalDays = [];
         ST.mgrCalBusy = [];
@@ -1198,53 +1271,46 @@
     const byDate = {};
     (ST.mgrCalDays || []).forEach(d => { if (d && d.date) byDate[d.date] = d; });
 
-    // Build ~2 month grid from today
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const start = new Date(today);
-    // align to Saturday for Persian week (شنبه=0 visually RTL: show ش ی د ... ج)
-    // Use ISO week starting Saturday for Iran
-    const dow = start.getDay(); // 0 Sun .. 6 Sat
-    // Iranian calendar grids often start Saturday
-    const offsetToSat = (dow + 1) % 7; // days since Saturday
-    start.setDate(start.getDate() - offsetToSat);
+    const now = new Date();
+    if (!ST.mgrCalMonth || !Array.isArray(ST.mgrCalMonth) || ST.mgrCalMonth.length < 2) {
+      const [jy0, jm0] = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+      ST.mgrCalMonth = [jy0, jm0];
+    }
+    const [jy, jm] = ST.mgrCalMonth;
+    const dim = jalaliMonthLength(jy, jm);
+    const firstG = jalaliToGregorian(jy, jm, 1);
+    const first = new Date(firstG[0], firstG[1] - 1, firstG[2]);
+    // Saturday-first: (JS Sunday=0) -> offset for شنبه
+    const startDow = (first.getDay() + 1) % 7;
+    const todayIso = localISODate(now);
 
-    const weekLabels = ['ش','ی','د','س','چ','پ','ج'];
+    const weekLabels = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
     let cells = weekLabels.map(w => `<div class="mgr-cal-head">${w}</div>`).join('');
-    const totalCells = 42;
-    for (let i = 0; i < totalCells; i++) {
-      const day = new Date(start);
-      day.setDate(start.getDate() + i);
-      const iso = localISODate(day);
-      const inMonthPad = true;
+    for (let i = 0; i < startDow; i++) cells += '<div class="mgr-cal-day muted empty"></div>';
+    for (let d = 1; d <= dim; d++) {
+      const g = jalaliToGregorian(jy, jm, d);
+      const iso = g[0] + '-' + String(g[1]).padStart(2, '0') + '-' + String(g[2]).padStart(2, '0');
+      const dayDate = new Date(g[0], g[1] - 1, g[2]);
+      dayDate.setHours(0, 0, 0, 0);
       const entry = byDate[iso];
-      const isPast = day < today || (entry && entry.status === 'past');
+      const isPast = dayDate < new Date(now.getFullYear(), now.getMonth(), now.getDate()) || (entry && entry.status === 'past');
       const isManual = !!busySet[iso];
-      const isFull = entry && (entry.status === 'full' || entry.free === false) && !isPast;
-      const isFree = entry && entry.status === 'free';
+      const isFull = entry && (entry.status === 'full' || entry.free === false) && !isPast && !isManual;
+      const isFree = !isPast && !isManual && !isFull;
+      const isToday = iso === todayIso;
       let cls = 'mgr-cal-day';
-      let label = String(day.getDate());
-      let title = entry ? (entry.jalali || iso) : iso;
-      if (!entry && day >= today) {
-        // outside API span
-        cls += ' muted';
-      } else if (isPast) {
-        cls += ' past';
-      } else if (isManual) {
-        cls += ' manual';
-        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + 'مسدود توسط شما';
-      } else if (isFull) {
-        cls += ' full';
-        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + (entry.why || 'رزرو شده / پر');
-      } else if (isFree) {
-        cls += ' free';
-        title = (entry && entry.jalali ? entry.jalali + ' — ' : '') + 'آزاد — برای مسدود کردن لمس کنید';
-      } else {
-        cls += ' muted';
-      }
-      if (iso === localISODate(today)) cls += ' today';
-      const canToggle = !isPast && (isFree || isManual);
-      cells += `<button type="button" class="${cls}" data-mgr-cal-day="${iso}" data-can-toggle="${canToggle ? '1' : '0'}" data-manual="${isManual ? '1' : '0'}" title="${esc(title)}" ${isPast ? 'disabled' : ''}>${label}</button>`;
+      if (isPast) cls += ' past muted';
+      else if (isManual) cls += ' manual';
+      else if (isFull) cls += ' full';
+      else if (isFree) cls += ' free';
+      if (isToday) cls += ' today';
+      let title = fa(d) + ' ' + JMONTHS[jm - 1];
+      if (isPast) title += ' — گذشته';
+      else if (isManual) title += ' — مسدود دستی';
+      else if (isFull) title += ' — تکمیل ظرفیت';
+      else title += ' — آزاد';
+      const canToggle = !isPast && !isFull;
+      cells += `<button type="button" class="${cls}" data-mgr-cal-day="${iso}" data-can-toggle="${canToggle ? '1' : '0'}" data-manual="${isManual ? '1' : '0'}" title="${esc(title)}" ${isPast ? 'disabled' : ''}>${fa(d)}</button>`;
     }
 
     const chName = ch ? esc(ch.name) : 'کانال';
@@ -1254,7 +1320,7 @@
         <div class="manager-screen-copy">
           <span class="manager-eyebrow">ظرفیت انتشار</span>
           <h2>تقویم ${chName}</h2>
-          <p>روزهای آزاد را لمس کنید تا مسدود شوند. روزهای مسدود دستی را دوباره لمس کنید تا آزاد شوند.</p>
+          <p>روز آزاد را لمس کنید تا مسدود شود؛ دوباره لمس کنید تا آزاد شود.</p>
         </div>
       </section>
       <div class="field" style="margin-bottom:10px">
@@ -1262,18 +1328,23 @@
         <select id="mgrCalTariffSelect">${list.map(x => `<option value="${x.id}" ${Number(x.id)===tid?'selected':''}>${esc(x.name || ((x.duration_hours||24)+' ساعته'))} · ${faNum(x.price)} تومان</option>`).join('')}</select>
       </div>
       <div class="mgr-cal-card">
+        <div class="mgr-cal-monthbar">
+          <button type="button" class="mgr-cal-nav-btn" id="mgrCalPrev" aria-label="ماه قبل">${icon('chevron-left',18)}</button>
+          <div class="mgr-cal-month-label"><strong>${JMONTHS[jm - 1]}</strong><span>${fa(jy)}</span></div>
+          <button type="button" class="mgr-cal-nav-btn" id="mgrCalNext" aria-label="ماه بعد"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><path d="m10 18 6-6-6-6"/></svg></button>
+        </div>
         ${ST.mgrCalLoading ? '<div class="loading" style="padding:24px">در حال بارگذاری تقویم…</div>' : `<div class="mgr-cal-grid">${cells}</div>`}
         <div class="calendar-legend mgr-cal-legend">
           <span><i class="legend-free"></i> آزاد</span>
           <span><i class="legend-manual"></i> مسدود دستی</span>
-          <span><i class="legend-busy"></i> رزرو / پر</span>
+          <span><i class="legend-busy"></i> تکمیل</span>
           <span><i class="legend-past"></i> گذشته</span>
         </div>
       </div>
-      <p class="hint" style="margin-top:10px;line-height:1.7">روزهای «رزرو / پر» مربوط به سفارش‌های ثبت‌شده‌اند و از اینجا باز نمی‌شوند. فقط مسدود دستی قابل برداشتن است.</p>
-      <button class="btn btn-ghost btn-block" id="btnMgrCalBack" style="margin-top:8px">بازگشت به کانال</button>
-    `;
+      <p class="manager-footnote" style="margin-top:10px">${icon('shield-check',14)} تاریخ‌ها به شمسی نمایش داده می‌شوند. ${trow ? ('تعرفه: ' + esc(trow.name || '')) : ''}</p>
+      <button class="btn btn-ghost btn-block" id="btnMgrCalBack" style="margin-top:8px">بازگشت به کانال</button>`;
   }
+
 
   function renderMgrChannelDetail() {
     const c = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
@@ -1415,9 +1486,14 @@ function renderOpTickets() {
 
   function render() {
     const root = $('#pageContent');
-    const back = !['home','market','orders','banners','wallet','settings','businesses','help','mgr-home','mgr-channels','mgr-tariffs','op-home'].includes(ST.page);
+    const back = !['home','market','orders','banners','wallet','settings','businesses','help','mgr-home','mgr-channels','mgr-tariffs','op-home','onboard'].includes(ST.page);
     $('#pageTitle').textContent = TITLES[ST.page] || 'لینک‌بان';
-    $('#btnBack').style.display = back ? '' : 'none';
+    // فلش برگشت جای دکمه تم می‌نشیند — پروفایل جابه‌جا نمی‌شود
+    try {
+      const btnBack = $('#btnBack');
+      if (btnBack) btnBack.style.display = 'none';
+      updateHeaderTrailing(back);
+    } catch (e) {}
     $('#headerEl').classList.add('brand');
     $('#headerEl').classList.toggle('manager-head', ST.role === 'manager');
     $('#headerEl').classList.toggle('operator-head', ST.role === 'operator');
@@ -1592,14 +1668,12 @@ function renderOpTickets() {
     const prev = $('#calPrev');
     const next = $('#calNext');
     if (prev) prev.onclick = () => {
-      let [y, m] = ST.calMonth;
-      m--; if (m < 1) { m = 12; y--; }
-      ST.calMonth = [y, m]; render();
+      const cur = ST.calMonth || gregorianToJalali(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
+      ST.calMonth = shiftJalaliMonth(cur[0], cur[1], -1); render();
     };
     if (next) next.onclick = () => {
-      let [y, m] = ST.calMonth;
-      m++; if (m > 12) { m = 1; y++; }
-      ST.calMonth = [y, m]; render();
+      const cur = ST.calMonth || gregorianToJalali(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
+      ST.calMonth = shiftJalaliMonth(cur[0], cur[1], 1); render();
     };
     const addCart = $('#btnAddCart');
     if (addCart) addCart.onclick = () => addToCart();
@@ -1927,7 +2001,21 @@ function renderOpTickets() {
       catch (e) { toast(e.message || 'خطا'); }
       finally { ST.mgrCalLoading = false; render(); }
     };
+    
+    const mgrCalPrev = $('#mgrCalPrev');
+    if (mgrCalPrev) mgrCalPrev.onclick = () => {
+      const cur = ST.mgrCalMonth || gregorianToJalali(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
+      ST.mgrCalMonth = shiftJalaliMonth(cur[0], cur[1], -1);
+      render();
+    };
+    const mgrCalNext = $('#mgrCalNext');
+    if (mgrCalNext) mgrCalNext.onclick = () => {
+      const cur = ST.mgrCalMonth || gregorianToJalali(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
+      ST.mgrCalMonth = shiftJalaliMonth(cur[0], cur[1], 1);
+      render();
+    };
     $$('[data-mgr-cal-day]').forEach((btn) => {
+
       btn.onclick = async () => {
         if (btn.disabled || btn.dataset.canToggle !== '1') return;
         const date = btn.dataset.mgrCalDay;
@@ -2615,6 +2703,60 @@ function renderOpTickets() {
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+
+  function updateHeaderTrailing(showBack) {
+    const themeBtn = document.getElementById('btnTheme');
+    if (!themeBtn) return;
+    const want = !!showBack;
+    const isBack = themeBtn.dataset.mode === 'back';
+    if (want === isBack) {
+      // ensure handler
+      if (want) {
+        themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
+      }
+      return;
+    }
+    themeBtn.classList.add('hdr-swap');
+    window.setTimeout(() => {
+      if (want) {
+        themeBtn.dataset.mode = 'back';
+        themeBtn.setAttribute('aria-label', 'بازگشت');
+        themeBtn.title = 'بازگشت';
+        themeBtn.classList.remove('tt');
+        themeBtn.classList.add('is-back');
+        themeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 18-6-6 6-6"/></svg>';
+        themeBtn.onclick = (e) => { e.preventDefault(); goBack(); };
+      } else {
+        themeBtn.dataset.mode = 'theme';
+        themeBtn.setAttribute('aria-label', 'تم');
+        themeBtn.title = 'حالت تیره / روشن';
+        themeBtn.classList.add('tt');
+        themeBtn.classList.remove('is-back');
+        try {
+          if (typeof themeToggleSvg === 'function') themeBtn.innerHTML = themeToggleSvg();
+          if (typeof paintThemeButton === 'function') paintThemeButton(themeBtn);
+        } catch (e) {}
+        themeBtn.onclick = (e) => {
+          try { setTheme(document.documentElement.dataset.theme !== 'dark', e); } catch (err) {}
+        };
+      }
+      themeBtn.classList.remove('hdr-swap');
+      themeBtn.classList.add('hdr-swap-in');
+      window.setTimeout(() => themeBtn.classList.remove('hdr-swap-in'), 220);
+    }, 120);
+  }
+
+  function goBack() {
+    if (ST.page === 'calendar') navigate('channel');
+    else if (ST.page === 'channel') navigate('market');
+    else if (ST.page === 'mgr-channel') navigate('mgr-channels');
+    else if (ST.page === 'mgr-calendar') navigate(ST.selectedMgrChannel ? 'mgr-channel' : 'mgr-channels');
+    else if (ST.page === 'help' || ST.page === 'businesses') navigate('settings');
+    else if (ST.role === 'manager') navigate('mgr-home');
+    else if (ST.role === 'operator') navigate('op-home');
+    else navigate('market');
   }
 
   function bindGlobal() {
