@@ -4,7 +4,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('wallet', '0004_alter_walletledger_entry_type'),  # may need adjust
+        ('wallet', '0004_alter_walletledger_entry_type'),
     ]
 
     operations = [

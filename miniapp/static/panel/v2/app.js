@@ -244,8 +244,9 @@
     if (!btn) return;
     const photo = userPhotoUrl(ST.me);
     const letter = userInitials(ST.me);
+    btn.style.cssText = 'border-radius:50%;width:40px;height:40px;min-width:40px;max-width:40px;overflow:hidden;padding:0;flex-shrink:0';
     if (photo) {
-      btn.innerHTML = `<img src="${esc(photo)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.remove();this.parentNode.textContent='${esc(letter)}'"/>`;
+      btn.innerHTML = `<img src="${esc(photo)}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:50%;display:block" onerror="this.remove();this.parentNode.textContent='${esc(letter)}'"/>`;
     } else {
       btn.textContent = letter;
     }
