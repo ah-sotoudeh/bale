@@ -2476,7 +2476,7 @@ function renderOpTickets() {
         if (OB.step === 'pmode') {
           if (OB.ch.id) {
             try {
-              await api('/channels/update', {
+              await api('/publish-mode', {
                 method: 'POST',
                 body: JSON.stringify({ channel_id: OB.ch.id, publish_mode: OB.pmode }),
               });
