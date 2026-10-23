@@ -607,7 +607,7 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     )
     looked_up = not info.get('error')
     if not looked_up:
-        missing = 'کانال را از بله نخواندیم. پیوند را یک بار دیگر بررسی کنید.'
+        missing = 'این کانال پیدا نشد. نام کاربری یا لینک را دوباره بررسی کنید.'
         return JsonResponse(
             {'ok': False, 'error': missing, 'message': missing, 'code': 'lookup_failed'},
             status=200,
@@ -626,8 +626,8 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
     MIN_MEMBERS = 1000
     if looked_up and members and members < MIN_MEMBERS and not owner:
         msg = (
-            f'کانال {name or link} کمتر از {MIN_MEMBERS} عضو دارد '
-            f'(الان حدود {members} عضو). فعلاً حداقل {MIN_MEMBERS} عضو لازم است.'
+            f'برای ثبت در لینک‌بان، کانال باید حداقل {MIN_MEMBERS} عضو داشته باشد. '
+            f'این کانال حدود {members} عضو دارد.'
         )
         return JsonResponse(
             {'ok': False, 'error': msg, 'message': msg, 'code': 'min_members', 'members': members},
@@ -635,40 +635,71 @@ def api_add_channel(request: HttpRequest) -> JsonResponse:
         )
 
     if existing and existing.manager_id and existing.manager_id != user.id and not owner:
-        taken = 'این کانال برای کانال‌دار دیگری ثبت شده. اگر مال شماست، به پشتیبانی بگویید.'
+        taken = 'این کانال قبلاً برای مدیر دیگری ثبت شده است. اگر متعلق به شماست با پشتیبانی در ارتباط باشید.'
         return JsonResponse({'ok': False, 'error': taken, 'message': taken}, status=200)
-    if existing:
-        existing.manager = user
-        existing.name = name
-        existing.pending_manager_username = ''
-        if pre_verified:
-            existing.ownership_verified = True
-        if info.get('id'):
+    peer = None
+    if info.get('id'):
+        try:
+            peer = int(info['id'])
+        except (TypeError, ValueError):
+            peer = None
+    cat = str(body.get('category') or '').strip()[:32]
+    about_txt = str(bio or '')[:4000]
+
+    try:
+        if existing:
+            existing.manager = user
+            existing.name = name
+            if hasattr(existing, 'pending_manager_username'):
+                existing.pending_manager_username = ''
+            if pre_verified and hasattr(existing, 'ownership_verified'):
+                existing.ownership_verified = True
+            if peer is not None and hasattr(existing, 'bale_peer_id'):
+                existing.bale_peer_id = peer
+            if about_txt and hasattr(existing, 'about'):
+                existing.about = about_txt
+            existing.save()
+            ch = existing
+        else:
+            # فقط فیلدهای پایه — فیلدهای سناریویی اختیاری اگر ستون در DB نباشد
+            kwargs = {
+                'name': name,
+                'link': link,
+                'manager': user,
+                'publish_mode': Channel.PUBLISH_MANUAL,
+            }
+            field_names = {f.name for f in Channel._meta.get_fields() if hasattr(f, 'name')}
+            if 'bale_peer_id' in field_names and peer is not None:
+                kwargs['bale_peer_id'] = peer
+            if 'about' in field_names and about_txt:
+                kwargs['about'] = about_txt
+            if 'category' in field_names and cat:
+                kwargs['category'] = cat
+            if 'auto_approve_banner' in field_names:
+                kwargs['auto_approve_banner'] = bool(body.get('auto_approve_banner'))
+            if 'auto_approve_time' in field_names:
+                kwargs['auto_approve_time'] = bool(body.get('auto_approve_time'))
+            if 'ownership_verified' in field_names:
+                kwargs['ownership_verified'] = True
             try:
-                existing.bale_peer_id = int(info['id'])
-            except (TypeError, ValueError):
-                pass
-        existing.save()
-        ch = existing
-    else:
-        peer = None
-        if info.get('id'):
-            try:
-                peer = int(info['id'])
-            except (TypeError, ValueError):
-                peer = None
-        cat = str(body.get('category') or '').strip()[:32]
-        ch = Channel.objects.create(
-            name=name,
-            link=link,
-            manager=user,
-            publish_mode=Channel.PUBLISH_MANUAL,
-            bale_peer_id=peer,
-            about=bio[:4000],
-            category=cat if cat else '',
-            auto_approve_banner=bool(body.get('auto_approve_banner')),
-            auto_approve_time=bool(body.get('auto_approve_time')),
-        )
+                ch = Channel.objects.create(**kwargs)
+            except Exception as create_err:
+                logger.exception('channel create full kwargs failed: %s', create_err)
+                # حداقل فیلدهای حیاتی
+                ch = Channel.objects.create(
+                    name=name,
+                    link=link,
+                    manager=user,
+                    publish_mode=Channel.PUBLISH_MANUAL,
+                )
+    except Exception as e:
+        logger.exception('api_add_channel failed')
+        msg = 'ثبت کانال الان انجام نشد. پیوند را بررسی کنید و کمی بعد دوباره تلاش کنید.'
+        err_s = str(e)
+        if 'no such column' in err_s.lower() or 'operationalerror' in err_s.lower():
+            msg = 'پایگاه داده نیاز به به‌روزرسانی دارد. از پشتیبان بخواهید migrate را اجرا کند، یا دوباره تلاش کنید.'
+        return JsonResponse({'ok': False, 'error': 'save_failed', 'message': msg}, status=200)
+
     try:
         from integrations.channel_stats import refresh_channel
 

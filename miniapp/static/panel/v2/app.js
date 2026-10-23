@@ -2353,30 +2353,30 @@ function renderOpTickets() {
     let body = '';
     if (step === 'role') {
       body = `${logo}
-        <div class="lb-ob-title">چطور می‌خواهید از لینک‌بان استفاده کنید؟</div>
-        <p class="lb-ob-sub">نقش خود را انتخاب کنید. بعداً از تنظیمات می‌توانید جابه‌جا شوید.</p>
+        <div class="lb-ob-title">خوش آمدید 👋</div>
+        <p class="lb-ob-sub">بگویید برای چه کاری آمده‌اید تا فضای مناسب شما باز شود.</p>
         <div class="lb-ob-cards">
           <button type="button" class="lb-ob-card" data-ob="role-advertiser">
             <span class="lb-ob-card-ico">${icon('megaphone',22)}</span>
-            <span><b>آگهی‌دهنده</b><small>ثبت کسب‌وکار، بنر و سفارش تبلیغ</small></span>
+            <span><b>آگهی‌دهنده هستم</b><small>می‌خواهم در کانال‌های بله تبلیغ بخرم</small></span>
           </button>
           <button type="button" class="lb-ob-card" data-ob="role-manager">
             <span class="lb-ob-card-ico">${icon('building-2',22)}</span>
-            <span><b>مدیر کانال</b><small>ثبت کانال، تعرفه و پاسخ به درخواست‌ها</small></span>
+            <span><b>مدیر کانال هستم</b><small>می‌خواهم جایگاه تبلیغاتی بفروشم</small></span>
           </button>
         </div>`;
     } else if (step === 'biz_name') {
       body = `${logo}
-        <div class="lb-ob-title">کسب‌وکار خود را معرفی کنید</div>
-        <p class="lb-ob-sub">برای شروع حداقل یک کسب‌وکار لازم است. بنر را بعداً به بازو می‌فرستید.</p>
+        <div class="lb-ob-title">نام کسب‌وکارتان چیست؟</div>
+        <p class="lb-ob-sub">همین نام در سفارش‌ها و بنرها نمایش داده می‌شود.</p>
         <div class="lb-ob-field"><label>نام کسب‌وکار</label>
           <input id="ob-biz-name" maxlength="160" placeholder="مثلاً فروشگاه گیاهان طبیعی" value="${esc(OB.biz.name)}"/>
         </div>
         ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
     } else if (step === 'biz_kind') {
       body = `${logo}
-        <div class="lb-ob-title">نوع کسب‌وکار</div>
-        <p class="lb-ob-sub">کانال بله یا کسب‌وکار خارج از بله.</p>
+        <div class="lb-ob-title">کسب‌وکارتان کجاست؟</div>
+        <p class="lb-ob-sub">اگر کانال بله دارید همان را انتخاب کنید؛ وگرنه فروشگاه یا صفحه خارجی.</p>
         <div class="lb-ob-opts">
           <button type="button" class="lb-ob-opt ${OB.biz.kind==='bale'?'on':''}" data-ob="kind-bale"><span class="radio"></span><div><b>کانال یا گروه بله</b><span>با شناسه یا لینک ble.ir</span></div></button>
           <button type="button" class="lb-ob-opt ${OB.biz.kind==='external'?'on':''}" data-ob="kind-external"><span class="radio"></span><div><b>فروشگاه خارج از بله</b><span>سایت، اینستاگرام و …</span></div></button>
@@ -2387,8 +2387,8 @@ function renderOpTickets() {
         ${OB.error ? `<div class="lb-ob-err">${esc(OB.error)}</div>` : ''}`;
     } else if (step === 'biz_cat') {
       body = `${logo}
-        <div class="lb-ob-title">دسته‌بندی کسب‌وکار</div>
-        <p class="lb-ob-sub">حداقل یک موضوع انتخاب کنید.</p>
+        <div class="lb-ob-title">فعالیت شما درباره چیست؟</div>
+        <p class="lb-ob-sub">یک یا چند موضوع نزدیک به کارتان را انتخاب کنید.</p>
         <div class="lb-ob-chips">
           ${OB_CATS.map((c) => `<button type="button" class="lb-ob-chip ${(OB.biz.categories||[]).includes(c)?'on':''}" data-ob="cat-${esc(c)}">${esc(c)}</button>`).join('')}
         </div>
@@ -2397,30 +2397,29 @@ function renderOpTickets() {
       body = `<div class="lb-ob-done">
         <div class="ok-ico">${icon('check',28)}</div>
         <div class="lb-ob-title">آماده‌اید</div>
-        <p class="lb-ob-sub">کسب‌وکار «${esc(OB.biz.name)}» ثبت شد. بنر را از برگه بنرها از طریق بازو اضافه کنید.</p>
+        <p class="lb-ob-sub">«${esc(OB.biz.name)}» آماده است. در مرحله بعد می‌توانید بنر بسازید و کانال انتخاب کنید.</p>
       </div>`;
     } else if (step === 'ch_link') {
       body = `${logo}
-        <div class="lb-ob-title">افزودن کانال</div>
-        <p class="lb-ob-sub">نام کاربری یا لینک کانال بله را وارد کنید. نیازی به بیو نیست.</p>
-        <div class="lb-ob-field"><label>نام کاربری یا لینک</label>
-          <input id="ob-ch-link" maxlength="120" placeholder="@mychannel یا ble.ir/mychannel" value="${esc(OB.ch.link)}"/>
+        <div class="lb-ob-title">کانال خود را اضافه کنید</div>
+        <p class="lb-ob-sub">آدرس کانال بله‌تان را بنویسید تا بتوانید برایش تعرفه بگذارید.</p>
+        <div class="lb-ob-field"><label>آدرس کانال</label>
+          <input id="ob-ch-link" maxlength="120" placeholder="مثلاً @mychannel یا ble.ir/mychannel" value="${esc(OB.ch.link)}"/>
         </div>
-        <div class="lb-ob-hint">اگر پشتیبان کانال را به شما انتساب داده، همین‌جا دیده می‌شود و فقط تعرفه می‌گذارید.</div>
         ${OB.ch.error || OB.error ? `<div class="lb-ob-err">${esc(OB.ch.error || OB.error)}</div>` : ''}`;
     } else if (step === 'pmode') {
       body = `${logo}
-        <div class="lb-ob-title">نحوه انتشار تبلیغ</div>
-        <p class="lb-ob-sub">برای «${esc(OB.ch.name || 'کانال')}» انتشار چگونه باشد؟</p>
+        <div class="lb-ob-title">تبلیغ‌ها چطور منتشر شوند؟</div>
+        <p class="lb-ob-sub">برای کانال «${esc(OB.ch.name || 'شما')}» یکی را انتخاب کنید.</p>
         <div class="lb-ob-opts">
-          <button type="button" class="lb-ob-opt ${OB.pmode==='manual'?'on':''}" data-ob="pmode-manual"><span class="radio"></span><div><b>ارسال دستی</b><span>خودتان در زمان مقرر می‌فرستید</span></div></button>
-          <button type="button" class="lb-ob-opt ${OB.pmode==='bot'?'on':''}" data-ob="pmode-bot"><span class="radio"></span><div><b>خودکار با بازو</b><span>بازو باید ادمین کانال باشد</span></div></button>
-          <button type="button" class="lb-ob-opt ${OB.pmode==='linkyar'?'on':''}" data-ob="pmode-linkyar"><span class="radio"></span><div><b>خودکار با حساب دستیار</b><span>لینک‌یار باید ادمین کانال باشد</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='manual'?'on':''}" data-ob="pmode-manual"><span class="radio"></span><div><b>خودم می‌فرستم</b><span>در زمان توافق‌شده خودتان در کانال پست می‌گذارید</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='bot'?'on':''}" data-ob="pmode-bot"><span class="radio"></span><div><b>خودکار با بازو</b><span>بازو را ادمین کانال کنید تا خودش بفرستد</span></div></button>
+          <button type="button" class="lb-ob-opt ${OB.pmode==='linkyar'?'on':''}" data-ob="pmode-linkyar"><span class="radio"></span><div><b>خودکار با حساب دستیار</b><span>حساب دستیار لینک‌بان را ادمین کانال کنید</span></div></button>
         </div>`;
     } else if (step === 'tariff') {
       body = `${logo}
-        <div class="lb-ob-title">اولین تعرفه</div>
-        <p class="lb-ob-sub">یک تعرفه بسازید تا آگهی‌دهنده‌ها سفارش بدهند.</p>
+        <div class="lb-ob-title">اولین قیمت‌گذاری</div>
+        <p class="lb-ob-sub">مدت ماندن تبلیغ و مبلغ را مشخص کنید. بعداً می‌توانید تغییر دهید.</p>
         <div class="lb-ob-field"><label>نام تعرفه</label>
           <input id="ob-tar-name" maxlength="80" value="${esc(OB.tariff.name)}" placeholder="مثلاً ۲۴ ساعته"/>
         </div>
@@ -2436,8 +2435,8 @@ function renderOpTickets() {
     } else if (step === 'mgr_done') {
       body = `<div class="lb-ob-done">
         <div class="ok-ico">${icon('check',28)}</div>
-        <div class="lb-ob-title">کانال آماده است</div>
-        <p class="lb-ob-sub">«${esc(OB.ch.name || OB.ch.link)}» ثبت شد. درخواست‌ها در صف پاسخ‌گویی می‌آیند.</p>
+        <div class="lb-ob-title">همه‌چیز آماده است</div>
+        <p class="lb-ob-sub">کانال «${esc(OB.ch.name || OB.ch.link)}» ثبت شد. از این به بعد درخواست‌های تبلیغ اینجا می‌آید.</p>
       </div>`;
     } else {
       body = `${logo}<div class="lb-ob-title">ادامهٔ ثبت‌نام</div>`;
@@ -2530,7 +2529,7 @@ function renderOpTickets() {
       if (OB.step === 'biz_name') {
         const n = document.getElementById('ob-biz-name');
         OB.biz.name = (n && n.value || '').trim();
-        if (!OB.biz.name) { OB.error = 'نام کسب‌وکار را بنویسید.'; return render(); }
+        if (!OB.biz.name) { OB.error = 'نام کسب‌وکار را وارد کنید.'; return render(); }
         OB.step = 'biz_kind';
         return render();
       }
@@ -2542,7 +2541,7 @@ function renderOpTickets() {
       }
       if (OB.step === 'biz_cat') {
         if (!(OB.biz.categories || []).length) {
-          OB.error = 'حداقل یک دسته‌بندی انتخاب کنید.';
+          OB.error = 'دست‌کم یک موضوع انتخاب کنید.';
           return render();
         }
         OB.loading = true; render();
@@ -2561,7 +2560,7 @@ function renderOpTickets() {
           OB.step = 'biz_done';
           await loadBusinesses().catch(() => {});
         } catch (err) {
-          OB.error = err.message || 'ثبت کسب‌وکار ناموفق بود.';
+          OB.error = err.message || 'ثبت انجام نشد. دوباره تلاش کنید.';
         }
         OB.loading = false;
         return render();
@@ -2569,19 +2568,19 @@ function renderOpTickets() {
       if (OB.step === 'ch_link') {
         const el = document.getElementById('ob-ch-link');
         OB.ch.link = (el && el.value || '').trim();
-        if (!OB.ch.link) { OB.ch.error = 'شناسه یا لینک کانال را وارد کنید.'; return render(); }
+        if (!OB.ch.link) { OB.ch.error = 'آدرس کانال را بنویسید.'; return render(); }
         OB.ch.loading = true; render();
         try {
           const d = await api('/channels/add', {
             method: 'POST',
             body: JSON.stringify({ link: OB.ch.link, name: '' }),
           });
-          if (!d.ok) throw new Error(d.message || d.error || 'ثبت کانال ناموفق');
+          if (!d.ok) throw new Error(d.message || d.error || 'ثبت کانال انجام نشد.');
           OB.ch.id = (d.channel && d.channel.id) || d.id || 0;
           OB.ch.name = (d.channel && (d.channel.name || d.channel.title)) || OB.ch.link;
           OB.step = 'pmode';
         } catch (err) {
-          OB.ch.error = err.message || 'ثبت کانال ناموفق بود.';
+          OB.ch.error = err.message || 'ثبت کانال انجام نشد. آدرس را بررسی کنید و دوباره تلاش کنید.';
         }
         OB.ch.loading = false;
         return render();
@@ -2604,7 +2603,7 @@ function renderOpTickets() {
         OB.tariff.name = (tn && tn.value || '').trim() || (OB.tariff.duration_hours + ' ساعته');
         OB.tariff.price = (pr && pr.value || '').toString().trim();
         const priceNum = parseInt(String(OB.tariff.price).replace(/[^0-9]/g, ''), 10) || 0;
-        if (priceNum <= 0) { OB.error = 'قیمت معتبر وارد کنید.'; return render(); }
+        if (priceNum <= 0) { OB.error = 'مبلغ را به تومان وارد کنید.'; return render(); }
         OB.loading = true; render();
         try {
           const d = await api('/tariffs/add', {
@@ -2620,7 +2619,7 @@ function renderOpTickets() {
           obMarkDone('manager');
           OB.step = 'mgr_done';
         } catch (err) {
-          OB.error = err.message || 'ثبت تعرفه ناموفق بود.';
+          OB.error = err.message || 'تعرفه ثبت نشد. دوباره تلاش کنید.';
         }
         OB.loading = false;
         return render();
