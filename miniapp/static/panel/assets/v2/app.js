@@ -1,4 +1,55 @@
-/* LinkBan Mini App v2 — connected to live API */
+/*    reportText() {
+      const role = (ST && ST.role) || '';
+      const me = (ST && ST.me && ST.me.user) || (ST && ST.user) || {};
+      const uid = me.bale_user_id || me.id || '';
+      const fails = (this.events || []).filter((e) => e.type === 'api' && !e.ok);
+      const jsErrs = (this.events || []).filter((e) => e.type === 'js_error' || e.type === 'promise_reject');
+      const pageIssues = (this.events || []).filter((e) => e.type === 'page' && e.issues && e.issues.length);
+      const failPaths = {};
+      fails.forEach((e) => {
+        const k = (e.path || '?') + (e.error ? ':' + e.error : '');
+        failPaths[k] = (failPaths[k] || 0) + 1;
+      });
+      // مسیر صفحات بدون تکرار پشت‌سرهم
+      const journey = [];
+      (this.events || []).forEach((e) => {
+        if (e.type !== 'page') return;
+        if (journey.length && journey[journey.length - 1] === e.page) return;
+        journey.push(e.page);
+      });
+      const lines = [];
+      lines.push('LY_QA v2');
+      lines.push('t=' + new Date().toISOString().slice(11, 19) + 'Z role=' + role + ' uid=' + uid);
+      lines.push('pages=' + journey.join('>'));
+      lines.push('api_fail=' + fails.length + ' js_err=' + jsErrs.length + ' ui_issue=' + pageIssues.length);
+      if (Object.keys(failPaths).length) {
+        lines.push('fails=' + Object.keys(failPaths).map((k) => k + '×' + failPaths[k]).join(' | '));
+      }
+      // فقط رویدادهای مهم (خطا / issue)
+      const important = (this.events || []).filter((e) => {
+        if (e.type === 'api' && !e.ok) return true;
+        if (e.type === 'js_error' || e.type === 'promise_reject') return true;
+        if (e.type === 'page' && e.issues && e.issues.length) return true;
+        if (e.type === 'page' && e.htmlLen < 80) return true;
+        return false;
+      }).slice(-25);
+      if (important.length) {
+        lines.push('--issues--');
+        important.forEach((e, i) => {
+          if (e.type === 'api') {
+            lines.push((i + 1) + '. API ' + e.method + ' ' + e.path + ' ' + (e.error || 'fail') + (e.msg ? ' | ' + String(e.msg).slice(0, 80) : '') + (e.body_snip ? ' | ' + e.body_snip : ''));
+          } else if (e.type === 'page') {
+            lines.push((i + 1) + '. PAGE ' + e.page + ' ' + (e.issues || []).join(',') + (e.htmlLen < 80 ? ' empty' : ''));
+          } else {
+            lines.push((i + 1) + '. ' + e.type + ' ' + (e.error || ''));
+          }
+        });
+      } else {
+        lines.push('ok=no_critical_issues');
+      }
+      lines.push('--end--');
+      return lines.join('\n');
+    },LinkBan Mini App v2 — connected to live API */
 (function () {
   'use strict';
 
@@ -203,11 +254,16 @@
         }
         if (page === 'mgr-channels' && !hasEmpty && !root.querySelector('[data-mgr-ch],.manager-channel-card')) issues.push('no_channel_cards');
         if (page === 'market' && !hasEmpty && !root.querySelector('[data-tariff],.tariff-card,.market-card')) issues.push('no_market_cards');
-        this.log('page', {
-          page, htmlLen, textLen: text.length,
-          buttons: root.querySelectorAll('button').length,
-          hasEmpty, hasError, issues, snippet: text.slice(0, 180),
-        });
+        const last = this.events.length ? this.events[this.events.length - 1] : null;
+        const sameOk = last && last.type === 'page' && last.page === page && !issues.length && !last.issues?.length && htmlLen > 80;
+        if (!sameOk) {
+          this.log('page', {
+            page, htmlLen, textLen: text.length,
+            buttons: root.querySelectorAll('button').length,
+            hasEmpty, hasError, issues,
+            snippet: issues.length || htmlLen < 80 ? text.slice(0, 120) : '',
+          });
+        }
       } catch (e) { this.log('inspect_fail', { error: String(e && e.message || e) }); }
     },
     reportText() {
@@ -1179,16 +1235,22 @@ function renderSettings() {
       </div>`;
     return `
       <section class="profile-hero">
-        <div class="profile-hero-glow"></div>
+        <div class="profile-hero-glow" aria-hidden="true"></div>
         <div class="profile-identity">
-          <div class="profile-avatar">${photo ? `<img src="${esc(photo)}" alt=""/>` : esc(initials)}</div>
-          <div class="profile-copy"><span class="profile-overline">حساب لینک‌بان</span><h2>${esc(handle)}</h2><span class="profile-subline">${icon('shield-check',13)} ${(u.handle || u.username) ? ('@' + esc(String(u.handle || u.username).replace(/^@/,''))) : 'حساب کاربری شما'}</span></div>
-          <span class="profile-member-badge">${icon('badge-check',17)}</span>
+          <div class="profile-avatar">${photo ? `<img src="${esc(photo)}" alt="" loading="lazy" onerror="this.remove()"/>` : `<span>${esc(initials)}</span>`}</div>
+          <div class="profile-copy">
+            <span class="profile-overline">حساب لینک‌بان</span>
+            <h2>${esc(handle)}</h2>
+            <span class="profile-subline">${icon('shield-check',13)} ${(u.handle || u.username) ? ('@' + esc(String(u.handle || u.username).replace(/^@/,''))) : 'حساب کاربری شما'}</span>
+          </div>
         </div>
-        <div class="profile-meta"><span>شناسه کاربری</span><strong>${identity ? fa(identity) : '—'}</strong><button id="btnCopyUserId" type="button" aria-label="کپی شناسه" ${identity ? '' : 'disabled'}>${icon('copy',15)}</button></div>
-      
-      <button type="button" class="btn btn-soft" id="btnOpenQa" style="width:100%;margin:8px 0 12px">گزارش عیب‌یابی</button>
-</section>
+        <div class="profile-meta">
+          <span>شناسه کاربری</span>
+          <strong dir="ltr">${identity ? fa(identity) : '—'}</strong>
+          <button id="btnCopyUserId" type="button" aria-label="کپی شناسه" ${identity ? '' : 'disabled'}>${icon('copy',15)}</button>
+        </div>
+      </section>
+      <button type="button" class="btn btn-soft btn-qa-report" id="btnOpenQa">گزارش عیب‌یابی</button>
       <div class="section-heading profile-section-heading"><div><span class="eyebrow">فضای کاری شما</span><h2>نقش فعال</h2></div><span class="role-count">${isOperator ? '۳ نقش' : '۲ نقش'}</span></div>
       <p class="profile-intro">با انتخاب نقش، ابزارهای متناسب با فعالیتت در دسترس قرار می‌گیرد.</p>
       <div class="role-list">

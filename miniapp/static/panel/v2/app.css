@@ -1661,3 +1661,66 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
   border-top-color: var(--teal-strong, #0a6794);
   animation: ly-spin .7s linear infinite;
 }
+
+/* Profile avatar: always circular, image contained */
+.profile-avatar{
+  width:56px!important;height:56px!important;border-radius:50%!important;
+  overflow:hidden!important;flex-shrink:0!important;
+  display:grid!important;place-items:center!important;
+}
+.profile-avatar img{
+  width:100%!important;height:100%!important;
+  object-fit:cover!important;display:block!important;
+  border-radius:50%!important;
+}
+.profile-avatar span{font-weight:900;font-size:1rem;color:#fff}
+.profile-identity{display:flex;align-items:center;gap:12px;min-width:0}
+.profile-copy{min-width:0;flex:1}
+.profile-copy h2{margin:2px 0;font-size:1.05rem;color:#fff;font-weight:900;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profile-member-badge{display:none!important}
+.btn-qa-report{
+  width:100%;margin:0 0 14px;min-height:42px;border-radius:14px;font-weight:800;
+}
+
+/* Bottom nav: no oval; active = line stuck to bottom */
+.nav{
+  position:fixed!important;bottom:0!important;left:0!important;right:0!important;
+  transform:none!important;width:100%!important;max-width:100%!important;
+  height:calc(var(--nav-h, 56px) + env(safe-area-inset-bottom, 0px))!important;
+  padding-bottom:env(safe-area-inset-bottom, 0px)!important;
+  background:var(--surface)!important;
+  border-top:1px solid var(--line)!important;
+  display:flex!important;z-index:50!important;
+  box-shadow:0 -4px 16px rgba(15,43,71,.06);
+}
+.nav button{
+  position:relative!important;flex:1!important;
+  border:0!important;background:transparent!important;
+  color:var(--muted)!important;
+  display:flex!important;flex-direction:column!important;
+  align-items:center!important;justify-content:center!important;
+  gap:3px!important;font-size:.62rem!important;font-weight:700!important;
+  min-width:0!important;padding:6px 2px 8px!important;
+  box-shadow:none!important;
+}
+.nav button::before,
+.nav button::after{
+  content:none!important;display:none!important;
+  background:transparent!important;box-shadow:none!important;
+}
+.nav button.on{
+  color:var(--teal-strong, var(--teal))!important;
+  font-weight:800!important;
+  background:transparent!important;
+}
+.nav button.on::after{
+  content:''!important;display:block!important;
+  position:absolute!important;
+  left:18%!important;right:18%!important;
+  bottom:0!important;
+  height:3px!important;border-radius:3px 3px 0 0!important;
+  background:var(--teal-strong, var(--teal))!important;
+  box-shadow:none!important;
+}
+.nav svg{width:22px!important;height:22px!important}
