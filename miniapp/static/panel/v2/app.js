@@ -1,55 +1,3 @@
-/*    reportText() {
-      const role = (ST && ST.role) || '';
-      const me = (ST && ST.me && ST.me.user) || (ST && ST.user) || {};
-      const uid = me.bale_user_id || me.id || '';
-      const fails = (this.events || []).filter((e) => e.type === 'api' && !e.ok);
-      const jsErrs = (this.events || []).filter((e) => e.type === 'js_error' || e.type === 'promise_reject');
-      const pageIssues = (this.events || []).filter((e) => e.type === 'page' && e.issues && e.issues.length);
-      const failPaths = {};
-      fails.forEach((e) => {
-        const k = (e.path || '?') + (e.error ? ':' + e.error : '');
-        failPaths[k] = (failPaths[k] || 0) + 1;
-      });
-      // مسیر صفحات بدون تکرار پشت‌سرهم
-      const journey = [];
-      (this.events || []).forEach((e) => {
-        if (e.type !== 'page') return;
-        if (journey.length && journey[journey.length - 1] === e.page) return;
-        journey.push(e.page);
-      });
-      const lines = [];
-      lines.push('LY_QA v2');
-      lines.push('t=' + new Date().toISOString().slice(11, 19) + 'Z role=' + role + ' uid=' + uid);
-      lines.push('pages=' + journey.join('>'));
-      lines.push('api_fail=' + fails.length + ' js_err=' + jsErrs.length + ' ui_issue=' + pageIssues.length);
-      if (Object.keys(failPaths).length) {
-        lines.push('fails=' + Object.keys(failPaths).map((k) => k + '×' + failPaths[k]).join(' | '));
-      }
-      // فقط رویدادهای مهم (خطا / issue)
-      const important = (this.events || []).filter((e) => {
-        if (e.type === 'api' && !e.ok) return true;
-        if (e.type === 'js_error' || e.type === 'promise_reject') return true;
-        if (e.type === 'page' && e.issues && e.issues.length) return true;
-        if (e.type === 'page' && e.htmlLen < 80) return true;
-        return false;
-      }).slice(-25);
-      if (important.length) {
-        lines.push('--issues--');
-        important.forEach((e, i) => {
-          if (e.type === 'api') {
-            lines.push((i + 1) + '. API ' + e.method + ' ' + e.path + ' ' + (e.error || 'fail') + (e.msg ? ' | ' + String(e.msg).slice(0, 80) : '') + (e.body_snip ? ' | ' + e.body_snip : ''));
-          } else if (e.type === 'page') {
-            lines.push((i + 1) + '. PAGE ' + e.page + ' ' + (e.issues || []).join(',') + (e.htmlLen < 80 ? ' empty' : ''));
-          } else {
-            lines.push((i + 1) + '. ' + e.type + ' ' + (e.error || ''));
-          }
-        });
-      } else {
-        lines.push('ok=no_critical_issues');
-      }
-      lines.push('--end--');
-      return lines.join('\n');
-    },LinkBan Mini App v2 — connected to live API */
 (function () {
   'use strict';
 
@@ -268,21 +216,56 @@
     },
     reportText() {
       const role = (ST && ST.role) || '';
-      const uid = (ST && ST.user && (ST.user.id || ST.user.bale_id || ST.user.user_id)) || '';
+      const me = (ST && ST.me && ST.me.user) || {};
+      const uid = me.bale_user_id || me.id || '';
       const fails = (this.events || []).filter((e) => e.type === 'api' && !e.ok);
-      const failPaths = {};
-      fails.forEach((e) => { failPaths[e.path] = (failPaths[e.path] || 0) + 1; });
-      const lines = ['LINKYAR_QA_REPORT', 'time=' + new Date().toISOString(),
-        'role=' + role + ' uid=' + uid + ' page=' + ((ST && ST.page) || ''),
-        'uptime_ms=' + (Date.now() - this.startedAt),
-        'pages=' + JSON.stringify(this.pageHits),
-        'api_fail_count=' + fails.length,
-        'api_fail_paths=' + JSON.stringify(failPaths),
-        '---events---'];
-      (this.events || []).forEach((ev, i) => lines.push('#' + (i + 1) + ' ' + JSON.stringify(ev)));
-      lines.push('---end---');
+      const jsErrs = (this.events || []).filter((e) => e.type === 'js_error' || e.type === 'promise_reject');
+      const pageIssues = (this.events || []).filter((e) => e.type === 'page' && ((e.issues && e.issues.length) || (e.htmlLen != null && e.htmlLen < 80)));
+      const failMap = {};
+      fails.forEach((e) => {
+        const k = (e.path || '?') + (e.error ? ':' + e.error : '');
+        failMap[k] = (failMap[k] || 0) + 1;
+      });
+      const journey = [];
+      (this.events || []).forEach((e) => {
+        if (e.type !== 'page') return;
+        if (journey.length && journey[journey.length - 1] === e.page) return;
+        journey.push(e.page);
+      });
+      const lines = [
+        'LY_QA v2',
+        't=' + new Date().toISOString().slice(11, 19) + 'Z role=' + role + ' uid=' + uid,
+        'pages=' + journey.join('>'),
+        'api_fail=' + fails.length + ' js_err=' + jsErrs.length + ' ui_issue=' + pageIssues.length,
+      ];
+      if (Object.keys(failMap).length) {
+        lines.push('fails=' + Object.keys(failMap).map((k) => k + '×' + failMap[k]).join(' | '));
+      }
+      const important = (this.events || []).filter((e) => {
+        if (e.type === 'api' && !e.ok) return true;
+        if (e.type === 'js_error' || e.type === 'promise_reject') return true;
+        if (e.type === 'page' && e.issues && e.issues.length) return true;
+        if (e.type === 'page' && e.htmlLen != null && e.htmlLen < 80) return true;
+        return false;
+      }).slice(-20);
+      if (important.length) {
+        lines.push('--issues--');
+        important.forEach((e, i) => {
+          if (e.type === 'api') {
+            lines.push((i + 1) + '. API ' + (e.method || '') + ' ' + (e.path || '') + ' ' + (e.error || 'fail') + (e.msg ? ' | ' + String(e.msg).slice(0, 70) : ''));
+          } else if (e.type === 'page') {
+            lines.push((i + 1) + '. PAGE ' + e.page + ' ' + ((e.issues || []).join(',') || 'empty'));
+          } else {
+            lines.push((i + 1) + '. ' + e.type + ' ' + (e.error || ''));
+          }
+        });
+      } else {
+        lines.push('ok=no_critical_issues');
+      }
+      lines.push('--end--');
       return lines.join('\n');
     },
+
   };
   try {
     const saved = localStorage.getItem('ly_qa_events');
@@ -2420,7 +2403,7 @@ function renderOpTickets() {
         if (!Number.isInteger(amount) || amount < 10000 || amount > 1000000) return toast('مبلغ باید عدد صحیح بین ۱۰٬۰۰۰ تا ۱٬۰۰۰٬۰۰۰ تومان باشد.');
         const submit = $('#btnSendInvoice'); submit.disabled = true;
         try {
-          const d = await api('/pay/invoice', { method: 'POST', body: { amount } });
+          const d = await api('/topup', { method: 'POST', body: { amount } });
           toast(d.message || (d.ok ? 'فاکتور ارسال شد' : (d.error || 'خطا')));
           if (d.ok) {
             closeSheet();
