@@ -147,6 +147,90 @@
     demoTickets: [],
   };
 
+
+  /* Runtime QA — گزارش چیزهایی که بیرون دیده نمی‌شود */
+  const QA = {
+    max: 80,
+    events: [],
+    pageHits: {},
+    startedAt: Date.now(),
+    log(type, detail) {
+      try {
+        const row = Object.assign({ t: Date.now(), type, page: (ST && ST.page) || '' }, detail || {});
+        this.events.push(row);
+        if (this.events.length > this.max) this.events.shift();
+        try { localStorage.setItem('ly_qa_events', JSON.stringify(this.events.slice(-40))); } catch (e) {}
+      } catch (e) {}
+    },
+    logApi(path, method, ms, err, data) {
+      const ok = !err && data && data.ok !== false;
+      let keys = [];
+      try { if (data && typeof data === 'object') keys = Object.keys(data).slice(0, 12); } catch (e) {}
+      const empty = [];
+      try {
+        if (data && typeof data === 'object') {
+          ['channels','tariffs','items','history','orders','banners','businesses'].forEach((k) => {
+            if (Array.isArray(data[k]) && data[k].length === 0) empty.push(k + '=[]');
+          });
+        }
+      } catch (e) {}
+      this.log('api', {
+        path: String(path || ''), method: method || 'GET', ms: ms || 0, ok: !!ok,
+        error: err ? String(err.message || err) : (data && data.error ? String(data.error) : ''),
+        keys: keys, empty: empty.join(','),
+        msg: data && data.message ? String(data.message).slice(0, 120) : '',
+      });
+    },
+    inspectPage() {
+      try {
+        const root = document.getElementById('pageContent');
+        if (!root) return;
+        const page = (ST && ST.page) || '';
+        this.pageHits[page] = (this.pageHits[page] || 0) + 1;
+        const text = (root.innerText || '').replace(/\s+/g, ' ').trim();
+        const htmlLen = (root.innerHTML || '').length;
+        const hasEmpty = !!root.querySelector('.empty');
+        const hasError = /خطا|ناموفق|Failed|Error|بارگذاری نشد|محتوا بارگذاری/i.test(text);
+        const issues = [];
+        if (htmlLen < 40) issues.push('html_too_short');
+        if (hasError) issues.push('error_text_visible');
+        if (page === 'mgr-channel') {
+          if (!root.querySelector('.manager-detail-banner,.mgr-banner-row')) issues.push('missing_channel_hero');
+          if (!root.querySelector('.mgr-stats-card,.mgr-stats-empty,.mgr-stats-svg')) issues.push('missing_chart');
+        }
+        if (page === 'mgr-channels' && !hasEmpty && !root.querySelector('[data-mgr-ch],.manager-channel-card')) issues.push('no_channel_cards');
+        if (page === 'market' && !hasEmpty && !root.querySelector('[data-tariff],.tariff-card,.market-card')) issues.push('no_market_cards');
+        this.log('page', {
+          page, htmlLen, textLen: text.length,
+          buttons: root.querySelectorAll('button').length,
+          hasEmpty, hasError, issues, snippet: text.slice(0, 180),
+        });
+      } catch (e) { this.log('inspect_fail', { error: String(e && e.message || e) }); }
+    },
+    reportText() {
+      const role = (ST && ST.role) || '';
+      const uid = (ST && ST.user && (ST.user.id || ST.user.bale_id || ST.user.user_id)) || '';
+      const lines = ['LINKYAR_QA_REPORT', 'time=' + new Date().toISOString(),
+        'role=' + role + ' uid=' + uid + ' page=' + ((ST && ST.page) || ''),
+        'uptime_ms=' + (Date.now() - this.startedAt),
+        'pages=' + JSON.stringify(this.pageHits),
+        '---events---'];
+      (this.events || []).forEach((ev, i) => lines.push('#' + (i + 1) + ' ' + JSON.stringify(ev)));
+      lines.push('---end---');
+      return lines.join('\n');
+    },
+  };
+  try {
+    const saved = localStorage.getItem('ly_qa_events');
+    if (saved) { const arr = JSON.parse(saved); if (Array.isArray(arr)) QA.events = arr.slice(-40); }
+  } catch (e) {}
+  window.addEventListener('error', (ev) => {
+    QA.log('js_error', { error: String(ev.message || ''), file: String(ev.filename || ''), line: ev.lineno || 0 });
+  });
+  window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev.reason; QA.log('promise_reject', { error: String((r && r.message) || r || '') });
+  });
+
   function toast(msg) {
     const t = $('#toast');
     t.textContent = msg;
@@ -243,6 +327,20 @@
     }
     return data;
   }
+
+  const __apiOriginal = api;
+  api = async function(path, opts = {}) {
+    const t0 = Date.now();
+    const method = (opts && opts.method) || 'GET';
+    try {
+      const data = await __apiOriginal(path, opts);
+      try { QA.logApi(path, method, Date.now() - t0, null, data); } catch (e) {}
+      return data;
+    } catch (err) {
+      try { QA.logApi(path, method, Date.now() - t0, err, null); } catch (e) {}
+      throw err;
+    }
+  };
 
   /* ——— Icons ——— */
   const ICONS = {
@@ -1018,7 +1116,29 @@
       <p class="hint" style="margin-top:12px">فاکتور شارژ از طریق گفت‌وگوی بله ارسال می‌شود. درخواست برداشت پس از ثبت پشتیبانی پردازش خواهد شد.</p>`;
   }
 
-  function renderSettings() {
+  
+  function renderQaPage() {
+    const report = QA.reportText();
+    const n = (QA.events || []).length;
+    const fails = (QA.events || []).filter((e) => e.type === 'api' && !e.ok).length;
+    const jsErrs = (QA.events || []).filter((e) => e.type === 'js_error' || e.type === 'promise_reject').length;
+    return `<section class="card" style="padding:14px">
+      <h2 style="margin:0 0 8px;font-size:1rem">گزارش عیب‌یابی</h2>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.75rem;line-height:1.65">
+        خطاهای API، صفحه خالی و خطای جاوااسکریپت اینجا جمع می‌شود. بعد از گشت در چند صفحه، «کپی گزارش» را بزنید و متن را برای پشتیبانی بفرستید.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span class="chip">رویداد ${fa(n)}</span>
+        <span class="chip">API ناموفق ${fa(fails)}</span>
+        <span class="chip">خطای JS ${fa(jsErrs)}</span>
+      </div>
+      <button type="button" class="btn btn-primary" id="btnQaCopy" style="width:100%;margin-bottom:8px">کپی گزارش</button>
+      <button type="button" class="btn btn-soft" id="btnQaClear" style="width:100%;margin-bottom:12px">پاک‌کردن تاریخچه</button>
+      <pre id="qaReportBox" style="white-space:pre-wrap;word-break:break-word;font-size:.62rem;line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;max-height:50vh;overflow:auto;direction:ltr;text-align:left">${esc(report)}</pre>
+    </section>`;
+  }
+
+function renderSettings() {
     const u = ST.me?.user || {};
     const pending = ST.me?.pending_orders || 0;
     const handle = displayName(ST.me);
@@ -1041,7 +1161,9 @@
           <span class="profile-member-badge">${icon('badge-check',17)}</span>
         </div>
         <div class="profile-meta"><span>شناسه کاربری</span><strong>${identity ? fa(identity) : '—'}</strong><button id="btnCopyUserId" type="button" aria-label="کپی شناسه" ${identity ? '' : 'disabled'}>${icon('copy',15)}</button></div>
-      </section>
+      
+      <button type="button" class="btn btn-soft" id="btnOpenQa" style="width:100%;margin:8px 0 12px">گزارش عیب‌یابی</button>
+</section>
       <div class="section-heading profile-section-heading"><div><span class="eyebrow">فضای کاری شما</span><h2>نقش فعال</h2></div><span class="role-count">${isOperator ? '۳ نقش' : '۲ نقش'}</span></div>
       <p class="profile-intro">با انتخاب نقش، ابزارهای متناسب با فعالیتت در دسترس قرار می‌گیرد.</p>
       <div class="role-list">
@@ -1694,6 +1816,7 @@ function renderOpTickets() {
   }
 
   const TITLES = {
+    qa: 'گزارش عیب‌یابی',
     onboard: 'خوش آمدید',
     home: 'خانه',
     market: 'بازار تبلیغات',
@@ -1779,6 +1902,7 @@ function renderOpTickets() {
     else if (ST.page === 'banners') html = renderBanners();
     else if (ST.page === 'orders') html = renderOrders();
     else if (ST.page === 'wallet') html = renderWallet();
+    else if (ST.page === 'qa') html = renderQaPage();
     else if (ST.page === 'settings') html = renderSettings();
     else if (ST.page === 'businesses') html = renderBusinesses();
     else if (ST.page === 'help') html = renderHelp();
@@ -2695,6 +2819,29 @@ function renderOpTickets() {
       } catch (e) { toast(e.message || 'به‌روزرسانی نشد'); }
       finally { refOne.disabled = false; }
     };
+    
+    const btnQaCopy = $('#btnQaCopy');
+    if (btnQaCopy) btnQaCopy.onclick = async () => {
+      const text = QA.reportText();
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+        else {
+          const ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+        }
+        toast('گزارش کپی شد');
+      } catch (e) { toast('کپی نشد؛ متن را دستی انتخاب کنید'); }
+    };
+    const btnQaClear = $('#btnQaClear');
+    if (btnQaClear) btnQaClear.onclick = () => {
+      QA.events = [];
+      try { localStorage.removeItem('ly_qa_events'); } catch (e) {}
+      render();
+      toast('پاک شد');
+    };
+    const btnOpenQa = $('#btnOpenQa');
+    if (btnOpenQa) btnOpenQa.onclick = () => navigate('qa');
+
     const archBtn = $('#btnToggleArchiveCh');
     if (archBtn) archBtn.onclick = async () => {
       const ch = (ST.myChannels || []).find(x => Number(x.id) === Number(ST.selectedMgrChannel));
@@ -3585,6 +3732,19 @@ function renderOpTickets() {
 
 
   async function boot() {
+    try {
+      const pc = document.getElementById('pageContent');
+      if (pc && !pc.__qaObs) {
+        let t = null;
+        pc.__qaObs = new MutationObserver(() => {
+          clearTimeout(t);
+          t = setTimeout(() => { try { QA.inspectPage(); } catch (e) {} }, 100);
+        });
+        pc.__qaObs.observe(pc, { childList: true, subtree: false });
+      if ((location.hash || '').replace('#','') === 'qa') { try { ST.page = 'qa'; } catch (e) {} }
+      }
+    } catch (e) {}
+
     try {
     const launchView = new URLSearchParams(location.search).get('view');
     if (launchView === 'businesses') ST.page = 'businesses';
