@@ -259,11 +259,13 @@
     moon: '<path d="M20 15.2A8 8 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"/>',
     sun: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     megaphone: '<path d="m3 11 15-6v14L3 13v-2Z"/><path d="m6 14 1 6h4l-1-5"/>',
+    activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/>',
     sparkles: '<path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m19 15 1.2 2.8L23 19l-2.8 1.2L19 23l-1.2-2.8L15 19l2.8-1.2L19 15Z"/>',
     at: '<circle cx="12" cy="12" r="9"/><path d="M16 12v2a2 2 0 0 0 4 0v-2a8 8 0 1 0-3 6.2"/><circle cx="12" cy="12" r="3"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
     chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-5 5"/>',
+    activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
     hand: '<path d="M8 11V5a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v8-5a2 2 0 0 1 4 0v8a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3l-3-4a2 2 0 0 1 3-3l2 2"/>',
     'chevron-left': '<path d="m15 18-6-6 6-6"/>',
     'arrow-down-up': '<path d="m3 8 4-4 4 4M7 4v12M21 16l-4 4-4-4M17 20V8"/>',
@@ -1356,93 +1358,120 @@
     return Number.isFinite(t) ? t : null;
   }
 
+
   function buildChannelChartSeries(channel, days) {
     const now = Date.now();
     const cutoff = now - days * 86400000;
-    let snaps = (channel && channel.history) || [];
-    snaps = snaps
+    const snaps = ((channel && channel.history) || [])
       .map((h) => {
         const at = _parseSnapAt(h.at || h.taken_at || h.date);
+        if (at == null || at < cutoff) return null;
         const members = Number(h.members != null ? h.members : h.members_count) || 0;
-        const views = Number(h.views != null ? h.views : (h.avg_views != null ? h.avg_views : 0)) || 0;
-        const eng = members > 0 ? Math.round((views / members) * 1000) / 10 : 0;
-        return at != null ? { at, members, views, eng } : null;
+        const views = Number(h.views != null ? h.views : (h.avg_views != null ? h.avg_views : h.daily_reach)) || 0;
+        const forwards = Number(h.forwards) || 0;
+        const posts = Number(h.posts) || 0;
+        // نرخ تعامل: واکنش/فوروارد به ازای هر هزار بازدید (میانگین پیام)
+        let eng = 0;
+        if (views > 0 && forwards > 0) {
+          eng = Math.round((forwards / views) * 1000 * 10) / 10;
+        } else if (members > 0 && views > 0) {
+          eng = Math.round((views / members) * 1000) / 10;
+        }
+        const dayKey = new Date(at);
+        dayKey.setHours(12, 0, 0, 0);
+        return { at: dayKey.getTime(), members, views, eng, forwards, posts };
       })
       .filter(Boolean)
-      .filter((p) => p.at >= cutoff)
       .sort((a, b) => a.at - b.at);
-    // اگر تاریخچه کم است، از مقدار فعلی یک روند ملایم بساز (فقط برای نمایش)
-    if (snaps.length < 2) {
-      const m = Number(channel.members_count) || 0;
-      const v = Number(channel.avg_views) || 0;
-      const e = m > 0 ? Math.round((v / m) * 1000) / 10 : Number(String(channel.err_percent || '').replace('%','')) || 0;
-      snaps = [];
-      for (let i = days - 1; i >= 0; i--) {
-        const wobble = 1 + Math.sin(i * 0.7) * 0.04;
-        snaps.push({
-          at: now - i * 86400000,
-          members: Math.max(0, Math.round(m * wobble)),
-          views: Math.max(0, Math.round(v * (1 + Math.sin(i * 0.9) * 0.08))),
-          eng: Math.max(0, Math.round(e * (1 + Math.cos(i * 0.6) * 0.05) * 10) / 10),
-          synthetic: true,
-        });
-      }
-    }
-    return snaps;
+    // فقط یک نقطه برای هر روز (آخرین برداشت همان روز)
+    const byDay = {};
+    snaps.forEach((p) => { byDay[p.at] = p; });
+    return Object.keys(byDay).map(Number).sort((a, b) => a - b).map((k) => byDay[k]);
+  }
+
+  function formatChartDayLabel(ts) {
+    const d = new Date(ts);
+    const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return fa(jm) + '/' + fa(jd);
   }
 
   function renderLineChartSvg(points, seriesFlags) {
-    const W = 320, H = 180, padL = 36, padR = 10, padT = 14, padB = 28;
+    const W = 340, H = 200, padL = 44, padR = 12, padT = 16, padB = 32;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     if (!points.length) {
-      return `<svg viewBox="0 0 ${W} ${H}" class="mgr-stats-svg"><text x="50%" y="50%" text-anchor="middle" fill="currentColor" font-size="12">داده‌ای نیست</text></svg>`;
+      return `<div class="mgr-stats-empty">هنوز برداشت آماری در این بازه ثبت نشده است.</div>`;
     }
     const keys = [];
-    if (seriesFlags.members) keys.push({ k: 'members', color: '#2563eb' });
-    if (seriesFlags.views) keys.push({ k: 'views', color: '#16a34a' });
-    if (seriesFlags.engagement) keys.push({ k: 'eng', color: '#dc2626' });
-    if (!keys.length) keys.push({ k: 'views', color: '#16a34a' });
-    let minV = Infinity, maxV = -Infinity;
+    if (seriesFlags.engagement) keys.push({ k: 'eng', color: '#dc2626', label: 'نرخ تعامل' });
+    if (seriesFlags.views) keys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
+    if (seriesFlags.members) keys.push({ k: 'members', color: '#2563eb', label: 'اعضا' });
+    if (!keys.length) keys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
+
+    let minV = 0, maxV = 0;
     points.forEach((p) => keys.forEach((s) => {
       const v = Number(p[s.k]) || 0;
-      if (v < minV) minV = v;
       if (v > maxV) maxV = v;
     }));
-    if (!(maxV > minV)) { minV = 0; maxV = Math.max(maxV, 1); }
+    if (maxV <= 0) maxV = 1;
     const span = maxV - minV || 1;
     const xAt = (i) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
     const yAt = (v) => padT + innerH - ((v - minV) / span) * innerH;
-    // grid
+
     let grid = '';
     for (let g = 0; g < 4; g++) {
       const y = padT + (innerH / 3) * g;
       const val = maxV - (span / 3) * g;
-      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="currentColor" stroke-opacity=".08"/>`;
-      grid += `<text x="${padL - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="currentColor" opacity=".45">${fa(Math.round(val))}</text>`;
+      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#94a3b8" stroke-opacity=".25" stroke-dasharray="3 4"/>`;
+      grid += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${fa(Math.round(val))}</text>`;
     }
+
     const paths = keys.map((s) => {
+      if (points.length === 1) {
+        const x = xAt(0), y = yAt(Number(points[0][s.k]) || 0);
+        return `<circle class="mgr-chart-dot" data-pi="0" data-series="${s.k}" cx="${x}" cy="${y}" r="5" fill="${s.color}" stroke="#fff" stroke-width="2"/>`;
+      }
       const d = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(Number(p[s.k]) || 0).toFixed(1)}`).join(' ');
-      const dots = points.map((p, i) => `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(Number(p[s.k]) || 0).toFixed(1)}" r="3.2" fill="${s.color}"/>`).join('');
-      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+      const dots = points.map((p, i) => {
+        const x = xAt(i).toFixed(1), y = yAt(Number(p[s.k]) || 0).toFixed(1);
+        return `<circle class="mgr-chart-dot" data-pi="${i}" data-series="${s.k}" cx="${x}" cy="${y}" r="4.5" fill="${s.color}" stroke="#fff" stroke-width="1.5"/>`;
+      }).join('');
+      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
     }).join('');
-    // x labels (first, mid, last) jalali-ish short
-    const labelIdx = points.length <= 3 ? points.map((_, i) => i) : [0, Math.floor((points.length - 1) / 2), points.length - 1];
-    const xLabels = labelIdx.map((i) => {
-      const d = new Date(points[i].at);
-      const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
-      return `<text x="${xAt(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="currentColor" opacity=".5">${fa(jm)}/${fa(jd)}</text>`;
-    }).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" class="mgr-stats-svg" preserveAspectRatio="xMidYMid meet">${grid}${paths}${xLabels}</svg>`;
+
+    // محور x: فقط روزهایی که نقطه داریم
+    let xLabels = '';
+    if (points.length === 1) {
+      xLabels = `<text x="${xAt(0)}" y="${H - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(points[0].at)}</text>`;
+    } else {
+      const step = points.length > 8 ? Math.ceil(points.length / 5) : 1;
+      points.forEach((p, i) => {
+        if (i % step !== 0 && i !== points.length - 1) return;
+        xLabels += `<text x="${xAt(i)}" y="${H - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(p.at)}</text>`;
+      });
+    }
+
+    return `<svg viewBox="0 0 ${W} ${H}" class="mgr-stats-svg" preserveAspectRatio="xMidYMid meet">${grid}${paths}${xLabels}</svg>
+      <div class="mgr-chart-tooltip" id="mgrChartTip" hidden></div>`;
   }
 
-function renderMgrChannelDetail() {
+  function engagementDisplay(channel) {
+    const err = Number(String(channel.err_percent || '').replace('%', '').replace(',', '.'));
+    if (Number.isFinite(err) && err > 0) return fa(Math.round(err * 10) / 10) + '٪';
+    const m = Number(channel.members_count) || 0;
+    const v = Number(channel.daily_reach || channel.avg_views) || 0;
+    if (m > 0 && v > 0) return fa(Math.round((v / m) * 1000) / 10) + '٪';
+    return '—';
+  }
+
+
+  function renderMgrChannelDetail() {
     const c = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
     if (!c) return '<div class="empty">کانال پیدا نشد</div>';
     const letter = esc((c.name||'ک').slice(0,1));
     const src = c.avatar_url || c.photo_url || '';
     const ava = src
-      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span style="display:none;place-items:center;width:100%;height:100%;font-weight:800">${letter}</span>`
-      : letter;
+      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span class="mgr-hero-letter" style="display:none">${letter}</span>`
+      : `<span class="mgr-hero-letter">${letter}</span>`;
     const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i,'')) : '';
     const chTariffs = (ST.mgrTariffs || []).filter(t => Number(t.channel_id || t.channel) === Number(c.id));
     const tariffRows = chTariffs.length
@@ -1467,25 +1496,28 @@ function renderMgrChannelDetail() {
     const days = ST.mgrChartDays === 30 ? 30 : 7;
     const series = ST.mgrChartSeries || { members: true, views: true, engagement: true };
     const points = buildChannelChartSeries(c, days);
-    const synthetic = points.some((p) => p.synthetic);
     const chartSvg = renderLineChartSvg(points, series);
+    const reach24 = c.daily_reach != null && c.daily_reach !== '' ? c.daily_reach : c.avg_views;
+    const engLabel = engagementDisplay(c);
 
     return `
-      <section class="manager-detail-hero">
-        <div class="manager-detail-cover short-cover">
-          <div class="manager-channel-cover-ornament"></div>
-          <span class="manager-detail-icon">${ava}</span>
-          <span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
+      <section class="manager-detail-hero flat-hero">
+        <div class="manager-detail-banner">
+          <div class="mgr-banner-top">
+            <div class="mgr-banner-identity">
+              <div class="mgr-banner-avatar">${ava}</div>
+              <strong class="mgr-banner-name">${esc(c.name)}</strong>
+            </div>
+            <div class="mgr-banner-status-block">
+              <span class="manager-detail-status on-banner ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
+              ${handle ? `<p class="mgr-banner-handle" dir="ltr">${esc(handle)}</p>` : ''}
+            </div>
+          </div>
         </div>
-        <div class="manager-detail-copy short-copy">
-          <span class="eyebrow">کانال تحت مدیریت</span>
-          <h2>${esc(c.name)}</h2>
-          <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسهٔ کانال ثبت نشده'}</p>
-        </div>
-        <div class="manager-channel-metrics detail-metrics">
+        <div class="manager-channel-metrics detail-metrics on-flat">
           <div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div>
-          <div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div>
-          <div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(chTariffs.length || c.tariff_count || 0)}</strong></div>
+          <div><span>${icon('chart',15)} بازدید ۲۴س</span><strong>${faK(reach24)}</strong></div>
+          <div><span>${icon('activity',15)} نرخ تعامل</span><strong>${engLabel}</strong></div>
         </div>
       </section>
 
@@ -1496,22 +1528,25 @@ function renderMgrChannelDetail() {
       <div class="mgr-ch-tariff-list">${tariffRows}</div>
 
       <div class="manager-content-heading" style="margin-top:14px">
-        <div><span class="eyebrow">روند کانال</span><h2>آمار بازدید و فروش</h2></div>
+        <div><span class="eyebrow">روند کانال</span><h2>آمار اعضا و بازدید</h2></div>
       </div>
       <section class="mgr-stats-card">
-        <div class="mgr-stats-toolbar">
+        <div class="mgr-stats-toolbar one-line">
           <div class="mgr-stats-series">
             <button type="button" class="mgr-series-chip ${series.engagement?'on':''}" data-chart-series="engagement"><i style="background:#dc2626"></i> نرخ تعامل</button>
             <button type="button" class="mgr-series-chip ${series.views?'on':''}" data-chart-series="views"><i style="background:#16a34a"></i> بازدید</button>
             <button type="button" class="mgr-series-chip ${series.members?'on':''}" data-chart-series="members"><i style="background:#2563eb"></i> اعضا</button>
           </div>
-          <div class="mgr-stats-range">
-            <button type="button" class="mgr-range-btn ${days===7?'on':''}" data-chart-days="7">${fa(7)} روز گذشته</button>
-            <button type="button" class="mgr-range-btn ${days===30?'on':''}" data-chart-days="30">${fa(30)} روز گذشته</button>
+          <div class="mgr-range-dropdown" id="mgrRangeDrop">
+            <button type="button" class="mgr-range-toggle" id="mgrRangeToggle">${fa(days)} روز گذشته <span class="mgr-range-caret">▾</span></button>
+            <div class="mgr-range-menu" id="mgrRangeMenu" hidden>
+              <button type="button" data-chart-days="7" class="${days===7?'on':''}">${fa(7)} روز گذشته</button>
+              <button type="button" data-chart-days="30" class="${days===30?'on':''}">${fa(30)} روز گذشته</button>
+            </div>
           </div>
         </div>
-        <div class="mgr-stats-plot">${chartSvg}</div>
-        ${synthetic ? '<p class="mgr-stats-note">تاریخچهٔ کافی نیست؛ روند تقریبی از آخرین آمار نمایش داده شده.</p>' : '<p class="mgr-stats-note">بر اساس برداشت‌های ثبت‌شدهٔ لینک‌یار</p>'}
+        <div class="mgr-stats-plot" id="mgrStatsPlot">${chartSvg}</div>
+        <p class="mgr-stats-note">${points.length ? 'فقط روزهایی که آمار واقعی ثبت شده نمایش داده می‌شود.' : 'با «به‌روزرسانی آمار» اولین برداشت ثبت می‌شود.'}</p>
       </section>
 
       <div class="manager-content-heading" style="margin-top:16px"><div><span class="eyebrow">تنظیمات</span><h2>مدیریت کانال</h2></div></div>
@@ -2406,6 +2441,14 @@ function renderOpTickets() {
     });
 
     
+    const rangeToggle = $('#mgrRangeToggle');
+    const rangeMenu = $('#mgrRangeMenu');
+    if (rangeToggle && rangeMenu) {
+      rangeToggle.onclick = (e) => {
+        e.stopPropagation();
+        rangeMenu.hidden = !rangeMenu.hidden;
+      };
+    }
     $$('[data-chart-days]').forEach((b) => {
       b.onclick = () => {
         ST.mgrChartDays = Number(b.dataset.chartDays) === 30 ? 30 : 7;
@@ -2417,13 +2460,45 @@ function renderOpTickets() {
         const key = b.dataset.chartSeries;
         if (!ST.mgrChartSeries) ST.mgrChartSeries = { members: true, views: true, engagement: true };
         ST.mgrChartSeries[key] = !ST.mgrChartSeries[key];
-        // at least one series
         if (!ST.mgrChartSeries.members && !ST.mgrChartSeries.views && !ST.mgrChartSeries.engagement) {
           ST.mgrChartSeries[key] = true;
         }
         render();
       };
     });
+    // tooltip on chart points
+    try {
+      const ch = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
+      const pts = ch ? buildChannelChartSeries(ch, ST.mgrChartDays === 30 ? 30 : 7) : [];
+      const tip = $('#mgrChartTip');
+      const plot = $('#mgrStatsPlot');
+      $$('.mgr-chart-dot').forEach((dot) => {
+        dot.style.cursor = 'pointer';
+        const show = (ev) => {
+          if (!tip || !plot) return;
+          const pi = Number(dot.getAttribute('data-pi'));
+          const p = pts[pi];
+          if (!p) return;
+          const series = dot.getAttribute('data-series');
+          const labels = { members: 'اعضا', views: 'بازدید', eng: 'نرخ تعامل' };
+          const val = series === 'eng' ? (fa(p.eng) + '‰') : fa(Math.round(p[series] || 0));
+          tip.hidden = false;
+          tip.innerHTML = `<small>تاریخ</small><b>${formatChartDayLabel(p.at)}</b><small>${labels[series] || series}</small><b>${val}</b>`;
+          const rect = plot.getBoundingClientRect();
+          const dx = (ev.clientX != null ? ev.clientX : rect.left + rect.width / 2) - rect.left;
+          const dy = (ev.clientY != null ? ev.clientY : rect.top + 40) - rect.top;
+          tip.style.left = Math.min(Math.max(8, dx - 40), rect.width - 100) + 'px';
+          tip.style.top = Math.max(8, dy - 56) + 'px';
+        };
+        dot.addEventListener('click', show);
+        dot.addEventListener('touchstart', (e) => { e.preventDefault(); show(e.touches[0] || e); }, { passive: false });
+      });
+      if (plot) {
+        plot.addEventListener('click', (e) => {
+          if (tip && !e.target.classList.contains('mgr-chart-dot')) tip.hidden = true;
+        });
+      }
+    } catch (e) {}
 
     $$('[data-mgr-ch]').forEach((b) => b.onclick = async () => {
       ST.selectedMgrChannel = Number(b.dataset.mgrCh);

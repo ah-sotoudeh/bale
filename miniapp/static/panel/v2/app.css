@@ -1441,3 +1441,69 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 .mgr-stats-plot{width:100%;overflow:hidden}
 .mgr-stats-svg{width:100%;height:auto;display:block;color:var(--muted)}
 .mgr-stats-note{margin:6px 2px 0;font-size:.6rem;color:var(--muted);line-height:1.6}
+
+/* Flat compact channel hero — identity in colored banner */
+.manager-detail-hero.flat-hero{
+  margin-bottom:12px;border-radius:18px;overflow:hidden;
+  border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);
+}
+.manager-detail-banner{
+  background:linear-gradient(120deg,#082e54,#0a6794,#09a59b);
+  padding:12px 14px 14px;color:#fff;
+}
+.mgr-banner-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.mgr-banner-identity{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.mgr-banner-avatar{
+  width:44px;height:44px;border-radius:14px;overflow:hidden;flex-shrink:0;
+  background:rgba(255,255,255,.18);display:grid;place-items:center;
+  border:2px solid rgba(255,255,255,.35);color:#fff;font-weight:900;
+}
+.mgr-banner-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.mgr-banner-name{color:#fff!important;font-size:1rem;font-weight:900;line-height:1.3}
+.mgr-banner-status-block{display:flex;flex-direction:column;align-items:flex-start;gap:4px;flex-shrink:0}
+.manager-detail-status.on-banner{
+  position:static;left:auto;top:auto;
+  background:rgba(255,255,255,.2);color:#fff;font-size:.62rem;padding:5px 10px;
+}
+.manager-detail-status.on-banner i{background:#6ee7b7}
+.manager-detail-status.on-banner.paused i{background:#cbd5e1}
+.mgr-banner-handle{margin:0;color:#fff!important;font-size:.78rem;font-weight:700;opacity:.95;dir:ltr}
+.detail-metrics.on-flat{padding:10px 12px 12px!important;margin:0}
+.detail-metrics.on-flat > div{padding:8px 6px}
+.detail-metrics.on-flat span{font-size:.55rem}
+.detail-metrics.on-flat strong{font-size:.82rem}
+
+/* Chart toolbar one line + dropdown */
+.mgr-stats-toolbar.one-line{
+  flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;
+}
+.mgr-range-dropdown{position:relative;margin-right:auto}
+.mgr-range-toggle{
+  appearance:none;border:1px solid var(--line);background:var(--surface);
+  border-radius:12px;padding:7px 12px;font:800 .65rem var(--font);color:var(--text);
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  box-shadow:0 1px 4px rgba(15,43,71,.06);
+}
+.mgr-range-caret{font-size:.7rem;opacity:.7}
+.mgr-range-menu{
+  position:absolute;top:calc(100% + 4px);right:0;z-index:20;
+  min-width:140px;background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 8px 24px rgba(15,43,71,.12);padding:4px;overflow:hidden;
+}
+.mgr-range-menu button{
+  display:block;width:100%;text-align:right;border:0;background:transparent;
+  padding:10px 12px;font:700 .7rem var(--font);color:var(--text);cursor:pointer;border-radius:8px;
+}
+.mgr-range-menu button.on,.mgr-range-menu button:active{background:var(--teal-soft);color:var(--teal-strong)}
+.mgr-stats-plot{position:relative;width:100%}
+.mgr-chart-tooltip{
+  position:absolute;z-index:5;min-width:88px;padding:8px 10px;border-radius:10px;
+  background:#0f172a;color:#fff;font-size:.62rem;line-height:1.5;
+  box-shadow:0 6px 18px rgba(0,0,0,.2);pointer-events:none;
+  display:grid;grid-template-columns:auto auto;gap:2px 8px;
+}
+.mgr-chart-tooltip[hidden]{display:none!important}
+.mgr-chart-tooltip small{opacity:.7}
+.mgr-chart-tooltip b{font-weight:800}
+.mgr-stats-empty{padding:28px 12px;text-align:center;color:var(--muted);font-size:.75rem}
+.mgr-stats-svg{width:100%;height:auto;display:block}
