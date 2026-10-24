@@ -1195,7 +1195,7 @@
           '</div></div></div>' +
           '<div class="manager-channel-actions">' +
           '<button class="btn btn-primary" data-mgr-ch="' + c.id + '">مدیریت</button>' +
-          '<button class="btn btn-ghost" data-mgr-mode="' + c.id + '">' + icon('sliders', 14) + ' انتشار</button>' +
+          '<button class="btn btn-ghost" data-mgr-cal-ch="' + c.id + '">' + icon('calendar', 14) + ' تقویم</button>' +
           '</div></article>'
         );
       } catch (err) {
@@ -1352,13 +1352,80 @@
     const letter = esc((c.name||'ک').slice(0,1));
     const src = c.avatar_url || c.photo_url || '';
     const ava = src
-      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span style="display:none;place-items:center;width:100%;height:100%;font-weight:800">${letter}</span>`
-      : letter;
+      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span class="mgr-ava-fallback" style="display:none">${letter}</span>`
+      : `<span class="mgr-ava-fallback">${letter}</span>`;
     const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i,'')) : '';
-    return `<section class="manager-detail-hero"><div class="manager-detail-cover"><div class="manager-channel-cover-ornament"></div><span class="manager-detail-icon">${ava}</span><span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span></div><div class="manager-detail-copy"><span class="eyebrow">کانال تحت مدیریت</span><h2>${esc(c.name)}</h2><p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسهٔ کانال ثبت نشده'}</p></div><div class="manager-channel-metrics detail-metrics"><div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div><div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div><div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(c.tariff_count||0)}</strong></div></div></section>
-      <div class="manager-content-heading"><div><span class="eyebrow">تنظیمات جایگاه</span><h2>مدیریت کانال</h2></div></div>
-      <div class="manager-detail-action-list"><button class="manager-detail-action" id="btnAddTariffForCh"><span class="manager-detail-action-icon tariff-icon">${icon('plus',19)}</span><span><b>افزودن تعرفه</b><small>ایجاد بستهٔ جدید برای این کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" data-mgr-mode="${c.id}"><span class="manager-detail-action-icon channel-icon">${icon('sliders',19)}</span><span><b>روش انتشار</b><small>${esc(modeLabel(c.publish_mode === 'manual' ? 'bot' : c.publish_mode))}</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnManageAvailability"><span class="manager-detail-action-icon request-icon">${icon('calendar',19)}</span><span><b>تقویم و روزهای آزاد</b><small>مدیریت ظرفیت روزانهٔ انتشار</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnRefreshOne"><span class="manager-detail-action-icon business-icon">${icon('refresh-cw',19)}</span><span><b>به‌روزرسانی آمار</b><small>دریافت دوبارهٔ مشخصات کانال</small></span><span>${icon('chevron-left',17)}</span></button><button class="manager-detail-action" id="btnToggleArchiveCh"><span class="manager-detail-action-icon">${icon('store',19)}</span><span><b>${c.is_listed===false?'بازگشت به بازار':'آرشیو کانال'}</b><small>${c.is_listed===false?'دوباره در کاتالوگ نمایش داده شود':'از کاتالوگ مخفی می‌شود؛ سفارش‌ها می‌مانند'}</small></span><span>${icon('chevron-left',17)}</span></button></div><p class="manager-footnote">${icon('shield-check',14)} تغییرات تعرفه و تقویم روی زمان‌های قابل رزرو در بازار اثر می‌گذارند.</p>`;
+    const chTariffs = (ST.mgrTariffs || []).filter(t => Number(t.channel_id || t.channel) === Number(c.id));
+    const tariffRows = chTariffs.length
+      ? chTariffs.map((t) => {
+          const active = t.is_active !== false;
+          return `<article class="mgr-ch-tariff-row">
+            <div class="mgr-ch-tariff-ico">${icon('wallet',18)}</div>
+            <div class="mgr-ch-tariff-body">
+              <strong>${esc(t.name || ((t.duration_hours||24) + ' ساعته'))}</strong>
+              <small>${fa(t.duration_hours||24)} ساعت · شروع ${fa(t.start_hour ?? 0)}:۰۰ · ${active ? 'فعال' : 'غیرفعال'}</small>
+            </div>
+            <div class="mgr-ch-tariff-price">${faNum(t.price)} <small>تومان</small></div>
+            <div class="mgr-ch-tariff-ops">
+              <button type="button" class="icon-btn" data-tariff-edit="${t.id}" aria-label="ویرایش" title="ویرایش">${icon('sliders',16)}</button>
+              <button type="button" class="icon-btn" data-tariff-cal="${t.id}" aria-label="تقویم" title="تقویم">${icon('calendar',16)}</button>
+              <button type="button" class="icon-btn danger" data-tariff-delete="${t.id}" aria-label="حذف" title="حذف">${icon('trash-2',16)}</button>
+            </div>
+          </article>`;
+        }).join('')
+      : `<div class="mgr-ch-tariff-empty"><p>هنوز تعرفه‌ای برای این کانال نیست.</p></div>`;
+
+    return `
+      <section class="manager-detail-hero compact-hero">
+        <div class="manager-detail-compact">
+          <div class="manager-detail-avatar">${ava}</div>
+          <div class="manager-detail-copy">
+            <div class="manager-detail-title-row">
+              <h2>${esc(c.name)}</h2>
+              <span class="manager-detail-pill ${c.is_listed===false?'paused':''}">${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
+            </div>
+            <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسه ثبت نشده'}</p>
+            <div class="manager-channel-metrics detail-metrics compact-metrics">
+              <div><span>${icon('users',13)}</span><strong>${faK(c.members_count)}</strong><small>عضو</small></div>
+              <div><span>${icon('chart',13)}</span><strong>${faK(c.avg_views)}</strong><small>بازدید</small></div>
+              <div><span>${icon('wallet',13)}</span><strong>${fa(chTariffs.length || c.tariff_count || 0)}</strong><small>تعرفه</small></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="manager-content-heading" style="margin-top:4px">
+        <div><span class="eyebrow">تعرفه‌های این کانال</span><h2>فهرست تعرفه‌ها</h2></div>
+        <button type="button" class="btn btn-soft" id="btnAddTariffForCh" style="min-height:36px;padding:6px 10px;font-size:.72rem">${icon('plus',14)} افزودن</button>
+      </div>
+      <div class="mgr-ch-tariff-list">${tariffRows}</div>
+
+      <div class="manager-content-heading" style="margin-top:16px"><div><span class="eyebrow">تنظیمات</span><h2>مدیریت کانال</h2></div></div>
+      <div class="manager-detail-action-list">
+        <button class="manager-detail-action" data-mgr-mode="${c.id}">
+          <span class="manager-detail-action-icon channel-icon">${icon('sliders',19)}</span>
+          <span><b>روش انتشار</b><small>${esc(modeLabel(c.publish_mode === 'manual' ? 'bot' : c.publish_mode))}</small></span>
+          <span>${icon('chevron-left',17)}</span>
+        </button>
+        <button class="manager-detail-action" id="btnManageAvailability">
+          <span class="manager-detail-action-icon request-icon">${icon('calendar',19)}</span>
+          <span><b>تقویم و روزهای آزاد</b><small>ظرفیت روزانهٔ انتشار</small></span>
+          <span>${icon('chevron-left',17)}</span>
+        </button>
+        <button class="manager-detail-action" id="btnRefreshOne">
+          <span class="manager-detail-action-icon business-icon">${icon('refresh-cw',19)}</span>
+          <span><b>به‌روزرسانی آمار</b><small>دریافت دوبارهٔ مشخصات کانال</small></span>
+          <span>${icon('chevron-left',17)}</span>
+        </button>
+        <button class="manager-detail-action" id="btnToggleArchiveCh">
+          <span class="manager-detail-action-icon">${icon('store',19)}</span>
+          <span><b>${c.is_listed===false?'بازگشت به بازار':'آرشیو کانال'}</b><small>${c.is_listed===false?'نمایش دوباره در کاتالوگ':'مخفی از کاتالوگ؛ سفارش‌ها می‌مانند'}</small></span>
+          <span>${icon('chevron-left',17)}</span>
+        </button>
+      </div>
+      <p class="manager-footnote">${icon('shield-check',14)} تغییرات تعرفه و تقویم روی زمان‌های قابل رزرو در بازار اثر می‌گذارند.</p>`;
   }
+
 
   function renderOpHome() {
     const banners = ST.opBanners || [];
@@ -2202,8 +2269,33 @@ function renderOpTickets() {
         b.disabled = false;
       }
     });
-    $$('[data-mgr-ch]').forEach((b) => b.onclick = () => {
+    
+    $$('[data-mgr-cal-ch]').forEach((b) => {
+      b.onclick = async () => {
+        const id = Number(b.dataset.mgrCalCh);
+        ST.selectedMgrChannel = id;
+        try {
+          if (!(ST.mgrTariffs || []).length) await loadMgrTariffs();
+        } catch (e) {}
+        const tariffs = (ST.mgrTariffs || []).filter((t) => Number(t.channel_id || t.channel) === id);
+        const first = tariffs.find((t) => t.is_active !== false) || tariffs[0];
+        ST.mgrCalTariffId = first ? Number(first.id) : null;
+        ST.page = 'mgr-calendar';
+        ST.loading = true; render();
+        try {
+          if (ST.mgrCalTariffId) await loadMgrCalendar(ST.mgrCalTariffId);
+        } catch (e) {
+          toast(e.message || 'تقویم باز نشد');
+        }
+        ST.loading = false; render();
+      };
+    });
+
+    $$('[data-mgr-ch]').forEach((b) => b.onclick = async () => {
       ST.selectedMgrChannel = Number(b.dataset.mgrCh);
+      ST.loading = true; render();
+      try { await loadMgrTariffs(); } catch (e) {}
+      ST.loading = false;
       navigate('mgr-channel');
     });
     $$('[data-mgr-mode]').forEach((b) => b.onclick = () => {
