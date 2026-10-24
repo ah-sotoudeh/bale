@@ -1834,3 +1834,13 @@ nav.nav,
 #app .main {
   padding-bottom: calc(var(--nav-h) + 12px) !important;
 }
+
+.page-soft-wrap{position:relative;min-height:40vh}
+.page-loading-overlay{
+  position:absolute;inset:0;z-index:20;
+  display:grid;place-items:center;
+  background:color-mix(in srgb, var(--bg,#f0f7f7) 55%, transparent);
+  backdrop-filter:blur(1px);
+  pointer-events:none;
+}
+.page-loading-overlay .ly-spinner{pointer-events:none}

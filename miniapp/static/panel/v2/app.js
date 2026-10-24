@@ -7,7 +7,7 @@
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const faDigits = '۰۱۲۳۴۵۶۷۸۹';
-  const fa = (n) => String(n).replace(/\d/g, (d) => faDigits[d]);
+  const fa = (n) => { if (n == null || n === '') return '۰'; try { return String(n).replace(/\d/g, (d) => faDigits[d]); } catch (e) { return '۰'; } };
   const faNum = (n) => fa(Number(n || 0).toLocaleString('en-US'));
   const faK = (n) => {
     n = Number(n) || 0;
@@ -1705,8 +1705,8 @@ function engagementDisplay(channel) {
 
 
   function renderMgrChannelDetail() {
-    const c = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
-    if (!c) return '<div class="empty">کانال پیدا نشد</div>';
+    const c = (ST.myChannels || []).find(x => Number(x.id) === Number(ST.selectedMgrChannel));
+    if (!c) return '<div class="empty"><strong>کانال پیدا نشد</strong><p>از فهرست کانال‌ها دوباره انتخاب کنید.</p><button type="button" class="btn btn-primary" data-nav="mgr-channels">بازگشت</button></div>';
     const letter = esc((c.name||'ک').slice(0,1));
     const src = c.avatar_url || c.photo_url || '';
     const ava = src
@@ -1977,8 +1977,13 @@ function renderOpTickets() {
 
     let html = '';
     if (ST.loading) {
-      // اسپینر به‌جای متن؛ اگر محتوای قبلی داریم روی آن overlay نگذار (کل صفحه سفید نشود)
-      html = '<div class="page-loading" role="status" aria-label="بارگذاری"><div class="ly-spinner"></div></div>';
+      // اسپینر نرم: محتوای قبلی را نگه دار، فقط overlay
+      const prev = (typeof ST._lastHtml === 'string' && ST._lastHtml) ? ST._lastHtml : '';
+      if (prev) {
+        html = '<div class="page-soft-wrap">' + prev + '<div class="page-loading-overlay" role="status" aria-label="بارگذاری"><div class="ly-spinner"></div></div></div>';
+      } else {
+        html = '<div class="page-loading" role="status" aria-label="بارگذاری"><div class="ly-spinner"></div></div>';
+      }
     }
     else if (ST.page === 'onboard') { try { html = renderOnboardPage(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در ویزارد</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'home') { try { html = renderHome(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در خانه</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
@@ -2001,7 +2006,8 @@ function renderOpTickets() {
     else html = ST.role === 'manager' ? renderMgrHome() : ST.role === 'operator' ? renderOpHome() : renderMarket();
 
     try {
-      root.innerHTML = html || '<div class="empty"><strong>محتوا بارگذاری نشد</strong><p>یک‌بار دیگر تلاش کنید.</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>';
+      if (!ST.loading && html) { try { ST._lastHtml = html; } catch (e) {} }
+    root.innerHTML = html || '<div class="empty"><strong>محتوا بارگذاری نشد</strong><p>یک‌بار دیگر تلاش کنید.</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>';
     } catch (err) {
       console.error('render', err);
       root.innerHTML = '<div class="empty"><strong>خطا در نمایش</strong><p>' + String((err && err.message) || err) + '</p><button class="btn btn-primary" id="btnReloadPage">تلاش دوباره</button></div>';
@@ -2031,9 +2037,7 @@ function renderOpTickets() {
 
   async function ensureCatalog() {
     if (!ST.catalog) {
-      ST.loading = true; render();
       try { await loadCatalog(); } catch (e) { toast(e.message || 'خطا در کاتالوگ'); }
-      ST.loading = false;
     }
   }
 
@@ -2392,7 +2396,6 @@ function renderOpTickets() {
     $$('[data-r]').forEach((el) => el.onclick = async () => {
       const r = el.dataset.r;
       setRole(r);
-      ST.loading = true; render();
       try {
         if (r === 'manager') { await loadMyChannels(); await loadMgrOrders(); if (ST.mgrTab === 'tariffs') await loadMgrTariffs(); }
         if (r === 'operator') { await loadOpBanners(); await loadOpPayouts(); }
@@ -2688,6 +2691,7 @@ function renderOpTickets() {
         ST.loading = true; render();
         try {
           if (ST.mgrCalTariffId) await loadMgrCalendar(ST.mgrCalTariffId);
+          else toast('تعرفه‌ای برای تقویم انتخاب نشده');
         } catch (e) {
           toast(e.message || 'تقویم باز نشد');
         }
@@ -2739,7 +2743,7 @@ function renderOpTickets() {
     });
     // tooltip on chart points
     try {
-      const ch = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
+      const ch = (ST.myChannels || []).find(x => Number(x.id) === Number(ST.selectedMgrChannel));
       const pts = ch ? buildChannelChartSeries(ch, ST.mgrChartDays === 30 ? 30 : 7) : [];
       const tip = $('#mgrChartTip');
       const plot = $('#mgrStatsPlot');
@@ -2772,10 +2776,10 @@ function renderOpTickets() {
     } catch (e) {}
 
     $$('[data-mgr-ch]').forEach((b) => b.onclick = async () => {
-      ST.selectedMgrChannel = Number(b.dataset.mgrCh);
-      ST.loading = true; render();
+      const _chId = Number(b.dataset.mgrCh);
+      if (!_chId) { toast('کانال نامعتبر'); return; }
+      ST.selectedMgrChannel = _chId;
       try { await loadMgrTariffs(); } catch (e) {}
-      ST.loading = false;
       navigate('mgr-channel');
     });
     $$('[data-mgr-mode]').forEach((b) => b.onclick = () => {

@@ -321,7 +321,10 @@ def api_catalog(request: HttpRequest) -> JsonResponse:
             })
     from integrations.channel_stats import recent_snapshots
 
-    history = recent_snapshots(list(channels.keys()))
+    try:
+        history = recent_snapshots(list(channels.keys()))
+    except Exception:
+        history = {}
     growth = _weekly_member_changes(list(channels.keys()))
     for cid, payload in channels.items():
         payload['history'] = history.get(cid) or []
