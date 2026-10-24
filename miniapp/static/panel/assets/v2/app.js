@@ -1933,10 +1933,23 @@ function renderOpTickets() {
 
   function renderNav() {
     const items = navItems();
-    $('#bottomNav').innerHTML = items.map((it) =>
+    const nav = $('#bottomNav');
+    if (!nav) return;
+    nav.innerHTML = items.map((it) =>
       `<button type="button" class="${ST.page===it.id?'on':''}" data-nav="${it.id}" aria-label="${it.label}">` +
       `${icon(it.icon, 22)}<span class="nav-label">${it.label}</span></button>`
     ).join('');
+    // نوار دقیقاً کف viewport — بدون فاصله خالی زیر
+    try {
+      nav.style.position = 'fixed';
+      nav.style.bottom = '0';
+      nav.style.left = '0';
+      nav.style.right = '0';
+      nav.style.paddingBottom = '0';
+      nav.style.margin = '0';
+      nav.style.height = '56px';
+      nav.style.maxHeight = '56px';
+    } catch (e) {}
   }
 
   function render() {
