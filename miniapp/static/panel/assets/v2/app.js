@@ -1410,17 +1410,22 @@
     return fa(jm) + '/' + fa(jd);
   }
 
-  function formatChartAxis(n) {
+    function formatChartAxis(n) {
     n = Number(n) || 0;
     const abs = Math.abs(n);
-    if (abs >= 1000000) return fa((n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')) + 'M';
-    if (abs >= 1000) return fa(Math.round(n / 1000)) + 'k';
-    if (abs >= 100) return fa(Math.round(n));
-    if (abs >= 10) return fa(Math.round(n * 10) / 10);
-    return fa(Math.round(n * 10) / 10);
+    // همیشه عدد صحیح (بدون اعشار)
+    if (abs >= 1000000) {
+      const m = Math.round(n / 1000000);
+      return fa(m) + 'M';
+    }
+    if (abs >= 1000) {
+      const k = Math.round(n / 1000);
+      return fa(k) + 'k';
+    }
+    return fa(Math.round(n));
   }
 
-  function renderLineChartSvg(points, seriesFlags) {
+function renderLineChartSvg(points, seriesFlags) {
     const W = 340, H = 210, padL = 40, padR = 36, padT = 14, padB = 30;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     if (!points.length) {
@@ -1442,10 +1447,12 @@
     const maxR = maxOf(rightKeys.length ? rightKeys : [{ k: 'eng' }]);
     // nice ceiling
     const niceMax = (m) => {
+      m = Math.max(1, Math.ceil(Number(m) || 1));
       if (m <= 1) return 1;
       const p = Math.pow(10, Math.floor(Math.log10(m)));
       const n = Math.ceil(m / p);
-      return (n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+      const stepped = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+      return Math.max(1, Math.round(stepped));
     };
     const topL = niceMax(maxL);
     const topR = niceMax(maxR);
@@ -1457,14 +1464,14 @@
     let grid = '';
     for (let g = 0; g < 4; g++) {
       const y = padT + (innerH / 3) * g;
-      const vL = topL - (topL / 3) * g;
-      const vR = topR - (topR / 3) * g;
+      const vL = Math.round(topL - (topL / 3) * g);
+      const vR = Math.round(topR - (topR / 3) * g);
       grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#94a3b8" stroke-opacity=".22" stroke-dasharray="3 4"/>`;
       if (leftKeys.length) {
-        grid += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#64748b">${formatChartAxis(vL)}</text>`;
+        grid += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#64748b">${formatChartAxis(Math.round(vL))}</text>`;
       }
       if (rightKeys.length) {
-        grid += `<text x="${W - padR + 6}" y="${y + 3}" text-anchor="start" font-size="10" fill="#dc2626" fill-opacity=".85">${formatChartAxis(vR)}</text>`;
+        grid += `<text x="${W - padR + 6}" y="${y + 3}" text-anchor="start" font-size="10" fill="#dc2626" fill-opacity=".85">${formatChartAxis(Math.round(vR))}</text>`;
       }
     }
 
