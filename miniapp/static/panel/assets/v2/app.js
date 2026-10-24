@@ -1484,7 +1484,7 @@ function renderSettings() {
           <div class="mgr-cal-month-label"><strong>${JMONTHS[jm - 1]}</strong><span>${fa(jy)}</span></div>
           <button type="button" class="mgr-cal-nav-btn" id="mgrCalNext" aria-label="ماه بعد"><svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><path d="m10 18 6-6-6-6"/></svg></button>
         </div>
-        ${ST.mgrCalLoading ? '<div class="loading" style="padding:24px">در حال بارگذاری تقویم…</div>' : `<div class="mgr-cal-grid">${cells}</div>`}
+        ${ST.mgrCalLoading ? '<div class="page-loading" style="min-height:20vh"><div class="ly-spinner"></div></div>' : `<div class="mgr-cal-grid">${cells}</div>`}
         <div class="calendar-legend mgr-cal-legend">
           <span><i class="legend-free"></i> آزاد</span>
           <span><i class="legend-manual"></i> مسدود دستی</span>

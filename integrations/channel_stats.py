@@ -251,7 +251,8 @@ def refresh_channel(channel) -> Dict[str, Any]:
     _remember_linkyar_admin(channel, reading)
     _check_bot_admin_if_configured(channel)
     channel.save()
-        try:
+    channel.save()
+    try:
         ChannelStatSnapshot.objects.create(
             channel=channel,
             taken_at=now,
@@ -274,7 +275,6 @@ def refresh_channel(channel) -> Dict[str, Any]:
             forwards=int(summary.get('forwards') or 0),
             source='linkyar',
         )
-    return {'ok': True, 'channel_id': channel.id, 'members': channel.members_count, 'avg_views': channel.avg_views}
 
 
 def recent_snapshots(channel_ids: List[int], limit: int = 60) -> Dict[int, List[Dict[str, Any]]]:
