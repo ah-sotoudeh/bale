@@ -179,6 +179,9 @@
         error: err ? String(err.message || err) : (data && data.error ? String(data.error) : ''),
         keys: keys, empty: empty.join(','),
         msg: data && data.message ? String(data.message).slice(0, 120) : '',
+        status: data && data.status != null ? data.status : '',
+        body_snip: data && data.body_snip ? String(data.body_snip).slice(0, 160) : '',
+        retried: !!(data && data._retried),
       });
     },
     inspectPage() {
@@ -190,7 +193,7 @@
         const text = (root.innerText || '').replace(/\s+/g, ' ').trim();
         const htmlLen = (root.innerHTML || '').length;
         const hasEmpty = !!root.querySelector('.empty');
-        const hasError = /خطا|ناموفق|Failed|Error|بارگذاری نشد|محتوا بارگذاری/i.test(text);
+        const hasError = page !== 'qa' && /خطا|ناموفق|Failed|Error|بارگذاری نشد|محتوا بارگذاری/i.test(text);
         const issues = [];
         if (htmlLen < 40) issues.push('html_too_short');
         if (hasError) issues.push('error_text_visible');
@@ -210,10 +213,15 @@
     reportText() {
       const role = (ST && ST.role) || '';
       const uid = (ST && ST.user && (ST.user.id || ST.user.bale_id || ST.user.user_id)) || '';
+      const fails = (this.events || []).filter((e) => e.type === 'api' && !e.ok);
+      const failPaths = {};
+      fails.forEach((e) => { failPaths[e.path] = (failPaths[e.path] || 0) + 1; });
       const lines = ['LINKYAR_QA_REPORT', 'time=' + new Date().toISOString(),
         'role=' + role + ' uid=' + uid + ' page=' + ((ST && ST.page) || ''),
         'uptime_ms=' + (Date.now() - this.startedAt),
         'pages=' + JSON.stringify(this.pageHits),
+        'api_fail_count=' + fails.length,
+        'api_fail_paths=' + JSON.stringify(failPaths),
         '---events---'];
       (this.events || []).forEach((ev, i) => lines.push('#' + (i + 1) + ' ' + JSON.stringify(ev)));
       lines.push('---end---');
@@ -313,10 +321,20 @@
       if (timeout) clearTimeout(timeout);
     }
     let data;
+    let rawText = '';
     try {
-      data = await res.json();
+      rawText = await res.text();
+      data = rawText ? JSON.parse(rawText) : { ok: false, error: 'empty_body', message: 'پاسخ خالی از سرور' };
     } catch (e) {
-      data = { ok: false, error: 'bad_json', message: res.status === 401 ? 'نشست بله منقضی شده. مینی‌اپ را از داخل بله دوباره باز کنید.' : 'پاسخ نامعتبر از سرور' };
+      data = {
+        ok: false,
+        error: 'bad_json',
+        message: res.status === 401
+          ? 'نشست بله منقضی شده. مینی‌اپ را از داخل بله دوباره باز کنید.'
+          : 'پاسخ نامعتبر از سرور',
+        status: res.status,
+        body_snip: String(rawText || '').replace(/\s+/g, ' ').slice(0, 180),
+      };
     }
     if (!res.ok && !data.message) {
       data.message = data.error || ('خطا ' + res.status);
@@ -331,9 +349,16 @@
   const __apiOriginal = api;
   api = async function(path, opts = {}) {
     const t0 = Date.now();
-    const method = (opts && opts.method) || 'GET';
+    const method = ((opts && opts.method) || 'GET').toUpperCase();
+    const run = () => __apiOriginal(path, opts);
     try {
-      const data = await __apiOriginal(path, opts);
+      let data = await run();
+      // یک‌بار تلاش دوباره برای GET وقتی پاسخ JSON نبود (اغلب فشار لحظه‌ای سرور)
+      if (data && data.error === 'bad_json' && method === 'GET' && !(opts && opts._retried)) {
+        await new Promise((r) => setTimeout(r, 120));
+        data = await __apiOriginal(path, Object.assign({}, opts, { _retried: true }));
+        data._retried = true;
+      }
       try { QA.logApi(path, method, Date.now() - t0, null, data); } catch (e) {}
       return data;
     } catch (err) {
@@ -1893,7 +1918,10 @@ function renderOpTickets() {
     } catch (e) {}
 
     let html = '';
-    if (ST.loading) html = '<div class="loading">در حال بارگذاری…</div>';
+    if (ST.loading) {
+      // اسپینر به‌جای متن؛ اگر محتوای قبلی داریم روی آن overlay نگذار (کل صفحه سفید نشود)
+      html = '<div class="page-loading" role="status" aria-label="بارگذاری"><div class="ly-spinner"></div></div>';
+    }
     else if (ST.page === 'onboard') { try { html = renderOnboardPage(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در ویزارد</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'home') { try { html = renderHome(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در خانه</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
     else if (ST.page === 'market') { try { html = renderMarket(); } catch (e) { console.error(e); html = '<div class="empty"><strong>خطا در بازار</strong><p>'+esc(String(e.message||e))+'</p></div>'; } }
@@ -3324,7 +3352,8 @@ function renderOpTickets() {
       if (id === 'mgr-channels') ST.mgrTab = 'channels';
       if (id === 'mgr-tariffs') ST.mgrTab = 'tariffs';
       if (id === 'mgr-home') ST.mgrTab = 'inbox';
-      ST.loading = true; render();
+      // بدون پاک‌کردن کل صفحه؛ فقط داده را تازه کن
+      ST.loading = false;
       try {
         if (id === 'home') { await Promise.allSettled([loadOrders(), loadWallet(), loadBanners()]); }
         if (id === 'market') await ensureCatalog();
@@ -3757,7 +3786,12 @@ function renderOpTickets() {
     try { render(); } catch (e) { console.error('render1', e); }
     try {
       await loadMe();
-      if (ST.role === 'manager') { ST.page = 'mgr-home'; await Promise.allSettled([loadMyChannels(), loadMgrOrders(), loadMgrTariffs(), loadWallet()]); }
+      if (ST.role === 'manager') {
+        ST.page = 'mgr-home';
+        await loadMyChannels();
+        await Promise.allSettled([loadMgrOrders(), loadMgrTariffs()]);
+        try { await loadWallet(); } catch (e) {}
+      }
       else if (ST.role === 'operator') { ST.page = 'op-home'; await Promise.allSettled([loadOpBanners(), loadOpPayouts(), loadOpAssignments(), loadOpSettings(), loadOpTickets()]); }
       else ST.page = launchView === 'businesses' ? 'businesses' : 'home';
       await Promise.allSettled([loadCatalog(), loadBanners(), loadBusinesses({ refreshMetadata: launchView === 'businesses' }), loadOrders(), loadWallet()]);

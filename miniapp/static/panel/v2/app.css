@@ -1637,3 +1637,27 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 .mgr-range-menu.open-up{top:auto;bottom:calc(100% + 6px)}
 .mgr-stats-card{overflow:visible!important;z-index:3}
 .mgr-stats-plot{overflow:hidden;z-index:1}
+
+/* Page loading spinner (no Persian text) */
+.page-loading{
+  display:grid;place-items:center;min-height:42vh;padding:28px 12px;
+}
+.ly-spinner{
+  width:36px;height:36px;border-radius:50%;
+  border:3px solid color-mix(in srgb, var(--teal, #0a9) 25%, transparent);
+  border-top-color: var(--teal-strong, #0a6794);
+  border-right-color: var(--teal, #09a59b);
+  animation: ly-spin .7s linear infinite;
+  box-sizing:border-box;
+}
+@keyframes ly-spin{to{transform:rotate(360deg)}}
+.loading{
+  display:grid;place-items:center;min-height:30vh;padding:24px;
+  color:transparent!important;font-size:0!important;
+}
+.loading::before{
+  content:"";width:32px;height:32px;border-radius:50%;
+  border:3px solid color-mix(in srgb, var(--teal, #0a9) 25%, transparent);
+  border-top-color: var(--teal-strong, #0a6794);
+  animation: ly-spin .7s linear infinite;
+}
