@@ -1507,3 +1507,111 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 .mgr-chart-tooltip b{font-weight:800}
 .mgr-stats-empty{padding:28px 12px;text-align:center;color:var(--muted);font-size:.75rem}
 .mgr-stats-svg{width:100%;height:auto;display:block}
+
+
+/* Channel detail banner — single row */
+.manager-detail-hero.flat-hero{
+  margin-bottom:12px;border-radius:18px;overflow:hidden;
+  border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);
+}
+.manager-detail-banner{
+  background:linear-gradient(120deg,#082e54,#0a6794,#09a59b);
+  padding:12px 12px;color:#fff;
+}
+.mgr-banner-row{
+  display:flex;align-items:center;gap:10px;min-width:0;
+}
+.mgr-banner-avatar{
+  width:42px;height:42px;border-radius:13px;overflow:hidden;flex-shrink:0;
+  background:rgba(255,255,255,.2);display:grid;place-items:center;
+  border:2px solid rgba(255,255,255,.4);color:#fff;font-weight:900;font-size:.95rem;
+}
+.mgr-banner-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.mgr-banner-text{
+  flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.mgr-banner-name{
+  color:#fff!important;font-size:.95rem;font-weight:900;line-height:1.25;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.mgr-banner-handle{
+  color:rgba(255,255,255,.9)!important;font-size:.72rem;font-weight:700;
+  background:rgba(255,255,255,.14);padding:3px 8px;border-radius:999px;
+  direction:ltr;unicode-bidi:plaintext;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.manager-detail-status.on-banner{
+  position:static!important;left:auto!important;top:auto!important;
+  background:rgba(255,255,255,.18);color:#fff;font-size:.58rem;padding:5px 9px;
+  flex-shrink:0;margin:0;white-space:nowrap;
+}
+.manager-detail-status.on-banner i{background:#6ee7b7}
+.manager-detail-status.on-banner.paused i{background:#cbd5e1}
+.detail-metrics.on-flat{padding:10px 10px 12px!important;margin:0}
+.detail-metrics.on-flat > div{padding:8px 6px}
+.detail-metrics.on-flat span{font-size:.54rem}
+.detail-metrics.on-flat strong{font-size:.8rem}
+
+/* Chart card + dropdown stays inside */
+.mgr-stats-card{
+  position:relative;overflow:visible;
+  background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  padding:12px;box-shadow:var(--shadow);margin-bottom:8px;z-index:2;
+}
+.mgr-stats-toolbar.one-line{
+  flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;
+  position:relative;z-index:5;
+}
+.mgr-stats-series{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
+.mgr-range-dropdown{position:relative;margin-right:0;flex-shrink:0;z-index:6}
+.mgr-range-toggle{
+  appearance:none;border:1px solid var(--line);background:var(--surface);
+  border-radius:12px;padding:7px 11px;font:800 .65rem var(--font);color:var(--text);
+  display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+  box-shadow:0 1px 4px rgba(15,43,71,.06);white-space:nowrap;
+}
+.mgr-range-menu{
+  position:absolute;top:calc(100% + 6px);right:0;left:auto;z-index:30;
+  min-width:148px;max-width:min(200px,70vw);
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 10px 28px rgba(15,43,71,.16);padding:4px;
+}
+.mgr-range-menu.open-up{
+  top:auto;bottom:calc(100% + 6px);
+  box-shadow:0 -8px 24px rgba(15,43,71,.14);
+}
+.mgr-range-menu[hidden]{display:none!important}
+.mgr-range-menu button{
+  display:block;width:100%;text-align:right;border:0;background:transparent;
+  padding:10px 12px;font:700 .7rem var(--font);color:var(--text);cursor:pointer;border-radius:8px;
+}
+.mgr-range-menu button.on{background:var(--teal-soft);color:var(--teal-strong)}
+.mgr-stats-plot{position:relative;width:100%;overflow:hidden}
+.mgr-chart-tooltip{
+  position:absolute;z-index:5;min-width:88px;padding:8px 10px;border-radius:10px;
+  background:#0f172a;color:#fff;font-size:.62rem;line-height:1.5;
+  box-shadow:0 6px 18px rgba(0,0,0,.2);pointer-events:none;
+  display:grid;grid-template-columns:auto auto;gap:2px 8px;
+}
+.mgr-chart-tooltip[hidden]{display:none!important}
+.mgr-stats-empty{padding:24px 12px;text-align:center;color:var(--muted);font-size:.75rem}
+.mgr-stats-svg{width:100%;height:auto;display:block}
+.mgr-stats-note{display:none!important}
+
+/* Prevent page horizontal overflow */
+#app,.main,#pageContent{max-width:100%;overflow-x:hidden}
+
+/* Tariff rows denser */
+.mgr-ch-tariff-row{padding:9px 8px}
+.mgr-ch-tariff-body strong{font-size:.74rem}
+.mgr-ch-tariff-ops .icon-btn{width:32px;height:32px}
+
+/* Manager list cards actions balance */
+.manager-channel-actions .btn{border-radius:12px}
+
+/* Chart series chips tighter */
+.mgr-series-chip{padding:5px 9px;font-size:.6rem}
+
+/* Detail metrics grid on small screens */
+.detail-metrics.on-flat{
+  display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important;
+}

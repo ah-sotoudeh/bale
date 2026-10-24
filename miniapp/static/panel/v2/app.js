@@ -1399,7 +1399,7 @@
     const W = 340, H = 200, padL = 44, padR = 12, padT = 16, padB = 32;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     if (!points.length) {
-      return `<div class="mgr-stats-empty">هنوز برداشت آماری در این بازه ثبت نشده است.</div>`;
+      return `<div class="mgr-stats-empty">آماری در این بازه نیست</div>`;
     }
     const keys = [];
     if (seriesFlags.engagement) keys.push({ k: 'eng', color: '#dc2626', label: 'نرخ تعامل' });
@@ -1491,7 +1491,7 @@
             </div>
           </article>`;
         }).join('')
-      : `<div class="mgr-ch-tariff-empty"><p>هنوز تعرفه‌ای برای این کانال نیست.</p></div>`;
+      : `<div class="mgr-ch-tariff-empty"><p>تعرفه‌ای ثبت نشده</p></div>`;
 
     const days = ST.mgrChartDays === 30 ? 30 : 7;
     const series = ST.mgrChartSeries || { members: true, views: true, engagement: true };
@@ -1503,20 +1503,18 @@
     return `
       <section class="manager-detail-hero flat-hero">
         <div class="manager-detail-banner">
-          <div class="mgr-banner-top">
-            <div class="mgr-banner-identity">
-              <div class="mgr-banner-avatar">${ava}</div>
+          <div class="mgr-banner-row">
+            <div class="mgr-banner-avatar">${ava}</div>
+            <div class="mgr-banner-text">
               <strong class="mgr-banner-name">${esc(c.name)}</strong>
+              ${handle ? `<span class="mgr-banner-handle" dir="ltr">${esc(handle)}</span>` : ''}
             </div>
-            <div class="mgr-banner-status-block">
-              <span class="manager-detail-status on-banner ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
-              ${handle ? `<p class="mgr-banner-handle" dir="ltr">${esc(handle)}</p>` : ''}
-            </div>
+            <span class="manager-detail-status on-banner ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
           </div>
         </div>
         <div class="manager-channel-metrics detail-metrics on-flat">
           <div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div>
-          <div><span>${icon('chart',15)} بازدید ۲۴س</span><strong>${faK(reach24)}</strong></div>
+          <div><span>${icon('chart',15)} بازدید روز</span><strong>${faK(reach24)}</strong></div>
           <div><span>${icon('activity',15)} نرخ تعامل</span><strong>${engLabel}</strong></div>
         </div>
       </section>
@@ -1546,7 +1544,6 @@
           </div>
         </div>
         <div class="mgr-stats-plot" id="mgrStatsPlot">${chartSvg}</div>
-        <p class="mgr-stats-note">${points.length ? 'فقط روزهایی که آمار واقعی ثبت شده نمایش داده می‌شود.' : 'با «به‌روزرسانی آمار» اولین برداشت ثبت می‌شود.'}</p>
       </section>
 
       <div class="manager-content-heading" style="margin-top:16px"><div><span class="eyebrow">تنظیمات</span><h2>مدیریت کانال</h2></div></div>
@@ -2445,9 +2442,24 @@ function renderOpTickets() {
     const rangeMenu = $('#mgrRangeMenu');
     if (rangeToggle && rangeMenu) {
       rangeToggle.onclick = (e) => {
+        e.preventDefault();
         e.stopPropagation();
-        rangeMenu.hidden = !rangeMenu.hidden;
+        const open = rangeMenu.hidden;
+        rangeMenu.hidden = !open;
+        if (!rangeMenu.hidden) {
+          // منو داخل کارت بماند؛ در صورت نیاز به بالا باز شود
+          const card = rangeToggle.closest('.mgr-stats-card') || rangeToggle.parentElement;
+          const cardRect = card ? card.getBoundingClientRect() : null;
+          const btnRect = rangeToggle.getBoundingClientRect();
+          const spaceBelow = cardRect ? (cardRect.bottom - btnRect.bottom) : 80;
+          rangeMenu.classList.toggle('open-up', spaceBelow < 110);
+        }
       };
+      document.addEventListener('click', function _closeRange(ev) {
+        if (!rangeMenu.hidden && !rangeMenu.contains(ev.target) && ev.target !== rangeToggle) {
+          rangeMenu.hidden = true;
+        }
+      }, { once: true });
     }
     $$('[data-chart-days]').forEach((b) => {
       b.onclick = () => {
@@ -2463,6 +2475,7 @@ function renderOpTickets() {
         if (!ST.mgrChartSeries.members && !ST.mgrChartSeries.views && !ST.mgrChartSeries.engagement) {
           ST.mgrChartSeries[key] = true;
         }
+        const menu = $('#mgrRangeMenu'); if (menu) menu.hidden = true;
         render();
       };
     });
@@ -2622,7 +2635,15 @@ function renderOpTickets() {
       try {
         const d = await api('/channels/refresh', { method: 'POST', body: { channel_id: ST.selectedMgrChannel, force: true } });
         toast(d.message || (d.ok ? 'آمار به‌روز شد' : (d.error || 'خطا')));
-        await loadMyChannels(); render();
+        await loadMyChannels();
+        if (d && d.ok && Array.isArray(ST.myChannels)) {
+          const updated = d.channel || ((d.channels || [])[0]);
+          if (updated) {
+            const idx = ST.myChannels.findIndex(x => Number(x.id) === Number(updated.id || ST.selectedMgrChannel));
+            if (idx >= 0) ST.myChannels[idx] = Object.assign({}, ST.myChannels[idx], updated);
+          }
+        }
+        render();
       } catch (e) { toast(e.message || 'به‌روزرسانی نشد'); }
       finally { refOne.disabled = false; }
     };
