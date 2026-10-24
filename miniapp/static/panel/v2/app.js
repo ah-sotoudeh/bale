@@ -1359,6 +1359,7 @@
   }
 
 
+  
   function buildChannelChartSeries(channel, days) {
     const now = Date.now();
     const cutoff = now - days * 86400000;
@@ -1367,26 +1368,40 @@
         const at = _parseSnapAt(h.at || h.taken_at || h.date);
         if (at == null || at < cutoff) return null;
         const members = Number(h.members != null ? h.members : h.members_count) || 0;
-        const views = Number(h.daily_reach != null ? h.daily_reach : (h.views != null ? h.views : h.avg_views)) || 0;
-        const forwards = Number(h.forwards) || 0;
-        const posts = Number(h.posts) || 0;
-        // نرخ تعامل: واکنش/فوروارد به ازای هر هزار بازدید (میانگین پیام)
-        let eng = 0;
-        if (views > 0 && forwards > 0) {
-          eng = Math.round((forwards / views) * 1000 * 10) / 10;
-        } else if (members > 0 && views > 0) {
-          eng = Math.round((views / members) * 1000) / 10;
+        const views = Number(
+          h.daily_reach != null && h.daily_reach !== ''
+            ? h.daily_reach
+            : (h.views != null ? h.views : h.avg_views)
+        ) || 0;
+        let eng = Number(h.engagement);
+        if (!Number.isFinite(eng) || eng <= 0) {
+          eng = Number(String(h.err_percent || '').replace('%','').replace(',','.')) || 0;
+        }
+        if ((!Number.isFinite(eng) || eng <= 0) && views > 0) {
+          const forwards = Number(h.forwards) || 0;
+          if (forwards > 0) eng = Math.round((forwards / views) * 1000 * 10) / 10;
         }
         const dayKey = new Date(at);
         dayKey.setHours(12, 0, 0, 0);
-        return { at: dayKey.getTime(), members, views, eng, forwards, posts };
+        return { at: dayKey.getTime(), members, views, eng: Number.isFinite(eng) ? eng : 0 };
       })
       .filter(Boolean)
       .sort((a, b) => a.at - b.at);
-    // فقط یک نقطه برای هر روز (آخرین برداشت همان روز)
+    // یک نقطه در روز (آخرین برداشت)
     const byDay = {};
     snaps.forEach((p) => { byDay[p.at] = p; });
-    return Object.keys(byDay).map(Number).sort((a, b) => a - b).map((k) => byDay[k]);
+    let out = Object.keys(byDay).map(Number).sort((a, b) => a - b).map((k) => byDay[k]);
+    // اگر تاریخچه خالی است ولی آمار فعلی هست، فقط امروز را نشان بده
+    if (!out.length && channel) {
+      const today = new Date(); today.setHours(12,0,0,0);
+      const members = Number(channel.members_count) || 0;
+      const views = Number(channel.daily_reach || channel.avg_views) || 0;
+      let eng = Number(String(channel.err_percent || '').replace('%','').replace(',','.')) || 0;
+      if (members || views || eng) {
+        out = [{ at: today.getTime(), members, views, eng }];
+      }
+    }
+    return out;
   }
 
   function formatChartDayLabel(ts) {
@@ -1395,58 +1410,87 @@
     return fa(jm) + '/' + fa(jd);
   }
 
+  function formatChartAxis(n) {
+    n = Number(n) || 0;
+    const abs = Math.abs(n);
+    if (abs >= 1000000) return fa((n / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, '')) + 'M';
+    if (abs >= 1000) return fa(Math.round(n / 1000)) + 'k';
+    if (abs >= 100) return fa(Math.round(n));
+    if (abs >= 10) return fa(Math.round(n * 10) / 10);
+    return fa(Math.round(n * 10) / 10);
+  }
+
   function renderLineChartSvg(points, seriesFlags) {
-    const W = 340, H = 200, padL = 44, padR = 12, padT = 16, padB = 32;
+    const W = 340, H = 210, padL = 40, padR = 36, padT = 14, padB = 30;
     const innerW = W - padL - padR, innerH = H - padT - padB;
     if (!points.length) {
       return `<div class="mgr-stats-empty">آماری در این بازه نیست</div>`;
     }
-    const keys = [];
-    if (seriesFlags.engagement) keys.push({ k: 'eng', color: '#dc2626', label: 'نرخ تعامل' });
-    if (seriesFlags.views) keys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
-    if (seriesFlags.members) keys.push({ k: 'members', color: '#2563eb', label: 'اعضا' });
-    if (!keys.length) keys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
+    const leftKeys = [];
+    const rightKeys = [];
+    if (seriesFlags.members) leftKeys.push({ k: 'members', color: '#2563eb', label: 'اعضا' });
+    if (seriesFlags.views) leftKeys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
+    if (seriesFlags.engagement) rightKeys.push({ k: 'eng', color: '#dc2626', label: 'نرخ تعامل' });
+    if (!leftKeys.length && !rightKeys.length) leftKeys.push({ k: 'views', color: '#16a34a', label: 'بازدید' });
 
-    let minV = 0, maxV = 0;
-    points.forEach((p) => keys.forEach((s) => {
-      const v = Number(p[s.k]) || 0;
-      if (v > maxV) maxV = v;
-    }));
-    if (maxV <= 0) maxV = 1;
-    const span = maxV - minV || 1;
+    const maxOf = (keys) => {
+      let m = 0;
+      points.forEach((p) => keys.forEach((s) => { const v = Number(p[s.k]) || 0; if (v > m) m = v; }));
+      return m > 0 ? m : 1;
+    };
+    const maxL = maxOf(leftKeys.length ? leftKeys : [{ k: 'members' }]);
+    const maxR = maxOf(rightKeys.length ? rightKeys : [{ k: 'eng' }]);
+    // nice ceiling
+    const niceMax = (m) => {
+      if (m <= 1) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(m)));
+      const n = Math.ceil(m / p);
+      return (n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+    };
+    const topL = niceMax(maxL);
+    const topR = niceMax(maxR);
+
     const xAt = (i) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
-    const yAt = (v) => padT + innerH - ((v - minV) / span) * innerH;
+    const yL = (v) => padT + innerH - (Math.min(v, topL) / topL) * innerH;
+    const yR = (v) => padT + innerH - (Math.min(v, topR) / topR) * innerH;
 
     let grid = '';
     for (let g = 0; g < 4; g++) {
       const y = padT + (innerH / 3) * g;
-      const val = maxV - (span / 3) * g;
-      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#94a3b8" stroke-opacity=".25" stroke-dasharray="3 4"/>`;
-      grid += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#94a3b8">${fa(Math.round(val))}</text>`;
+      const vL = topL - (topL / 3) * g;
+      const vR = topR - (topR / 3) * g;
+      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#94a3b8" stroke-opacity=".22" stroke-dasharray="3 4"/>`;
+      if (leftKeys.length) {
+        grid += `<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="#64748b">${formatChartAxis(vL)}</text>`;
+      }
+      if (rightKeys.length) {
+        grid += `<text x="${W - padR + 6}" y="${y + 3}" text-anchor="start" font-size="10" fill="#dc2626" fill-opacity=".85">${formatChartAxis(vR)}</text>`;
+      }
     }
 
-    const paths = keys.map((s) => {
+    const drawSeries = (keys, yFn) => keys.map((s) => {
       if (points.length === 1) {
-        const x = xAt(0), y = yAt(Number(points[0][s.k]) || 0);
+        const x = xAt(0), y = yFn(Number(points[0][s.k]) || 0);
         return `<circle class="mgr-chart-dot" data-pi="0" data-series="${s.k}" cx="${x}" cy="${y}" r="5" fill="${s.color}" stroke="#fff" stroke-width="2"/>`;
       }
-      const d = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(Number(p[s.k]) || 0).toFixed(1)}`).join(' ');
+      const d = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yFn(Number(p[s.k]) || 0).toFixed(1)}`).join(' ');
       const dots = points.map((p, i) => {
-        const x = xAt(i).toFixed(1), y = yAt(Number(p[s.k]) || 0).toFixed(1);
-        return `<circle class="mgr-chart-dot" data-pi="${i}" data-series="${s.k}" cx="${x}" cy="${y}" r="4.5" fill="${s.color}" stroke="#fff" stroke-width="1.5"/>`;
+        const x = xAt(i).toFixed(1), y = yFn(Number(p[s.k]) || 0).toFixed(1);
+        return `<circle class="mgr-chart-dot" data-pi="${i}" data-series="${s.k}" cx="${x}" cy="${y}" r="4" fill="${s.color}" stroke="#fff" stroke-width="1.5"/>`;
       }).join('');
-      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
     }).join('');
 
-    // محور x: فقط روزهایی که نقطه داریم
+    const paths = drawSeries(leftKeys, yL) + drawSeries(rightKeys, yR);
+
     let xLabels = '';
     if (points.length === 1) {
-      xLabels = `<text x="${xAt(0)}" y="${H - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(points[0].at)}</text>`;
+      xLabels = `<text x="${xAt(0)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(points[0].at)}</text>`;
     } else {
       const step = points.length > 8 ? Math.ceil(points.length / 5) : 1;
       points.forEach((p, i) => {
         if (i % step !== 0 && i !== points.length - 1) return;
-        xLabels += `<text x="${xAt(i)}" y="${H - 10}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(p.at)}</text>`;
+        xLabels += `<text x="${xAt(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#94a3b8">${formatChartDayLabel(p.at)}</text>`;
       });
     }
 
@@ -1454,7 +1498,7 @@
       <div class="mgr-chart-tooltip" id="mgrChartTip" hidden></div>`;
   }
 
-  function engagementDisplay(channel) {
+function engagementDisplay(channel) {
     const err = Number(String(channel.err_percent || '').replace('%', '').replace(',', '.').replace('‰',''));
     if (Number.isFinite(err) && err > 0) return fa(Math.round(err * 10) / 10);
     return '—';
@@ -2491,7 +2535,7 @@ function renderOpTickets() {
           if (!p) return;
           const series = dot.getAttribute('data-series');
           const labels = { members: 'اعضا', views: 'بازدید', eng: 'نرخ تعامل' };
-          const val = series === 'eng' ? (fa(p.eng) + '‰') : fa(Math.round(p[series] || 0));
+          const val = series === 'eng' ? formatChartAxis(p.eng) : formatChartAxis(p[series] || 0);
           tip.hidden = false;
           tip.innerHTML = `<small>تاریخ</small><b>${formatChartDayLabel(p.at)}</b><small>${labels[series] || series}</small><b>${val}</b>`;
           const rect = plot.getBoundingClientRect();

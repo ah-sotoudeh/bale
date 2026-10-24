@@ -246,6 +246,7 @@ class ChannelStatSnapshot(models.Model):
     daily_reach = models.PositiveIntegerField(default=0)
     posts = models.PositiveSmallIntegerField(default=0)
     forwards = models.PositiveIntegerField(default=0)
+    engagement = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     source = models.CharField(max_length=16, default='linkyar')
 
     class Meta:
