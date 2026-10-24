@@ -2617,6 +2617,13 @@ def collect_channel_stats(channel_ref: str, limit: int = 30) -> Dict[str, Any]:
                         'date': parsed.get('date'),
                         'views': _named_int(item, ('views', 'view', 'views_count', 'view_count')),
                         'forwards': _named_int(item, ('forwards', 'forward_count', 'forwards_count')) or 0,
+                        'reactions': _named_int(item, ('reactions', 'reaction_count', 'reactions_count', 'likes')) or 0,
+                        'is_forward': bool(
+                            item.get('forwarded')
+                            or item.get('fwd')
+                            or item.get('5')
+                            or parsed.get('is_forward')
+                        ),
                     }
                 )
 

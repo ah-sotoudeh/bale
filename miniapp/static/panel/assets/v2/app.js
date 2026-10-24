@@ -1367,7 +1367,7 @@
         const at = _parseSnapAt(h.at || h.taken_at || h.date);
         if (at == null || at < cutoff) return null;
         const members = Number(h.members != null ? h.members : h.members_count) || 0;
-        const views = Number(h.views != null ? h.views : (h.avg_views != null ? h.avg_views : h.daily_reach)) || 0;
+        const views = Number(h.daily_reach != null ? h.daily_reach : (h.views != null ? h.views : h.avg_views)) || 0;
         const forwards = Number(h.forwards) || 0;
         const posts = Number(h.posts) || 0;
         // نرخ تعامل: واکنش/فوروارد به ازای هر هزار بازدید (میانگین پیام)
@@ -1455,11 +1455,8 @@
   }
 
   function engagementDisplay(channel) {
-    const err = Number(String(channel.err_percent || '').replace('%', '').replace(',', '.'));
-    if (Number.isFinite(err) && err > 0) return fa(Math.round(err * 10) / 10) + '٪';
-    const m = Number(channel.members_count) || 0;
-    const v = Number(channel.daily_reach || channel.avg_views) || 0;
-    if (m > 0 && v > 0) return fa(Math.round((v / m) * 1000) / 10) + '٪';
+    const err = Number(String(channel.err_percent || '').replace('%', '').replace(',', '.').replace('‰',''));
+    if (Number.isFinite(err) && err > 0) return fa(Math.round(err * 10) / 10);
     return '—';
   }
 
@@ -1530,17 +1527,17 @@
       </div>
       <section class="mgr-stats-card">
         <div class="mgr-stats-toolbar one-line">
-          <div class="mgr-stats-series">
-            <button type="button" class="mgr-series-chip ${series.engagement?'on':''}" data-chart-series="engagement"><i style="background:#dc2626"></i> نرخ تعامل</button>
-            <button type="button" class="mgr-series-chip ${series.views?'on':''}" data-chart-series="views"><i style="background:#16a34a"></i> بازدید</button>
-            <button type="button" class="mgr-series-chip ${series.members?'on':''}" data-chart-series="members"><i style="background:#2563eb"></i> اعضا</button>
-          </div>
           <div class="mgr-range-dropdown" id="mgrRangeDrop">
             <button type="button" class="mgr-range-toggle" id="mgrRangeToggle">${fa(days)} روز گذشته <span class="mgr-range-caret">▾</span></button>
             <div class="mgr-range-menu" id="mgrRangeMenu" hidden>
               <button type="button" data-chart-days="7" class="${days===7?'on':''}">${fa(7)} روز گذشته</button>
               <button type="button" data-chart-days="30" class="${days===30?'on':''}">${fa(30)} روز گذشته</button>
             </div>
+          </div>
+          <div class="mgr-stats-series">
+            <button type="button" class="mgr-series-chip ${series.engagement?'on':''}" data-chart-series="engagement"><i style="background:#dc2626"></i> نرخ تعامل</button>
+            <button type="button" class="mgr-series-chip ${series.views?'on':''}" data-chart-series="views"><i style="background:#16a34a"></i> بازدید</button>
+            <button type="button" class="mgr-series-chip ${series.members?'on':''}" data-chart-series="members"><i style="background:#2563eb"></i> اعضا</button>
           </div>
         </div>
         <div class="mgr-stats-plot" id="mgrStatsPlot">${chartSvg}</div>

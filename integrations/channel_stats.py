@@ -16,7 +16,7 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-_FRESH = timedelta(hours=6)
+_FRESH = timedelta(hours=20)
 
 
 def _to_ms(value: Optional[int]) -> Optional[int]:
@@ -33,44 +33,86 @@ _DAY_MS = 86_400_000
 
 
 def summarize_reading(members: Optional[int], posts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """بازدید میانگین، جمع بازدید ۲۴ ساعت، و نرخ پست را از خواندن لینک‌یار می‌سازد.
+    """آمار کانال از پست‌های اصلی (نه بازارسال).
 
-    پست تازه‌تر از یک ساعت در میانگین نمی‌آید، چون بازدیدش هنوز جمع نشده.
-    اگر پست تاریخ‌دار هست ولی هیچ‌کدام مال امروز نیست، بازدید روز صفر است.
+    بازدید ۲۴ساعته:
+      تا ۳ پستی که سن‌شان به ۲۴ ساعت نزدیک‌تر است انتخاب می‌شوند.
+      بازدید هر کدام با (views / age_hours) * 24 به معادل ۲۴ساعت نرمال می‌شود
+      و میانگین گرفته می‌شود.
+
+    نرخ تعامل (‰):
+      برای همان پست‌ها: (مجموع واکنش‌ها / مجموع بازدید) * 1000
+      اگر واکنش نبود، از forwards به‌عنوان تقریب استفاده می‌شود.
     """
     now_ms = int(timezone.now().timestamp() * 1000)
+    target_age = _DAY_MS  # 24h
     real = [p for p in posts if p.get('message_id')]
     base = real or list(posts)
-    scored = []
+
+    candidates = []
     for post in base:
         if not isinstance(post.get('views'), int) or int(post['views']) < 0:
             continue
+        # بازارسال‌ها را کنار بگذار
+        if post.get('is_forward') or post.get('forwarded'):
+            continue
         stamp = _to_ms(post.get('date'))
-        age = now_ms - stamp if stamp else None
-        scored.append((int(post['views']), age, post))
-    mature = [views for views, age, _post in scored if age is None or age >= _HOUR_MS]
-    view_vals = mature or [views for views, _age, _post in scored]
-    avg_views = int(sum(view_vals) / len(view_vals)) if view_vals else None
+        if not stamp:
+            continue
+        age = now_ms - stamp
+        if age < _HOUR_MS:
+            # هنوز بازدید جمع نشده
+            continue
+        # پنجره معقول: بین ۶ ساعت تا ۵ روز
+        if age > 5 * _DAY_MS:
+            continue
+        views = int(post['views'])
+        reactions = post.get('reactions')
+        if not isinstance(reactions, int) or reactions < 0:
+            reactions = int(post.get('forwards') or 0)
+        candidates.append({
+            'views': views,
+            'age': age,
+            'reactions': max(0, int(reactions)),
+            'post': post,
+            'dist': abs(age - target_age),
+        })
+
+    candidates.sort(key=lambda x: x['dist'])
+    sample = candidates[:3]
+
+    daily_reach = None
+    if sample:
+        norms = []
+        for c in sample:
+            age_h = c['age'] / _HOUR_MS
+            if age_h <= 0:
+                continue
+            norms.append(c['views'] / age_h * 24.0)
+        if norms:
+            daily_reach = int(round(sum(norms) / len(norms)))
+
+    # میانگین بازدید (پست‌های بالغ) برای فیلد avg_views
+    mature_views = [c['views'] for c in candidates]
+    avg_views = int(round(sum(mature_views) / len(mature_views))) if mature_views else None
+    if avg_views is None and daily_reach is not None:
+        avg_views = daily_reach
+
+    total_reactions = sum(c['reactions'] for c in sample) if sample else 0
+    total_views = sum(c['views'] for c in sample) if sample else 0
+    # نرخ تعامل: واکنش به ازای هر هزار بازدید
+    err = None
+    if total_views > 0:
+        err = round(total_reactions / total_views * 1000, 2)
+
+    forwards = sum(int(p.get('forwards') or 0) for p in base)
     dates = [d for d in (_to_ms(p.get('date')) for p in base) if d]
     span_days = 1.0
     if len(dates) >= 2:
         span_days = max((max(dates) - min(dates)) / _DAY_MS, 1.0)
-    forwards = sum(int(p.get('forwards') or 0) for p in base)
     posts_per_day = round(len(base) / span_days, 2) if base else 0.0
     citation = round(forwards / len(base), 3) if base else 0.0
-    day_views = [views for views, age, _post in scored if age is not None and 0 <= age <= _DAY_MS]
-    dated = any(age is not None for _views, age, _post in scored)
-    if day_views:
-        daily_reach = int(sum(day_views))
-    elif dated:
-        daily_reach = 0
-    elif avg_views is not None:
-        daily_reach = avg_views
-    else:
-        daily_reach = None
-    err = None
-    if members and avg_views is not None and members > 0:
-        err = round(avg_views / members * 100, 2)
+
     return {
         'members': members,
         'avg_views': avg_views,
@@ -80,6 +122,7 @@ def summarize_reading(members: Optional[int], posts: List[Dict[str, Any]]) -> Di
         'posts_per_day': posts_per_day,
         'citation_index': citation,
         'err_percent': err,
+        'sample_size': len(sample),
     }
 
 

@@ -1615,3 +1615,25 @@ html.lb-ob-lock, html.lb-ob-lock body { overflow: hidden !important; }
 .detail-metrics.on-flat{
   display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important;
 }
+
+/* Toolbar: day filter on the RIGHT, series on the LEFT (RTL) */
+.mgr-stats-toolbar.one-line{
+  display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;
+  gap:8px;position:relative;z-index:8;
+}
+.mgr-range-dropdown{
+  order:0;flex-shrink:0;position:relative;z-index:20;margin:0;
+}
+.mgr-stats-series{
+  order:1;flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;
+  justify-content:flex-start;
+}
+.mgr-range-menu{
+  position:absolute;top:calc(100% + 6px);right:0;left:auto;
+  z-index:40;min-width:148px;max-width:180px;
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 10px 28px rgba(15,43,71,.18);padding:4px;
+}
+.mgr-range-menu.open-up{top:auto;bottom:calc(100% + 6px)}
+.mgr-stats-card{overflow:visible!important;z-index:3}
+.mgr-stats-plot{overflow:hidden;z-index:1}
