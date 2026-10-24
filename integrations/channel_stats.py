@@ -223,13 +223,13 @@ def refresh_channel(channel) -> Dict[str, Any]:
     return {'ok': True, 'channel_id': channel.id, 'members': channel.members_count, 'avg_views': channel.avg_views}
 
 
-def recent_snapshots(channel_ids: List[int], limit: int = 6) -> Dict[int, List[Dict[str, Any]]]:
+def recent_snapshots(channel_ids: List[int], limit: int = 60) -> Dict[int, List[Dict[str, Any]]]:
     """آخرین برداشت‌های هر کانال، از قدیم به جدید، برای نمودار مینی‌اپ."""
     if not channel_ids:
         return {}
     from channels_app.models import ChannelStatSnapshot
 
-    since = timezone.now() - timedelta(days=21)
+    since = timezone.now() - timedelta(days=45)
     buckets: Dict[int, List[Any]] = {}
     rows = (
         ChannelStatSnapshot.objects.filter(channel_id__in=channel_ids, taken_at__gte=since)

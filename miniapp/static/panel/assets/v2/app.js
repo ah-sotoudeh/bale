@@ -134,6 +134,8 @@
     mgrCalBusy: [], // manual busy {id,date,jalali}
     mgrCalLoading: false,
     mgrCalMonth: null, // [jy, jm]
+    mgrChartDays: 7,
+    mgrChartSeries: { members: true, views: true, engagement: true },
     selectedMgrChannel: null,
     // operator
     opBanners: [],
@@ -1346,14 +1348,101 @@
   }
 
 
-  function renderMgrChannelDetail() {
+  
+  function _parseSnapAt(s) {
+    if (!s) return null;
+    if (typeof s === 'number') return s;
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : null;
+  }
+
+  function buildChannelChartSeries(channel, days) {
+    const now = Date.now();
+    const cutoff = now - days * 86400000;
+    let snaps = (channel && channel.history) || [];
+    snaps = snaps
+      .map((h) => {
+        const at = _parseSnapAt(h.at || h.taken_at || h.date);
+        const members = Number(h.members != null ? h.members : h.members_count) || 0;
+        const views = Number(h.views != null ? h.views : (h.avg_views != null ? h.avg_views : 0)) || 0;
+        const eng = members > 0 ? Math.round((views / members) * 1000) / 10 : 0;
+        return at != null ? { at, members, views, eng } : null;
+      })
+      .filter(Boolean)
+      .filter((p) => p.at >= cutoff)
+      .sort((a, b) => a.at - b.at);
+    // اگر تاریخچه کم است، از مقدار فعلی یک روند ملایم بساز (فقط برای نمایش)
+    if (snaps.length < 2) {
+      const m = Number(channel.members_count) || 0;
+      const v = Number(channel.avg_views) || 0;
+      const e = m > 0 ? Math.round((v / m) * 1000) / 10 : Number(String(channel.err_percent || '').replace('%','')) || 0;
+      snaps = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const wobble = 1 + Math.sin(i * 0.7) * 0.04;
+        snaps.push({
+          at: now - i * 86400000,
+          members: Math.max(0, Math.round(m * wobble)),
+          views: Math.max(0, Math.round(v * (1 + Math.sin(i * 0.9) * 0.08))),
+          eng: Math.max(0, Math.round(e * (1 + Math.cos(i * 0.6) * 0.05) * 10) / 10),
+          synthetic: true,
+        });
+      }
+    }
+    return snaps;
+  }
+
+  function renderLineChartSvg(points, seriesFlags) {
+    const W = 320, H = 180, padL = 36, padR = 10, padT = 14, padB = 28;
+    const innerW = W - padL - padR, innerH = H - padT - padB;
+    if (!points.length) {
+      return `<svg viewBox="0 0 ${W} ${H}" class="mgr-stats-svg"><text x="50%" y="50%" text-anchor="middle" fill="currentColor" font-size="12">داده‌ای نیست</text></svg>`;
+    }
+    const keys = [];
+    if (seriesFlags.members) keys.push({ k: 'members', color: '#2563eb' });
+    if (seriesFlags.views) keys.push({ k: 'views', color: '#16a34a' });
+    if (seriesFlags.engagement) keys.push({ k: 'eng', color: '#dc2626' });
+    if (!keys.length) keys.push({ k: 'views', color: '#16a34a' });
+    let minV = Infinity, maxV = -Infinity;
+    points.forEach((p) => keys.forEach((s) => {
+      const v = Number(p[s.k]) || 0;
+      if (v < minV) minV = v;
+      if (v > maxV) maxV = v;
+    }));
+    if (!(maxV > minV)) { minV = 0; maxV = Math.max(maxV, 1); }
+    const span = maxV - minV || 1;
+    const xAt = (i) => padL + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+    const yAt = (v) => padT + innerH - ((v - minV) / span) * innerH;
+    // grid
+    let grid = '';
+    for (let g = 0; g < 4; g++) {
+      const y = padT + (innerH / 3) * g;
+      const val = maxV - (span / 3) * g;
+      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="currentColor" stroke-opacity=".08"/>`;
+      grid += `<text x="${padL - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="currentColor" opacity=".45">${fa(Math.round(val))}</text>`;
+    }
+    const paths = keys.map((s) => {
+      const d = points.map((p, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(Number(p[s.k]) || 0).toFixed(1)}`).join(' ');
+      const dots = points.map((p, i) => `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(Number(p[s.k]) || 0).toFixed(1)}" r="3.2" fill="${s.color}"/>`).join('');
+      return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>${dots}`;
+    }).join('');
+    // x labels (first, mid, last) jalali-ish short
+    const labelIdx = points.length <= 3 ? points.map((_, i) => i) : [0, Math.floor((points.length - 1) / 2), points.length - 1];
+    const xLabels = labelIdx.map((i) => {
+      const d = new Date(points[i].at);
+      const [jy, jm, jd] = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
+      return `<text x="${xAt(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="currentColor" opacity=".5">${fa(jm)}/${fa(jd)}</text>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" class="mgr-stats-svg" preserveAspectRatio="xMidYMid meet">${grid}${paths}${xLabels}</svg>`;
+  }
+
+function renderMgrChannelDetail() {
     const c = (ST.myChannels || []).find(x => x.id === ST.selectedMgrChannel);
     if (!c) return '<div class="empty">کانال پیدا نشد</div>';
     const letter = esc((c.name||'ک').slice(0,1));
     const src = c.avatar_url || c.photo_url || '';
     const ava = src
-      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span class="mgr-ava-fallback" style="display:none">${letter}</span>`
-      : `<span class="mgr-ava-fallback">${letter}</span>`;
+      ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='grid');"/><span style="display:none;place-items:center;width:100%;height:100%;font-weight:800">${letter}</span>`
+      : letter;
     const handle = c.link ? ('@' + String(c.link).replace(/^@/, '').replace(/^ble\.ir\//i,'')) : '';
     const chTariffs = (ST.mgrTariffs || []).filter(t => Number(t.channel_id || t.channel) === Number(c.id));
     const tariffRows = chTariffs.length
@@ -1375,30 +1464,55 @@
         }).join('')
       : `<div class="mgr-ch-tariff-empty"><p>هنوز تعرفه‌ای برای این کانال نیست.</p></div>`;
 
+    const days = ST.mgrChartDays === 30 ? 30 : 7;
+    const series = ST.mgrChartSeries || { members: true, views: true, engagement: true };
+    const points = buildChannelChartSeries(c, days);
+    const synthetic = points.some((p) => p.synthetic);
+    const chartSvg = renderLineChartSvg(points, series);
+
     return `
-      <section class="manager-detail-hero compact-hero">
-        <div class="manager-detail-compact">
-          <div class="manager-detail-avatar">${ava}</div>
-          <div class="manager-detail-copy">
-            <div class="manager-detail-title-row">
-              <h2>${esc(c.name)}</h2>
-              <span class="manager-detail-pill ${c.is_listed===false?'paused':''}">${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
-            </div>
-            <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسه ثبت نشده'}</p>
-            <div class="manager-channel-metrics detail-metrics compact-metrics">
-              <div><span>${icon('users',13)}</span><strong>${faK(c.members_count)}</strong><small>عضو</small></div>
-              <div><span>${icon('chart',13)}</span><strong>${faK(c.avg_views)}</strong><small>بازدید</small></div>
-              <div><span>${icon('wallet',13)}</span><strong>${fa(chTariffs.length || c.tariff_count || 0)}</strong><small>تعرفه</small></div>
-            </div>
-          </div>
+      <section class="manager-detail-hero">
+        <div class="manager-detail-cover short-cover">
+          <div class="manager-channel-cover-ornament"></div>
+          <span class="manager-detail-icon">${ava}</span>
+          <span class="manager-detail-status ${c.is_listed===false?'paused':''}"><i></i>${c.is_listed===false?'آرشیو':'فعال در بازار'}</span>
+        </div>
+        <div class="manager-detail-copy short-copy">
+          <span class="eyebrow">کانال تحت مدیریت</span>
+          <h2>${esc(c.name)}</h2>
+          <p class="mgr-handle" dir="ltr">${handle ? esc(handle) : 'شناسهٔ کانال ثبت نشده'}</p>
+        </div>
+        <div class="manager-channel-metrics detail-metrics">
+          <div><span>${icon('users',15)} اعضا</span><strong>${faK(c.members_count)}</strong></div>
+          <div><span>${icon('chart',15)} بازدید</span><strong>${faK(c.avg_views)}</strong></div>
+          <div><span>${icon('wallet',15)} تعرفه</span><strong>${fa(chTariffs.length || c.tariff_count || 0)}</strong></div>
         </div>
       </section>
 
-      <div class="manager-content-heading" style="margin-top:4px">
+      <div class="manager-content-heading">
         <div><span class="eyebrow">تعرفه‌های این کانال</span><h2>فهرست تعرفه‌ها</h2></div>
         <button type="button" class="btn btn-soft" id="btnAddTariffForCh" style="min-height:36px;padding:6px 10px;font-size:.72rem">${icon('plus',14)} افزودن</button>
       </div>
       <div class="mgr-ch-tariff-list">${tariffRows}</div>
+
+      <div class="manager-content-heading" style="margin-top:14px">
+        <div><span class="eyebrow">روند کانال</span><h2>آمار بازدید و فروش</h2></div>
+      </div>
+      <section class="mgr-stats-card">
+        <div class="mgr-stats-toolbar">
+          <div class="mgr-stats-series">
+            <button type="button" class="mgr-series-chip ${series.engagement?'on':''}" data-chart-series="engagement"><i style="background:#dc2626"></i> نرخ تعامل</button>
+            <button type="button" class="mgr-series-chip ${series.views?'on':''}" data-chart-series="views"><i style="background:#16a34a"></i> بازدید</button>
+            <button type="button" class="mgr-series-chip ${series.members?'on':''}" data-chart-series="members"><i style="background:#2563eb"></i> اعضا</button>
+          </div>
+          <div class="mgr-stats-range">
+            <button type="button" class="mgr-range-btn ${days===7?'on':''}" data-chart-days="7">${fa(7)} روز گذشته</button>
+            <button type="button" class="mgr-range-btn ${days===30?'on':''}" data-chart-days="30">${fa(30)} روز گذشته</button>
+          </div>
+        </div>
+        <div class="mgr-stats-plot">${chartSvg}</div>
+        ${synthetic ? '<p class="mgr-stats-note">تاریخچهٔ کافی نیست؛ روند تقریبی از آخرین آمار نمایش داده شده.</p>' : '<p class="mgr-stats-note">بر اساس برداشت‌های ثبت‌شدهٔ لینک‌یار</p>'}
+      </section>
 
       <div class="manager-content-heading" style="margin-top:16px"><div><span class="eyebrow">تنظیمات</span><h2>مدیریت کانال</h2></div></div>
       <div class="manager-detail-action-list">
@@ -2288,6 +2402,26 @@ function renderOpTickets() {
           toast(e.message || 'تقویم باز نشد');
         }
         ST.loading = false; render();
+      };
+    });
+
+    
+    $$('[data-chart-days]').forEach((b) => {
+      b.onclick = () => {
+        ST.mgrChartDays = Number(b.dataset.chartDays) === 30 ? 30 : 7;
+        render();
+      };
+    });
+    $$('[data-chart-series]').forEach((b) => {
+      b.onclick = () => {
+        const key = b.dataset.chartSeries;
+        if (!ST.mgrChartSeries) ST.mgrChartSeries = { members: true, views: true, engagement: true };
+        ST.mgrChartSeries[key] = !ST.mgrChartSeries[key];
+        // at least one series
+        if (!ST.mgrChartSeries.members && !ST.mgrChartSeries.views && !ST.mgrChartSeries.engagement) {
+          ST.mgrChartSeries[key] = true;
+        }
+        render();
       };
     });
 
